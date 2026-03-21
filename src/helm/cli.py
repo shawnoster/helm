@@ -223,6 +223,7 @@ def receive(
     relay: str = typer.Option(None),
     instance: str = typer.Option("default"),
     auto_ingest: bool = typer.Option(False, help="Ingest all trusted packets without prompting"),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress output when inbox is empty (for startup hooks)"),
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Poll for pending packets and surface them for review."""
@@ -231,18 +232,25 @@ def receive(
         p = _load_profile(profile)
         local = p.instances.get(instance)
         if not local:
-            err.print(f"[red]Instance '{instance}' not found.[/red]")
+            if not quiet:
+                err.print(f"[red]Instance '{instance}' not found.[/red]")
             raise typer.Exit(1)
 
         relay_url = relay or p.default_relay
         client = RelayClient(relay_url, local.nostr_private_hex, local.nostr_public_hex)
 
         packets: list[Packet] = []
-        async for packet in client.fetch_pending():
-            packets.append(packet)
+        try:
+            async for packet in client.fetch_pending():
+                packets.append(packet)
+        except Exception:
+            if not quiet:
+                err.print("[yellow]Could not reach relay — skipping inbox check.[/yellow]")
+            return
 
         if not packets:
-            console.print("[dim]No pending packets.[/dim]")
+            if not quiet:
+                console.print("[dim]No pending packets.[/dim]")
             return
 
         _show_inbox(packets, p)
