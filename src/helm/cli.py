@@ -368,6 +368,22 @@ def pair(
         ))
 
 
+# ── bootstrap ────────────────────────────────────────────────────────────────
+
+
+@app.command()
+def bootstrap(
+    root: Path = typer.Option(
+        Path.cwd(), help="Workspace root directory (default: current directory)"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
+) -> None:
+    """Scaffold a personal assistant workspace."""
+    from helm.workspace import bootstrap_workspace
+
+    bootstrap_workspace(root.expanduser().resolve(), interactive=not yes, console=console)
+
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
