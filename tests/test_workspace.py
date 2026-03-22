@@ -8,7 +8,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from aya.workspace import DIRS, bootstrap_workspace
+from aya.workspace import (
+    DIRS,
+    PRESERVED_ON_RESET,
+    RESET_FILES,
+    SKILL_NAMES,
+    bootstrap_workspace,
+    reset_workspace,
+)
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -236,6 +243,166 @@ class TestDotfileSetup:
         second_run_count = len(json.loads(settings_path.read_text())["hooks"]["SessionStart"])
 
         assert first_run_count == second_run_count
+
+
+# ── reset_workspace ───────────────────────────────────────────────────────────
+
+
+class TestResetWorkspace:
+    def test_removes_config_files(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+            reset_workspace(root, interactive=False, console=_silent_console())
+
+        for f in RESET_FILES:
+            assert not (root / f).exists(), f"Expected {f} to be removed after reset"
+
+    def test_preserves_persona(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+
+        persona_path = root / "assistant" / "persona.md"
+        custom_content = "# My custom persona\n"
+        persona_path.write_text(custom_content)
+
+        with _patch_home(fake_home):
+            reset_workspace(root, interactive=False, console=_silent_console())
+
+        assert persona_path.exists(), "persona.md must not be removed on reset"
+        assert persona_path.read_text() == custom_content
+
+    def test_preserves_notes(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+
+        note = root / "assistant" / "notes" / "daily" / "TODAY.md"
+        note.write_text("# Today\n- item")
+        meeting = root / "assistant" / "notes" / "meetings" / "2025-01-01.md"
+        meeting.write_text("# Meeting\n")
+
+        with _patch_home(fake_home):
+            reset_workspace(root, interactive=False, console=_silent_console())
+
+        assert note.exists(), "daily note must not be removed on reset"
+        assert meeting.exists(), "meeting note must not be removed on reset"
+
+    def test_preserves_projects(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+
+        status = root / "projects" / "my-project" / "status.md"
+        status.parent.mkdir(parents=True)
+        status.write_text("# Status\n")
+
+        with _patch_home(fake_home):
+            reset_workspace(root, interactive=False, console=_silent_console())
+
+        assert status.exists(), "project files must not be removed on reset"
+
+    def test_removes_skills(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+
+        # Confirm at least one skill is installed before reset
+        installed = [
+            name
+            for name in SKILL_NAMES
+            if (root / ".claude" / "commands" / f"{name}.md").exists()
+            or (root / "skills" / name / "SKILL.md").exists()
+        ]
+        assert installed, (
+            "Expected at least one bundled skill to be installed before reset; "
+            "SKILL_NAMES or bootstrap_workspace behavior may be out of sync."
+        )
+
+        with _patch_home(fake_home):
+            reset_workspace(root, interactive=False, console=_silent_console())
+
+        for name in installed:
+            assert not (root / ".claude" / "commands" / f"{name}.md").exists(), (
+                f"Skill command {name}.md must be removed on reset"
+            )
+            # The entire skill directory must be gone, not just SKILL.md
+            assert not (root / "skills" / name).exists(), (
+                f"Skill directory skills/{name} must be removed on reset"
+            )
+
+    def test_preserves_scheduler(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+
+        scheduler_path = root / "assistant" / "memory" / "scheduler.json"
+        custom_content = '{"items": [{"id": "custom-reminder"}]}'
+        scheduler_path.write_text(custom_content)
+
+        with _patch_home(fake_home):
+            reset_workspace(root, interactive=False, console=_silent_console())
+
+        assert scheduler_path.exists(), "scheduler.json must not be removed on reset"
+        assert scheduler_path.read_text() == custom_content
+
+    def test_noop_when_nothing_to_reset(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        # Should not raise even when there are no bootstrap files present
+        reset_workspace(root, interactive=False, console=_silent_console())
+
+    def test_idempotent_double_reset(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+            reset_workspace(root, interactive=False, console=_silent_console())
+            # Second reset on already-reset workspace must not raise
+            reset_workspace(root, interactive=False, console=_silent_console())
+
+    def test_bootstrap_after_reset_recreates_files(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+            reset_workspace(root, interactive=False, console=_silent_console())
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+
+        for f in RESET_FILES:
+            assert (root / f).exists(), f"Expected {f} to be recreated after bootstrap"
+
+    def test_reset_files_matches_get_files(self) -> None:
+        """RESET_FILES must stay in sync with _get_files() minus PRESERVED_ON_RESET.
+
+        This test fails when someone adds a file to _get_files() without updating
+        either RESET_FILES or PRESERVED_ON_RESET, preventing silent drift.
+        """
+        from aya.workspace import _get_files
+
+        all_bootstrapped = {path for path, _ in _get_files("")}
+        expected = all_bootstrapped - PRESERVED_ON_RESET
+        assert set(RESET_FILES) == expected, (
+            f"RESET_FILES is out of sync with _get_files().\n"
+            f"  Missing from RESET_FILES: {expected - set(RESET_FILES)}\n"
+            f"  Extra in RESET_FILES:     {set(RESET_FILES) - expected}"
+        )
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

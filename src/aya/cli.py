@@ -42,7 +42,7 @@ from aya.scheduler import (
     snooze_item,
 )
 from aya.status import run_status
-from aya.workspace import bootstrap_workspace
+from aya.workspace import bootstrap_workspace, reset_workspace
 
 app = typer.Typer(
     name="aya",
@@ -659,6 +659,29 @@ def bootstrap(
 ) -> None:
     """Scaffold a personal assistant workspace."""
     bootstrap_workspace(root.expanduser().resolve(), interactive=not yes, console=console)
+
+
+@app.command()
+def reset(
+    root: Path = typer.Option(
+        Path.cwd(), help="Workspace root directory (default: current directory)"
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
+) -> None:
+    """Remove bootstrap-created config files and skills, keeping persona and user data.
+
+    Deletes configuration files, framework scripts, and installed skills so the
+    workspace can be re-bootstrapped from scratch with ``aya bootstrap``.
+
+    The following are never removed:
+
+    \b
+    - assistant/persona.md
+    - assistant/memory/scheduler.json (reminders and watches)
+    - assistant/notes/ (daily notes, meeting notes, ideas)
+    - projects/ (all project memory)
+    """
+    reset_workspace(root.expanduser().resolve(), interactive=not yes, console=console)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

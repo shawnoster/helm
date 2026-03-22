@@ -35,6 +35,28 @@ FRAMEWORK_SCRIPTS = [
     "watcher_daemon.py",
 ]
 
+# Files that bootstrap creates but are *never* removed on reset — they become
+# user data quickly and wiping them silently would be destructive.
+PRESERVED_ON_RESET: frozenset[str] = frozenset(
+    {
+        "assistant/persona.md",
+        "assistant/memory/scheduler.json",
+    }
+)
+
+# Bootstrap-created config files that are safe to remove on reset.
+# Derived from _get_files() minus PRESERVED_ON_RESET — keep these in sync.
+# A test (test_reset_files_matches_get_files) enforces that invariant.
+RESET_FILES = [
+    "CLAUDE.md",
+    "AGENTS.md",
+    "assistant/AGENTS.md",
+    "assistant/CLAUDE.md",
+    "assistant/config.json",
+    "assistant/memory/README.md",
+    "Makefile",
+]
+
 # Skills bundled with aya — names match directories under repo_root/skills/
 SKILL_NAMES = [
     "morning",
@@ -166,6 +188,94 @@ def bootstrap_workspace(
     con.print(f"  1. cd {root}")
     con.print("  2. claude                        # launch Claude Code")
     con.print("  3. aya inbox                    # check for packets from work")
+
+
+# ── Reset workspace ───────────────────────────────────────────────────────────
+
+
+def reset_workspace(
+    root: Path,
+    *,
+    interactive: bool = True,
+    console: Console | None = None,
+) -> None:
+    """Remove bootstrap-created config files and skills, preserving persona and user data.
+
+    Deletes all files that ``bootstrap_workspace`` would create (config files,
+    framework scripts, and skills) so the workspace can be re-bootstrapped from
+    scratch.  The following are *never* touched:
+
+    - ``assistant/persona.md`` — user-customised persona
+    - ``assistant/memory/scheduler.json`` — accumulated reminders and watches
+    - ``assistant/notes/`` — all notes (daily, meetings, ideas)
+    - ``projects/`` — all project memory and meeting notes
+    """
+    con = console or Console()
+
+    con.print(f"Reset assistant workspace at: [cyan]{root}[/cyan]\n")
+
+    # Config files
+    files_to_remove = [root / f for f in RESET_FILES if (root / f).exists()]
+
+    # Framework scripts
+    scripts_to_remove = [
+        root / "scripts" / s for s in FRAMEWORK_SCRIPTS if (root / "scripts" / s).exists()
+    ]
+
+    # Skills — both install locations.
+    # For the skills/ tree we remove the entire per-skill directory so no
+    # empty directories are left behind.  The legacy .claude/commands/ files
+    # are individual markdown files and are removed directly.
+    skills_to_remove: list[Path] = []
+    skill_dirs_to_remove: list[Path] = []
+    for name in SKILL_NAMES:
+        legacy = root / ".claude" / "commands" / f"{name}.md"
+        skill_dir = root / "skills" / name
+        if legacy.exists():
+            skills_to_remove.append(legacy)
+        if skill_dir.exists():
+            skill_dirs_to_remove.append(skill_dir)
+
+    all_files_to_remove = files_to_remove + scripts_to_remove + skills_to_remove
+
+    if not all_files_to_remove and not skill_dirs_to_remove:
+        con.print("[green]Nothing to reset — no bootstrap files found.[/green]")
+        return
+
+    con.print("[bold]Files to remove:[/bold]")
+    for f in all_files_to_remove:
+        con.print(f"  [red]-[/red] {f.relative_to(root)}")
+    for d in skill_dirs_to_remove:
+        con.print(f"  [red]-[/red] {d.relative_to(root)}/")
+    con.print()
+    con.print("[dim]Preserved: assistant/persona.md · assistant/notes/ · projects/[/dim]")
+    con.print()
+
+    if interactive and not typer.confirm("Proceed with reset?", default=False):
+        con.print("Aborted.")
+        return
+
+    errors: list[str] = []
+    for f in all_files_to_remove:
+        try:
+            f.unlink()
+        except OSError as exc:
+            errors.append(f"{f.relative_to(root)}: {exc.strerror}")
+    for d in skill_dirs_to_remove:
+        try:
+            shutil.rmtree(d)
+        except OSError as exc:
+            errors.append(f"{d.relative_to(root)}/: {exc.strerror}")
+
+    if errors:
+        for msg in errors:
+            con.print(f"  [red]✗[/red] {msg}")
+        con.print(
+            f"\n[yellow]⚠ Workspace partially reset at {root} ({len(errors)} error(s))[/yellow]"
+        )
+    else:
+        con.print(f"\n[bold green]✓ Workspace reset at {root}[/bold green]")
+    con.print("Run [bold]aya bootstrap[/bold] to re-scaffold.")
 
 
 # ── File generators ──────────────────────────────────────────────────────────
