@@ -475,6 +475,8 @@ def add_watch(
             raise ValueError("Format: owner/repo#123")
         watch_config = {"owner": m.group(1), "repo": m.group(2), "pr": int(m.group(3))}
         condition = condition or "approved_or_merged"
+        if interval == 30:
+            interval = 5
     elif provider == "jira-query":
         watch_config = {"jql": target}
         condition = condition or "new_results"
