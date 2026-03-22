@@ -48,7 +48,7 @@ def bootstrap_workspace(
 
     # Locate bundled framework scripts
     package_dir = Path(__file__).resolve().parent
-    repo_root = package_dir.parents[1]  # src/helm -> repo root
+    repo_root = package_dir.parents[1]  # src/ai_assist -> repo root
     framework_scripts_dir = repo_root / "framework" / "scripts"
 
     # Determine what to create
@@ -136,7 +136,7 @@ def bootstrap_workspace(
     con.print("Next steps:")
     con.print(f"  1. cd {root}")
     con.print("  2. claude                        # launch Claude Code")
-    con.print("  3. helm inbox                    # check for packets from work")
+    con.print("  3. assist inbox                    # check for packets from work")
 
 
 # ── File generators ──────────────────────────────────────────────────────────
@@ -428,7 +428,7 @@ def _makefile() -> str:
 # ── Assistant ────────────────────────────────────────────────────────────────
 
 assistant-status:
-\t@python3 scripts/status_check.py 2>/dev/null || echo "status_check.py not found — run helm bootstrap"
+\t@python3 scripts/status_check.py 2>/dev/null || echo "status_check.py not found — run assist bootstrap"
 
 # ── Scheduler ────────────────────────────────────────────────────────────────
 
@@ -489,16 +489,16 @@ def _setup_dotfiles(home: Path, con: Console) -> int:
         })
         changes += 1
 
-    # Add helm receive hook if not present
+    # Add assist receive hook if not present
     helm_hook_exists = any(
-        "helm receive" in (h.get("hooks", [{}])[0].get("command", "") if h.get("hooks") else "")
+        "assist receive" in (h.get("hooks", [{}])[0].get("command", "") if h.get("hooks") else "")
         for h in session_start
     )
     if not helm_hook_exists:
         session_start.append({
             "hooks": [{
                 "type": "command",
-                "command": "helm receive --quiet --auto-ingest 2>/dev/null || true",
+                "command": "assist receive --quiet --auto-ingest 2>/dev/null || true",
                 "statusMessage": "Checking for packets...",
                 "async": True,
             }]

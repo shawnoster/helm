@@ -1,4 +1,4 @@
-"""CLI entry point — helm command."""
+"""CLI entry point — assist command."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from helm.identity import Identity, Profile, TrustedKey
-from helm.packet import ConflictStrategy, ContentType, Packet, human_age
-from helm.pair import (
+from ai_assist.identity import Identity, Profile, TrustedKey
+from ai_assist.packet import ConflictStrategy, ContentType, Packet, human_age
+from ai_assist.pair import (
     PairingError,
     generate_code,
     hash_code,
@@ -21,10 +21,10 @@ from helm.pair import (
     poll_for_pair_response,
     publish_pair_request,
 )
-from helm.relay import RelayClient
+from ai_assist.relay import RelayClient
 
 app = typer.Typer(
-    name="helm",
+    name="assist",
     help="Personal AI assistant toolkit — sync, schedule, bootstrap.",
     no_args_is_help=True,
 )
@@ -48,7 +48,7 @@ def _load_profile(profile_path: Path) -> Profile:
     if not profile_path.exists():
         err.print(
             f"[red]Profile not found at {profile_path}.[/red]\n"
-            "Run [bold]helm init[/bold] first."
+            "Run [bold]assist init[/bold] first."
         )
         raise typer.Exit(1)
     return Profile.load(profile_path)
@@ -82,7 +82,7 @@ def init(
         f"DID:    [dim]{identity.did}[/dim]\n"
         f"Relay:  [cyan]{relay}[/cyan]\n\n"
         "[dim]Share your DID with other instances you want to trust.[/dim]",
-        title="Helm — init",
+        title="assist — init",
     ))
 
 
@@ -137,7 +137,7 @@ def pack(
     p = _load_profile(profile)
     local = p.instances.get(instance)
     if not local:
-        err.print(f"[red]Instance '{instance}' not found. Run helm init.[/red]")
+        err.print(f"[red]Instance '{instance}' not found. Run assist init.[/red]")
         raise typer.Exit(1)
 
     # Resolve recipient DID
@@ -359,7 +359,7 @@ def pair(
     p = _load_profile(profile)
     local = p.instances.get(instance)
     if not local:
-        err.print(f"[red]Instance '{instance}' not found. Run helm init first.[/red]")
+        err.print(f"[red]Instance '{instance}' not found. Run assist init first.[/red]")
         raise typer.Exit(1)
 
     relay_url = relay or p.default_relay
@@ -378,7 +378,7 @@ def pair(
             f"[bold green]✓ Paired![/bold green]\n\n"
             f"Trusted: [cyan]{trusted.label}[/cyan]\n"
             f"DID:     [dim]{trusted.did}[/dim]",
-            title="Helm — pair (joined)",
+            title="assist — pair (joined)",
         ))
 
     else:
@@ -396,9 +396,9 @@ def pair(
         console.print(Panel.fit(
             f"[bold]Pairing code:[/bold]  [bold cyan]{pairing_code}[/bold cyan]\n\n"
             "Enter this on your other machine:\n"
-            f"  [dim]helm pair --code {pairing_code} --label <their-label>[/dim]\n\n"
+            f"  [dim]assist pair --code {pairing_code} --label <their-label>[/dim]\n\n"
             "[dim]Expires in 10 minutes.[/dim]",
-            title="Helm — pair",
+            title="assist — pair",
         ))
 
         # Poll for response
@@ -410,7 +410,7 @@ def pair(
         if trusted is None:
             console.print(
                 "[bold yellow]Pairing timed out.[/bold yellow] "
-                "Run [bold]helm pair[/bold] again for a new code."
+                "Run [bold]assist pair[/bold] again for a new code."
             )
             raise typer.Exit(1)
 
@@ -420,7 +420,7 @@ def pair(
             f"[bold green]✓ Paired![/bold green]\n\n"
             f"Trusted: [cyan]{trusted.label}[/cyan]\n"
             f"DID:     [dim]{trusted.did}[/dim]",
-            title="Helm — pair (complete)",
+            title="assist — pair (complete)",
         ))
 
 
@@ -434,7 +434,7 @@ def schedule_remind(
     tag: str = typer.Option("", "--tag", "-t", help="Comma-separated tags"),
 ) -> None:
     """Add a one-shot reminder."""
-    from helm.scheduler import add_reminder, parse_due
+    from ai_assist.scheduler import add_reminder, parse_due
     item = add_reminder(message, due, tag)
     due_dt = parse_due(due)
     console.print(f"[green]✓[/green] Reminder {item['id'][:8]} — {due_dt.strftime('%a %b %d, %I:%M %p')}")
@@ -452,7 +452,7 @@ def schedule_watch(
     remove_when: str = typer.Option("", help="Auto-remove: merged_or_closed"),
 ) -> None:
     """Add a condition-based watch."""
-    from helm.scheduler import add_watch
+    from ai_assist.scheduler import add_watch
     try:
         item = add_watch(provider, target, message, tag, condition, interval, remove_when)
     except ValueError as exc:
@@ -469,7 +469,7 @@ def schedule_list(
     item_type: str = typer.Option(None, "--type", help="Filter: reminder, watch, recurring, event"),
 ) -> None:
     """List scheduled items."""
-    from helm.scheduler import _display_items, list_items
+    from ai_assist.scheduler import _display_items, list_items
     items = list_items(show_all=all_items, item_type=item_type)
     _display_items(items)
 
@@ -479,7 +479,7 @@ def schedule_check(
     as_json: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Check for due reminders and alerts."""
-    from helm.scheduler import check_due
+    from ai_assist.scheduler import check_due
     due_items, unseen = check_due()
 
     if as_json:
@@ -509,7 +509,7 @@ def schedule_dismiss(
     item_id: str = typer.Argument(help="Item ID (prefix match ok)"),
 ) -> None:
     """Dismiss an item."""
-    from helm.scheduler import dismiss_item
+    from ai_assist.scheduler import dismiss_item
     try:
         item = dismiss_item(item_id)
     except ValueError as exc:
@@ -524,7 +524,7 @@ def schedule_snooze(
     until: str = typer.Option(..., "--until", "-u", help="Snooze until: 'in 1 hour', 'tomorrow 9am'"),
 ) -> None:
     """Snooze a reminder."""
-    from helm.scheduler import snooze_item
+    from ai_assist.scheduler import snooze_item
     try:
         item, snooze_until = snooze_item(item_id, until)
     except ValueError as exc:
@@ -538,7 +538,7 @@ def schedule_poll(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress output on no changes"),
 ) -> None:
     """Run one poll cycle (for daemon/cron)."""
-    from helm.scheduler import run_poll
+    from ai_assist.scheduler import run_poll
     run_poll(quiet=quiet)
 
 
@@ -548,7 +548,7 @@ def schedule_alerts(
     mark_seen: bool = typer.Option(False, "--mark-seen", help="Mark all alerts as seen"),
 ) -> None:
     """Show alerts from background watcher."""
-    from helm.scheduler import show_alerts
+    from ai_assist.scheduler import show_alerts
     unseen = show_alerts(as_json=as_json, mark_seen=mark_seen)
 
     if as_json:
@@ -578,7 +578,7 @@ def profile(
     profile_path: Path = typer.Option(DEFAULT_PROFILE, "--profile", help="Path to assistant_profile.json"),
 ) -> None:
     """Initialize or rotate the persistent assistant profile."""
-    from helm.profile import PROFILE_PATH, ensure_profile
+    from ai_assist.profile import PROFILE_PATH, ensure_profile
     path = profile_path if str(profile_path) != str(DEFAULT_PROFILE) else PROFILE_PATH
     p = ensure_profile(path)
     console.print(f"[green]✓[/green] Profile: [dim]{path}[/dim]")
@@ -593,7 +593,7 @@ def profile(
 @app.command()
 def status() -> None:
     """Workspace readiness check — systems, schedule, focus."""
-    from helm.status import run_status
+    from ai_assist.status import run_status
     run_status()
 
 
@@ -608,7 +608,7 @@ def bootstrap(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
 ) -> None:
     """Scaffold a personal assistant workspace."""
-    from helm.workspace import bootstrap_workspace
+    from ai_assist.workspace import bootstrap_workspace
 
     bootstrap_workspace(root.expanduser().resolve(), interactive=not yes, console=console)
 
@@ -624,7 +624,7 @@ def _resolve_did(to: str, profile: Profile) -> str:
     if not key:
         err.print(
             f"[red]Unknown recipient '{to}'.[/red]\n"
-            "Use a full DID or add with [bold]helm trust[/bold]."
+            "Use a full DID or add with [bold]assist trust[/bold]."
         )
         raise typer.Exit(1)
     return key.did

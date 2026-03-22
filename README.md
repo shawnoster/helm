@@ -1,8 +1,8 @@
-# helm
+# ai-assist
 
 **Personal AI assistant toolkit.**
 
-`helm` is a CLI for managing your AI assistant across machines — sync context between instances, schedule reminders, and bootstrap new workspaces.
+`assist` is a CLI for managing your AI assistant across machines — sync context between instances, schedule reminders, and bootstrap new workspaces.
 
 ## Install
 
@@ -16,33 +16,33 @@ uv sync
 
 ```bash
 # Bootstrap a workspace
-uv run helm bootstrap --root ~
+uv run assist bootstrap --root ~
 
 # Set up identity
-uv run helm init --label work
+uv run assist init --label work
 
 # Pair with another machine
-uv run helm pair --label work        # shows a code
-uv run helm pair --code WORD-WORD-0000 --label home  # on the other machine
+uv run assist pair --label work        # shows a code
+uv run assist pair --code WORD-WORD-0000 --label home  # on the other machine
 
 # Send a packet
-echo "Hello from work" | uv run helm pack --to home --intent "test" | uv run helm send /dev/stdin
+echo "Hello from work" | uv run assist pack --to home --intent "test" | uv run assist send /dev/stdin
 
 # Check inbox
-uv run helm inbox
+uv run assist inbox
 ```
 
 ## Commands
 
 | Command | What it does |
 | ---- | ---- |
-| `helm init` | Generate identity keypair for this instance |
-| `helm pair` | Pair two instances via short-lived relay code |
-| `helm trust` | Manually trust a DID |
-| `helm pack` | Create a signed knowledge packet |
-| `helm send` | Publish a packet to a Nostr relay |
-| `helm inbox` | List pending packets |
-| `helm receive` | Review and ingest packets |
+| `assist init` | Generate identity keypair for this instance |
+| `assist pair` | Pair two instances via short-lived relay code |
+| `assist trust` | Manually trust a DID |
+| `assist pack` | Create a signed knowledge packet |
+| `assist send` | Publish a packet to a Nostr relay |
+| `assist inbox` | List pending packets |
+| `assist receive` | Review and ingest packets |
 
 ## How it works
 
