@@ -11,8 +11,8 @@ from datetime import UTC, datetime
 
 import websockets
 
-from helm.identity import Identity, TrustedKey
-from helm.relay import (
+from ai_assist.identity import Identity, TrustedKey
+from ai_assist.relay import (
     ACE_SYNC_KIND,
     _compute_event_id,
     _read_until_eose,

@@ -2,7 +2,7 @@
 
 ## System Overview
 
-Helm is a personal AI assistant toolkit that spans multiple machines. Each machine runs its own assistant instance with its own context, connected by signed async packets through Nostr relays.
+ai-assist is a personal AI assistant toolkit that spans multiple machines. Each machine runs its own assistant instance with its own context, connected by signed async packets through Nostr relays.
 
 ```
 ┌─────────────────────────────────┐     ┌─────────────────────────────────┐
@@ -82,12 +82,12 @@ SENDER (work)                    RELAY                    RECEIVER (home)
    │
 2. Assistant gathers context
    │
-3. helm pack
+3. assist pack
    ├── Create JSON envelope
    ├── Sign with ed25519
    └── Set TTL, intent, conflict strategy
    │
-4. helm send
+4. assist send
    ├── Wrap in Nostr event (kind 5999)
    ├── Sign with secp256k1 (Schnorr)
    └── Publish to relay ──────────────► 5. Relay stores event
@@ -95,7 +95,7 @@ SENDER (work)                    RELAY                    RECEIVER (home)
                                            recipient pubkey
                                                 │
                          6. SessionStart hook ◄──┘
-                            helm receive --quiet
+                            assist receive --quiet
                             │
                          7. Query relay for
                             packets to my pubkey
@@ -117,7 +117,7 @@ SENDER (work)                    RELAY                    RECEIVER (home)
 MACHINE A                        RELAY                    MACHINE B
 ─────────                        ─────                    ─────────
 
-1. helm pair --label work
+1. assist pair --label work
    │
 2. Generate code: ANCHOR-NORTH-0045
    │
@@ -127,7 +127,7 @@ MACHINE A                        RELAY                    MACHINE B
    (kind 5999, tag: as-pair-req)     code hash tag
    │
 6. Display code to user                              7. User enters code
-   "ANCHOR-NORTH-0045"                                  helm pair --code
+   "ANCHOR-NORTH-0045"                                  assist pair --code
                                                         ANCHOR-NORTH-0045
                                                         --label home
                                                         │
@@ -154,10 +154,10 @@ The same skill produces different output based on available MCPs:
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│                 /helm:morning                         │
+│                 /assist:morning                         │
 │                                                      │
 │  1. Detect available data sources                    │
-│     !`helm status --json`                            │
+│     !`assist status --json`                            │
 │                                                      │
 │  2. Branch by what's available:                      │
 │                                                      │
@@ -191,7 +191,7 @@ git clone github.com/shawnoster/helm
 cd helm && uv sync
      │
      ▼
-helm bootstrap --root ~
+assist bootstrap --root ~
      │
      ├── Create workspace skeleton
      │   ~/assistant/, ~/projects/, ~/code/, ~/scripts/
@@ -204,14 +204,14 @@ helm bootstrap --root ~
      │
      └── Create dotfiles
          ~/.copilot/assistant_profile.json  (alias, persona, reminders)
-         ~/.claude/settings.json            (hooks: health crons + helm receive)
+         ~/.claude/settings.json            (hooks: health crons + assist receive)
          ~/.claude/hooks/health_crons.sh    (movement reminder injection)
      │
      ▼
-helm init --label home
+assist init --label home
      │
      ▼
-helm pair --code <CODE> --label home
+assist pair --code <CODE> --label home
      │
      ▼
 Ready. Open Claude, packets auto-surface.
@@ -220,7 +220,7 @@ Ready. Open Claude, packets auto-surface.
 ## Component Map
 
 ```
-helm (CLI + Plugin)
+assist (CLI + Plugin)
 ├── Identity
 │   ├── identity.py      — did:key gen, ed25519 + secp256k1 keypairs
 │   └── Profile          — load/save assistant_profile.json

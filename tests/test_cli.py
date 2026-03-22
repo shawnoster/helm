@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from helm.cli import app
-from helm.identity import Identity, Profile, TrustedKey
-from helm.scheduler import add_reminder
+from ai_assist.cli import app
+from ai_assist.identity import Identity, Profile, TrustedKey
+from ai_assist.scheduler import add_reminder
 
 runner = CliRunner()
 
@@ -221,8 +221,8 @@ class TestScheduleRemind:
         scheduler_file.write_text(json.dumps({"items": []}))
         alerts_file.write_text(json.dumps({"alerts": []}))
 
-        monkeypatch.setattr("helm.scheduler.SCHEDULER_FILE", scheduler_file)
-        monkeypatch.setattr("helm.scheduler.ALERTS_FILE", alerts_file)
+        monkeypatch.setattr("ai_assist.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("ai_assist.scheduler.ALERTS_FILE", alerts_file)
 
         result = runner.invoke(app, [
             "schedule", "remind",
@@ -239,7 +239,7 @@ class TestScheduleRemind:
     def test_remind_requires_message(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         scheduler_file = tmp_path / "scheduler.json"
         scheduler_file.write_text(json.dumps({"items": []}))
-        monkeypatch.setattr("helm.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("ai_assist.scheduler.SCHEDULER_FILE", scheduler_file)
 
         result = runner.invoke(app, [
             "schedule", "remind",
@@ -259,8 +259,8 @@ class TestScheduleDismiss:
         scheduler_file.write_text(json.dumps({"items": []}))
         alerts_file.write_text(json.dumps({"alerts": []}))
 
-        monkeypatch.setattr("helm.scheduler.SCHEDULER_FILE", scheduler_file)
-        monkeypatch.setattr("helm.scheduler.ALERTS_FILE", alerts_file)
+        monkeypatch.setattr("ai_assist.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("ai_assist.scheduler.ALERTS_FILE", alerts_file)
 
         item = add_reminder("Dismiss me via CLI", "in 1 hour")
         prefix = item["id"][:8]
@@ -281,8 +281,8 @@ class TestScheduleDismiss:
         scheduler_file.write_text(json.dumps({"items": []}))
         alerts_file.write_text(json.dumps({"alerts": []}))
 
-        monkeypatch.setattr("helm.scheduler.SCHEDULER_FILE", scheduler_file)
-        monkeypatch.setattr("helm.scheduler.ALERTS_FILE", alerts_file)
+        monkeypatch.setattr("ai_assist.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("ai_assist.scheduler.ALERTS_FILE", alerts_file)
 
         result = runner.invoke(app, ["schedule", "dismiss", "nonexistent"])
         assert result.exit_code != 0
@@ -300,7 +300,7 @@ class TestBootstrap:
         fake_home = tmp_path / "fakehome"
         fake_home.mkdir()
 
-        monkeypatch.setattr("helm.workspace.Path.home", lambda: fake_home)
+        monkeypatch.setattr("ai_assist.workspace.Path.home", lambda: fake_home)
 
         result = runner.invoke(app, [
             "bootstrap",
@@ -319,7 +319,7 @@ class TestBootstrap:
         fake_home = tmp_path / "fakehome2"
         fake_home.mkdir()
 
-        monkeypatch.setattr("helm.workspace.Path.home", lambda: fake_home)
+        monkeypatch.setattr("ai_assist.workspace.Path.home", lambda: fake_home)
 
         result = runner.invoke(app, ["bootstrap", "--root", str(root), "--yes"])
         # Should not prompt and should succeed

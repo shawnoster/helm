@@ -9,9 +9,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from helm.identity import Identity
-from helm.packet import Packet
-from helm.relay import (
+from ai_assist.identity import Identity
+from ai_assist.packet import Packet
+from ai_assist.relay import (
     ACE_SYNC_KIND,
     ACE_SYNC_RESULT_KIND,
     RelayClient,
@@ -328,12 +328,12 @@ class TestFetchPending:
         async def fake_read_until_eose(ws, sub_id):
             yield raw_event
 
-        with patch("helm.relay._read_until_eose", side_effect=fake_read_until_eose):
+        with patch("ai_assist.relay._read_until_eose", side_effect=fake_read_until_eose):
             mock_ws = AsyncMock()
             mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
             mock_ws.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("helm.relay.websockets.connect", return_value=mock_ws):
+            with patch("ai_assist.relay.websockets.connect", return_value=mock_ws):
                 packets = [pkt async for pkt in client.fetch_pending()]
 
         assert len(packets) == 1
@@ -355,12 +355,12 @@ class TestFetchPending:
         async def fake_read_until_eose(ws, sub_id):
             yield raw_event
 
-        with patch("helm.relay._read_until_eose", side_effect=fake_read_until_eose):
+        with patch("ai_assist.relay._read_until_eose", side_effect=fake_read_until_eose):
             mock_ws = AsyncMock()
             mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
             mock_ws.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("helm.relay.websockets.connect", return_value=mock_ws):
+            with patch("ai_assist.relay.websockets.connect", return_value=mock_ws):
                 packets = [pkt async for pkt in client.fetch_pending()]
 
         assert packets == []
@@ -371,12 +371,12 @@ class TestFetchPending:
         async def fake_read_until_eose(ws, sub_id):
             yield bad_event
 
-        with patch("helm.relay._read_until_eose", side_effect=fake_read_until_eose):
+        with patch("ai_assist.relay._read_until_eose", side_effect=fake_read_until_eose):
             mock_ws = AsyncMock()
             mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
             mock_ws.__aexit__ = AsyncMock(return_value=False)
 
-            with patch("helm.relay.websockets.connect", return_value=mock_ws):
+            with patch("ai_assist.relay.websockets.connect", return_value=mock_ws):
                 packets = [pkt async for pkt in client.fetch_pending()]
 
         assert packets == []
@@ -396,7 +396,7 @@ class TestPublish:
         fake_event_id = "a" * 64
         mock_ws.recv = AsyncMock(return_value=json.dumps(["OK", fake_event_id, True, ""]))
 
-        with patch("helm.relay.websockets.connect", return_value=mock_ws):
+        with patch("ai_assist.relay.websockets.connect", return_value=mock_ws):
             event_id = await client.publish(packet, recipient.nostr_public_hex)
 
         assert isinstance(event_id, str)
@@ -414,7 +414,7 @@ class TestPublish:
         )
 
         with (
-            patch("helm.relay.websockets.connect", return_value=mock_ws),
+            patch("ai_assist.relay.websockets.connect", return_value=mock_ws),
             pytest.raises(RelayError),
         ):
             await client.publish(packet, recipient.nostr_public_hex)

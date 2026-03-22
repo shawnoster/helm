@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from helm.scheduler import (
+from ai_assist.scheduler import (
     LOCAL_TZ,
     _find,
     _parse_tags,
@@ -34,8 +34,8 @@ def _isolate_scheduler(tmp_path, monkeypatch):
     scheduler_file.write_text(json.dumps({"items": []}))
     alerts_file.write_text(json.dumps({"alerts": []}))
 
-    monkeypatch.setattr("helm.scheduler.SCHEDULER_FILE", scheduler_file)
-    monkeypatch.setattr("helm.scheduler.ALERTS_FILE", alerts_file)
+    monkeypatch.setattr("ai_assist.scheduler.SCHEDULER_FILE", scheduler_file)
+    monkeypatch.setattr("ai_assist.scheduler.ALERTS_FILE", alerts_file)
 
 
 # ── Time parsing ─────────────────────────────────────────────────────────────
@@ -315,7 +315,7 @@ class TestShowAlerts:
         assert show_alerts() == []
 
     def test_mark_seen(self, monkeypatch):
-        from helm import scheduler
+        from ai_assist import scheduler
         alerts = [
             {"id": "a1", "source_item_id": "s1", "created_at": datetime.now(LOCAL_TZ).isoformat(),
              "message": "Alert 1", "seen": False},

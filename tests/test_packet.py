@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from helm.identity import Identity
-from helm.packet import ConflictStrategy, ContentType, Packet
+from ai_assist.identity import Identity
+from ai_assist.packet import ConflictStrategy, ContentType, Packet
 
 
 @pytest.fixture

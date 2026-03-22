@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from helm.workspace import DIRS, bootstrap_workspace
+from ai_assist.workspace import DIRS, bootstrap_workspace
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -169,13 +169,13 @@ class TestDotfileSetup:
         session_start = hooks.get("SessionStart", [])
         assert len(session_start) > 0
 
-        # Check that helm receive hook is present
+        # Check that assist receive hook is present
         all_commands = [
             h.get("hooks", [{}])[0].get("command", "")
             for h in session_start
             if h.get("hooks")
         ]
-        assert any("helm receive" in cmd for cmd in all_commands)
+        assert any("assist receive" in cmd for cmd in all_commands)
 
     def test_creates_health_crons_script(self, tmp_path: Path, fake_home: Path) -> None:
         root = tmp_path / "workspace"
@@ -258,4 +258,4 @@ def _silent_console() -> MagicMock:
 def _patch_home(fake_home: Path):
     """Context manager that redirects Path.home() to a temp directory."""
     fake_home.mkdir(parents=True, exist_ok=True)
-    return patch("helm.workspace.Path.home", return_value=fake_home)
+    return patch("ai_assist.workspace.Path.home", return_value=fake_home)

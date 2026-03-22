@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from helm.scheduler import _find_workspace_root
+from ai_assist.scheduler import _find_workspace_root
 
 ROOT = _find_workspace_root()
 ASSISTANT = ROOT / "assistant"
@@ -345,7 +345,7 @@ def main() -> None:
 
     # Reminders and alerts
     try:
-        from helm.scheduler import get_due_reminders, get_upcoming_reminders, get_unseen_alerts, get_active_watches, LOCAL_TZ
+        from ai_assist.scheduler import get_due_reminders, get_upcoming_reminders, get_unseen_alerts, get_active_watches, LOCAL_TZ
         local_tz = LOCAL_TZ
         now_tz = datetime.now(local_tz)
 
@@ -413,5 +413,5 @@ def main() -> None:
 
 
 def run_status() -> None:
-    """Entry point for helm status subcommand."""
+    """Entry point for assist status subcommand."""
     main()

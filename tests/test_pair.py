@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from helm.identity import Identity
-from helm.pair import (
+from ai_assist.identity import Identity
+from ai_assist.pair import (
     _TAG_PAIR_REQ,
     _TAG_PAIR_RESP,
     PAIR_TTL_SECONDS,
@@ -171,7 +171,7 @@ class TestPairingFlowMocked:
 
     async def test_publish_pair_request_returns_event_id(self, work):
         ws = _make_ws_mock([])
-        with patch("helm.pair.websockets.connect", return_value=ws):
+        with patch("ai_assist.pair.websockets.connect", return_value=ws):
             event_id = await publish_pair_request(work, "work", "code_hash", "wss://relay.test")
             assert event_id
             assert len(event_id) == 64  # sha256 hex
@@ -185,11 +185,11 @@ class TestPairingFlowMocked:
         # publish goes through a simple mock ws
         with (
             patch(
-                "helm.pair._find_pair_request",
+                "ai_assist.pair._find_pair_request",
                 return_value=request_event,
             ),
             patch(
-                "helm.pair.websockets.connect",
+                "ai_assist.pair.websockets.connect",
                 return_value=_make_ws_mock([]),
             ),
         ):
@@ -203,7 +203,7 @@ class TestPairingFlowMocked:
         # Relay returns EOSE immediately — no matching events
         ws = _make_ws_mock([json.dumps(["EOSE", "sub1"])])
 
-        with patch("helm.pair.websockets.connect", return_value=ws):
+        with patch("ai_assist.pair.websockets.connect", return_value=ws):
             result = await _find_pair_request("wss://relay.test", "nonexistent_hash")
 
         assert result is None
