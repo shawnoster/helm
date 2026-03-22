@@ -239,14 +239,26 @@ def receive(
         relay_url = relay or p.default_relay
         client = RelayClient(relay_url, local.nostr_private_hex, local.nostr_public_hex)
 
+        # Use last_checked to avoid re-fetching old packets
+        since = None
+        last_ts = p.last_checked.get(relay_url)
+        if last_ts:
+            from datetime import datetime as _dt
+            since = _dt.fromisoformat(last_ts)
+
         packets: list[Packet] = []
         try:
-            async for packet in client.fetch_pending():
+            async for packet in client.fetch_pending(since=since):
                 packets.append(packet)
         except Exception:
             if not quiet:
                 err.print("[yellow]Could not reach relay — skipping inbox check.[/yellow]")
             return
+
+        # Update last_checked timestamp
+        from datetime import UTC, datetime as _dt
+        p.last_checked[relay_url] = _dt.now(UTC).isoformat()
+        p.save(profile)
 
         if not packets:
             if not quiet:
@@ -255,7 +267,10 @@ def receive(
 
         # Verify signatures — reject tampered or unsigned packets
         verified: list[Packet] = []
+        ingested_set = set(p.ingested_ids)
         for packet in packets:
+            if packet.id in ingested_set:
+                continue  # skip duplicates silently
             if packet.verify_from_did():
                 verified.append(packet)
             else:
@@ -278,6 +293,7 @@ def receive(
 
             if auto_ingest and trusted:
                 _ingest(packet)
+                p.ingested_ids.append(packet.id)
                 continue
 
             ingest = typer.confirm(
@@ -286,9 +302,13 @@ def receive(
             )
             if ingest:
                 _ingest(packet)
+                p.ingested_ids.append(packet.id)
                 sender_nostr_pub = _resolve_nostr_pubkey(packet.from_did, p)
                 if sender_nostr_pub:
                     await client.send_receipt(packet, sender_nostr_pub)
+
+        # Save ingested IDs
+        p.save(profile)
 
     asyncio.run(_run())
 

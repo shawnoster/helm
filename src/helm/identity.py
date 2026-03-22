@@ -102,6 +102,7 @@ class Profile:
     trusted_keys: dict[str, TrustedKey] = field(default_factory=dict)
     default_relay: str = "wss://relay.damus.io"
     last_checked: dict[str, str] = field(default_factory=dict)  # relay → ISO timestamp
+    ingested_ids: list[str] = field(default_factory=list)  # packet IDs already ingested (dedup)
 
     @classmethod
     def load(cls, path: Path) -> Profile:
@@ -129,6 +130,7 @@ class Profile:
             trusted_keys=trusted,
             default_relay=data.get("assistant_sync", {}).get("default_relay", "wss://relay.damus.io"),
             last_checked=data.get("assistant_sync", {}).get("last_checked", {}),
+            ingested_ids=data.get("assistant_sync", {}).get("ingested_ids", []),
         )
 
     def save(self, path: Path) -> None:
@@ -152,6 +154,7 @@ class Profile:
         }
         data["assistant_sync"]["default_relay"] = self.default_relay
         data["assistant_sync"]["last_checked"] = self.last_checked
+        data["assistant_sync"]["ingested_ids"] = self.ingested_ids[-100:]  # keep last 100
         path.write_text(json.dumps(data, indent=2))
 
     def active_instance(self, label: str = "default") -> Identity | None:
