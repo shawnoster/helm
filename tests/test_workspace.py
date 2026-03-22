@@ -331,6 +331,23 @@ class TestResetWorkspace:
                 f"Skill directory skills/{name} must be removed on reset"
             )
 
+    def test_preserves_scheduler(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+
+        scheduler_path = root / "assistant" / "memory" / "scheduler.json"
+        custom_content = '{"items": [{"id": "custom-reminder"}]}'
+        scheduler_path.write_text(custom_content)
+
+        with _patch_home(fake_home):
+            reset_workspace(root, interactive=False, console=_silent_console())
+
+        assert scheduler_path.exists(), "scheduler.json must not be removed on reset"
+        assert scheduler_path.read_text() == custom_content
+
     def test_noop_when_nothing_to_reset(self, tmp_path: Path, fake_home: Path) -> None:
         root = tmp_path / "workspace"
         root.mkdir()

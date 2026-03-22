@@ -671,6 +671,7 @@ def reset(
 
     \b
     - assistant/persona.md
+    - assistant/memory/scheduler.json (reminders and watches)
     - assistant/notes/ (daily notes, meeting notes, ideas)
     - projects/ (all project memory)
     """

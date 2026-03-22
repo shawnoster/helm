@@ -36,7 +36,9 @@ FRAMEWORK_SCRIPTS = [
 ]
 
 # Bootstrap-created config files that are safe to remove on reset.
-# assistant/persona.md is intentionally excluded — it is user data.
+# assistant/persona.md and assistant/memory/scheduler.json are intentionally
+# excluded — both start as bootstrap scaffolding but quickly become user data
+# (persona customisations and accumulated reminders/watches respectively).
 RESET_FILES = [
     "CLAUDE.md",
     "AGENTS.md",
@@ -44,7 +46,6 @@ RESET_FILES = [
     "assistant/CLAUDE.md",
     "assistant/config.json",
     "assistant/memory/README.md",
-    "assistant/memory/scheduler.json",
     "Makefile",
 ]
 
@@ -197,6 +198,7 @@ def reset_workspace(
     scratch.  The following are *never* touched:
 
     - ``assistant/persona.md`` — user-customised persona
+    - ``assistant/memory/scheduler.json`` — accumulated reminders and watches
     - ``assistant/notes/`` — all notes (daily, meetings, ideas)
     - ``projects/`` — all project memory and meeting notes
     """
