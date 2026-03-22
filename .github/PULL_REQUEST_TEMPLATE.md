@@ -38,5 +38,6 @@ config file format changes. Delete this section if not applicable.
 - [ ] Commit messages follow [Conventional Commits](https://www.conventionalcommits.org/) (`feat:`, `fix:`, `chore:`, etc.)
 - [ ] Tests added or updated for changed behavior
 - [ ] `make check` passes locally (lint + type-check + tests)
+- [ ] Pre-commit hooks installed and passing (`make install-hooks` on first clone)
 - [ ] Docs updated if behavior changed
 - [ ] No secrets, credentials, or personal data committed

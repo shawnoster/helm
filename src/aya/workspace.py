@@ -25,6 +25,7 @@ DIRS = [
     "code",
     ".claude",
     ".claude/commands",
+    "skills",
 ]
 
 FRAMEWORK_SCRIPTS = [
@@ -32,6 +33,19 @@ FRAMEWORK_SCRIPTS = [
     "status_check.py",
     "assistant_profile.py",
     "watcher_daemon.py",
+]
+
+# Skills bundled with aya — names match directories under repo_root/skills/
+SKILL_NAMES = [
+    "morning",
+    "eod",
+    "status",
+    "feature",
+    "dev-discovery",
+    "dev-plan",
+    "dev-implement",
+    "dev-architecture",
+    "dev-meeting",
 ]
 
 
@@ -47,10 +61,11 @@ def bootstrap_workspace(
 
     con.print(f"Bootstrap assistant workspace at: [cyan]{root}[/cyan]\n")
 
-    # Locate bundled framework scripts
+    # Locate bundled assets
     package_dir = Path(__file__).resolve().parent
     repo_root = package_dir.parents[1]  # src/aya -> repo root
     framework_scripts_dir = repo_root / "framework" / "scripts"
+    skills_source_dir = repo_root / "skills"
 
     # Determine what to create
     files = _get_files(root_str)
@@ -71,6 +86,8 @@ def bootstrap_workspace(
         else:
             scripts_to_copy.append(script_name)
 
+    skills_to_install, skills_to_skip = _plan_skills(root, skills_source_dir, SKILL_NAMES)
+
     # Show plan
     if dirs_to_create:
         con.print("[bold]Directories to create:[/bold]")
@@ -90,15 +107,24 @@ def bootstrap_workspace(
             con.print(f"  [green]+[/green] scripts/{s}")
         con.print()
 
-    if files_to_skip or scripts_to_skip:
-        con.print("[dim]Already exist (skipping):[/dim]")
-        for p, _ in files_to_skip:
-            con.print(f"  [dim]~ {p}[/dim]")
-        for s in scripts_to_skip:
-            con.print(f"  [dim]~ scripts/{s}[/dim]")
+    if skills_to_install:
+        con.print("[bold]Skills to install:[/bold]")
+        for name in skills_to_install:
+            con.print(f"  [green]+[/green] .claude/commands/{name}.md  +  skills/{name}/SKILL.md")
         con.print()
 
-    if not dirs_to_create and not files_to_create and not scripts_to_copy:
+    skipped = [
+        *(p for p, _ in files_to_skip),
+        *(f"scripts/{s}" for s in scripts_to_skip),
+        *(f"skills/{s}" for s in skills_to_skip),
+    ]
+    if skipped:
+        con.print("[dim]Already exist (skipping):[/dim]")
+        for item in skipped:
+            con.print(f"  [dim]~ {item}[/dim]")
+        con.print()
+
+    if not dirs_to_create and not files_to_create and not scripts_to_copy and not skills_to_install:
         con.print("[green]Nothing to do — workspace is already set up.[/green]")
         return
 
@@ -123,6 +149,9 @@ def bootstrap_workspace(
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
 
+    # Install skills
+    _install_skills(root, skills_source_dir, skills_to_install, con)
+
     # ── Dotfiles (user home) ─────────────────────────────────────────────
     home = Path.home()
     dotfile_changes = _setup_dotfiles(home, con)
@@ -143,6 +172,7 @@ def bootstrap_workspace(
 def _get_files(root: str) -> list[tuple[str, str]]:
     return [
         ("CLAUDE.md", _claude_md(root)),
+        ("AGENTS.md", _agents_md(root)),  # root-level for harness auto-discovery
         ("assistant/AGENTS.md", _agents_md(root)),
         ("assistant/CLAUDE.md", _assistant_claude_md(root)),
         ("assistant/persona.md", _persona_md()),
@@ -157,7 +187,7 @@ def _claude_md(root: str) -> str:
     return f"""\
 # Assistant Workspace
 
-**Start here**: Read [`assistant/AGENTS.md`](assistant/AGENTS.md) for workspace structure, project conventions, and active projects.
+**Start here**: Read [`assistant/AGENTS.md`](assistant/AGENTS.md) for workspace structure, projects, and available skills.
 
 **Behavioral instructions**: [`assistant/CLAUDE.md`](assistant/CLAUDE.md) defines how to act in this workspace.
 
@@ -165,24 +195,25 @@ def _claude_md(root: str) -> str:
 
 ## Overview
 
-This workspace serves as a personal assistant for:
+This workspace is a personal assistant for daily work:
 
-- Daily work tasks and coordination
+- Daily planning and coordination
 - Meeting notes and documentation
 - Task tracking and reminders
-- Project coordination
+- Project context across SDLC
 
 ## Quick Start
 
-1. Read `assistant/AGENTS.md` — understand what's here and where things are
-2. Read `assistant/CLAUDE.md` — understand how to behave
-3. Check project `status.md` files for current state of active work
+1. Read `assistant/AGENTS.md` — workspace structure and active projects
+2. Read `assistant/CLAUDE.md` — behavioral instructions
+3. Run `/status` — confirm workspace is ONLINE
+4. Run `/morning` — get today's briefing
 
-## Launch + memory defaults
+## Workspace roots
 
-- Launch agent harnesses from `{root}` (this workspace root).
-- Keep persistent project memory in `{root}/projects`.
-- Apply behavior from `{root}/assistant/AGENTS.md` and `{root}/assistant/CLAUDE.md`.
+- Launch from: `{root}` (this directory)
+- Project memory: `{root}/projects/`
+- Code repos: `{root}/code/`
 """
 
 
@@ -274,15 +305,14 @@ def _agents_md(root: str) -> str:
 
 ---
 
-## Control Plane Model
+## Control Plane
 
 | Tier | Path | Purpose |
 | ---- | ---- | ---- |
-| Root | `{root}/` | Launch point, root CLAUDE.md, Makefile |
-| Assistant | `{root}/assistant/` | Behavioral config, memory, templates, scripts |
+| Root | `{root}/` | Launch point, CLAUDE.md, Makefile |
+| Assistant | `{root}/assistant/` | Behavioral config, memory, templates |
 | Projects | `{root}/projects/` | Per-project persistent context |
-
-Code repositories live in `{root}/code/`.
+| Code | `{root}/code/` | Repositories |
 
 ---
 
@@ -291,31 +321,44 @@ Code repositories live in `{root}/code/`.
 ```
 {root}/
 ├── CLAUDE.md
+├── AGENTS.md
 ├── Makefile
-├── scripts/
-│   ├── scheduler.py
-│   ├── status_check.py
-│   ├── assistant_profile.py
-│   └── watcher_daemon.py
 ├── assistant/
 │   ├── AGENTS.md
 │   ├── CLAUDE.md
 │   ├── config.json
 │   ├── persona.md
-│   ├── memory/
-│   │   └── scheduler.json
-│   ├── notes/
-│   │   ├── daily/
-│   │   ├── meetings/
-│   │   └── ideas/
-│   └── templates/
+│   └── memory/
+│       ├── scheduler.json
+│       └── done-log.md
 ├── projects/
 │   └── <project>/
-│       ├── README.md
 │       ├── status.md
+│       ├── discovery.md
+│       ├── plan.md
 │       └── meetings/
+├── skills/
+│   └── <skill-name>/SKILL.md
 └── code/
 ```
+
+---
+
+## Available Skills
+
+Invoke with `/skill-name` (Claude Code) or ask your assistant to run the task.
+
+| Skill | When to use |
+| ---- | ---- |
+| `/morning` | Start of day — briefing, priorities, calendar |
+| `/eod` | End of day — reconcile plan, stage tomorrow |
+| `/status` | Workspace readiness check |
+| `/feature` | Start a new feature (ticket → branch) |
+| `/dev-discovery` | Find relevant code for a project |
+| `/dev-architecture` | Understand how an existing system works |
+| `/dev-plan` | Design an implementation approach |
+| `/dev-implement` | Execute a plan and make code changes |
+| `/dev-meeting` | Capture meeting notes |
 
 ---
 
@@ -327,9 +370,9 @@ _No projects yet. Create a directory in `projects/` to get started._
 
 ## Operating Cadence
 
-- **Session start**: Read this file → scan project status files → load reminders
-- **During work**: Update status.md as decisions are made
-- **Session end**: Reconcile planned vs actual
+- **Session start**: read this file → scan project status files → load reminders → run `/status`
+- **During work**: update `status.md` as decisions are made
+- **Session end**: run `/eod` to reconcile and stage tomorrow
 """
 
 
@@ -447,7 +490,54 @@ schedule-alerts:
 """
 
 
-# ── Dotfile setup ────────────────────────────────────────────────────────────
+# ── Skills bootstrapping ─────────────────────────────────────────────────────
+
+
+def _plan_skills(
+    root: Path,
+    skills_source_dir: Path,
+    skill_names: list[str],
+) -> tuple[list[str], list[str]]:
+    """Return (to_install, to_skip) skill name lists."""
+    to_install, to_skip = [], []
+    for name in skill_names:
+        source = skills_source_dir / name / "SKILL.md"
+        if not source.exists():
+            continue  # skill not bundled — skip silently
+        legacy_target = root / ".claude" / "commands" / f"{name}.md"
+        skill_target = root / "skills" / name / "SKILL.md"
+        if legacy_target.exists() or skill_target.exists():
+            to_skip.append(name)
+        else:
+            to_install.append(name)
+    return to_install, to_skip
+
+
+def _install_skills(
+    root: Path,
+    skills_source_dir: Path,
+    skill_names: list[str],
+    con: Console,
+) -> None:
+    """Copy each skill to both .claude/commands/ (legacy) and skills/ (SKILL.md format)."""
+    for name in skill_names:
+        source = skills_source_dir / name / "SKILL.md"
+        content = source.read_text()
+
+        # Legacy flat format — Claude Code .claude/commands/
+        legacy_target = root / ".claude" / "commands" / f"{name}.md"
+        legacy_target.parent.mkdir(parents=True, exist_ok=True)
+        legacy_target.write_text(content)
+
+        # SKILL.md format — harness-agnostic skills/ directory
+        skill_target = root / "skills" / name / "SKILL.md"
+        skill_target.parent.mkdir(parents=True, exist_ok=True)
+        skill_target.write_text(content)
+
+        con.print(f"  [green]✓[/green] skill: {name}")
+
+
+# ── Dotfile setup ─────────────────────────────────────────────────────────────
 
 
 def _setup_dotfiles(home: Path, con: Console) -> int:

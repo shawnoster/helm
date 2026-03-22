@@ -1,7 +1,10 @@
-.PHONY: install lint fmt format type-check test check build clean
+.PHONY: install install-hooks lint fmt format type-check test check build clean
 
 install:
 	uv sync --all-groups
+
+install-hooks:
+	uv run pre-commit install
 
 lint:
 	uv run ruff check src tests
