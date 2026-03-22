@@ -1,6 +1,11 @@
 ---
 name: morning
-description: Adaptive morning briefing — priorities, calendar, open work, and a context-aware day plan
+description: >
+  Adaptive morning briefing with priorities, calendar, open work, and a
+  day plan. Invoke at session start, or when the user says "good morning",
+  "what's on today", "start of day", "what did I miss", or "brief me".
+  Depth adapts: full on weekday morning, focused on weekday afternoon,
+  light on weekends.
 argument-hint: "[quick]"
 ---
 

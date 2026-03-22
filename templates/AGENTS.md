@@ -52,11 +52,11 @@ Invoke these with `/skill-name` (Claude Code) or by asking your assistant to run
 | `/eod` | End of day — reconcile plan, stage tomorrow |
 | `/status` | Workspace readiness check |
 | `/feature` | Start a new feature (ticket → branch) |
-| `/dev-discovery` | Find relevant code for a project |
-| `/dev-architecture` | Understand how an existing system works |
-| `/dev-plan` | Design an implementation approach |
-| `/dev-implement` | Execute a plan and make code changes |
-| `/dev-meeting` | Capture meeting notes |
+| `/discovery` | Find relevant code for a project |
+| `/architecture` | Understand how an existing system works |
+| `/plan` | Design an implementation approach |
+| `/implement` | Execute a plan and make code changes |
+| `/meeting` | Capture meeting notes |
 
 ---
 

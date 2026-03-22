@@ -1,6 +1,10 @@
 ---
-name: dev-meeting
-description: Capture meeting notes — structured format with decisions, action items, and follow-ups
+name: meeting
+description: >
+  Capture meeting notes in a structured format with decisions, action items,
+  and follow-ups. Invoke when the user says "take notes", "we're starting a
+  meeting", "capture this discussion", "stand-up notes", or "I need to
+  document this call".
 argument-hint: "[<project-name> | <meeting title>]"
 ---
 

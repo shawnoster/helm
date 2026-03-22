@@ -1,6 +1,10 @@
 ---
 name: eod
-description: End-of-day wrap — reconcile planned vs. actual, stage carry-overs, update done-log, write tomorrow's stub
+description: >
+  End-of-day wrap — reconcile planned vs. actual, stage carry-overs, update
+  done-log, write tomorrow's stub. Invoke when the user says "wrap up",
+  "end of day", "close out today", "I'm done for the day", or "let's
+  capture what got done".
 ---
 
 # End of Day

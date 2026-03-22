@@ -1,6 +1,10 @@
 ---
 name: feature
-description: Start a new feature — find or create a ticket, create a branch, and set it In Progress
+description: >
+  Start a new feature — find or create a ticket, create a branch, and set
+  it In Progress. Invoke when the user says "start a feature", "let's work
+  on X", "create a branch for X", "pick up ticket CSD-N", or "new feature
+  for X".
 argument-hint: "[<ticket-id> | <short description>]"
 ---
 

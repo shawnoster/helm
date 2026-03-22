@@ -41,11 +41,11 @@ SKILL_NAMES = [
     "eod",
     "status",
     "feature",
-    "dev-discovery",
-    "dev-plan",
-    "dev-implement",
-    "dev-architecture",
-    "dev-meeting",
+    "discovery",
+    "plan",
+    "implement",
+    "architecture",
+    "meeting",
 ]
 
 
@@ -354,11 +354,11 @@ Invoke with `/skill-name` (Claude Code) or ask your assistant to run the task.
 | `/eod` | End of day — reconcile plan, stage tomorrow |
 | `/status` | Workspace readiness check |
 | `/feature` | Start a new feature (ticket → branch) |
-| `/dev-discovery` | Find relevant code for a project |
-| `/dev-architecture` | Understand how an existing system works |
-| `/dev-plan` | Design an implementation approach |
-| `/dev-implement` | Execute a plan and make code changes |
-| `/dev-meeting` | Capture meeting notes |
+| `/discovery` | Find relevant code for a project |
+| `/architecture` | Understand how an existing system works |
+| `/plan` | Design an implementation approach |
+| `/implement` | Execute a plan and make code changes |
+| `/meeting` | Capture meeting notes |
 
 ---
 

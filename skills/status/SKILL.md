@@ -1,6 +1,10 @@
 ---
 name: status
-description: Workspace readiness check — identity, memory, integrations, and assistant health
+description: >
+  Workspace readiness check — identity, memory, integrations, and assistant
+  health. Invoke when the user says "check status", "are you ready",
+  "run a health check", "what's your current state", or at the start of
+  any session where something seems off.
 ---
 
 # Status Check

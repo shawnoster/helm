@@ -1,6 +1,10 @@
 ---
-name: dev-discovery
-description: Enter DISCOVERY MODE — collaboratively locate relevant code, repos, and context for a project
+name: discovery
+description: >
+  Locate relevant code, repos, and context for a project before diving in.
+  Invoke when the user says "find the code for X", "where does X live",
+  "what repos are involved", "help me get oriented", or "I'm not sure where
+  to start — let's look around first".
 argument-hint: "<project-name>"
 ---
 
@@ -61,9 +65,9 @@ You are now in DISCOVERY MODE.
 - Assess initial scope and complexity
 
 **Boundaries:**
-- Do NOT analyze implementation details (that's `/dev-architecture`)
-- Do NOT create plans or solutions (that's `/dev-plan`)
-- Do NOT make code changes (that's `/dev-implement`)
+- Do NOT analyze implementation details (that's `/architecture`)
+- Do NOT create plans or solutions (that's `/plan`)
+- Do NOT make code changes (that's `/implement`)
 - Stay in discovery until the user explicitly switches modes
 
 **Approach:**

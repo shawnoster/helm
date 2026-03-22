@@ -1,6 +1,9 @@
 ---
-name: dev-implement
-description: Enter IMPLEMENTATION MODE — execute a plan and make code changes for a project
+name: implement
+description: >
+  Execute a plan and make code changes. Invoke when the user says "let's build
+  this", "start coding", "make the changes", "implement the plan", or "we've
+  planned enough — time to write code".
 argument-hint: "<project-name>"
 ---
 
@@ -25,7 +28,7 @@ Set `projectPath` to `{projects_dir}/{project-name}`.
 Check for:
 - `discovery.md` — set `hasDiscovery` flag if present
 - `architecture.md` — set `hasArchitecture` flag if present
-- `plan.md` — set `hasPlan` flag; warn if missing ("Consider running /dev-plan first")
+- `plan.md` — set `hasPlan` flag; warn if missing ("Consider running /plan first")
 
 ---
 

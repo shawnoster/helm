@@ -1,6 +1,10 @@
 ---
-name: dev-architecture
-description: Enter ARCHITECTURE MODE — analyze how an existing implementation works before planning changes
+name: architecture
+description: >
+  Understand how a codebase or system works before making changes. Invoke when
+  the user says "let's look at the architecture", "how does X work", "walk me
+  through the codebase", "understand the implementation", or "before we plan,
+  show me how this is structured".
 argument-hint: "<project-name>"
 ---
 
@@ -56,8 +60,8 @@ You are now in ARCHITECTURE MODE.
 - Read repos and code identified in `discovery.md`
 - Ask questions to fill gaps — don't assume
 - Update `architecture.md` incrementally as understanding grows
-- Do NOT make code changes (that's `/dev-implement`)
-- Do NOT create implementation plans (that's `/dev-plan`)
+- Do NOT make code changes (that's `/implement`)
+- Do NOT create implementation plans (that's `/plan`)
 
 If resuming: load `architecture.md`, summarize current understanding, then ask what to explore next.
 If new: start from `discovery.md` and ask what aspect of the architecture to investigate first.
