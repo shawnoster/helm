@@ -4,6 +4,14 @@
 
 `aya` is a CLI for managing your AI assistant across machines — sync context between instances, schedule reminders, and bootstrap new workspaces.
 
+## Why "aya"?
+
+Och, ye might well ask. It started life as `assistant-sync` — perfectly descriptive, perfectly dull, the kind o' name a committee'd be proud of. Then came `helm`, which sounded braw and nautical until some wee Kubernetes chart showed up and said *"Naw, that's mine."*
+
+So there we were, rootin' around for a name, and someone muttered *"aya"* — and that was that. In the Scots tongue, *aya* is what ye say when somethin' lands just right. Not a grand *"YES"* mind ye, more a quiet *"aye, that'll do."* The kind o' sound a canny person makes when the kettle's found, the fire's lit, and everything's settled where it ought tae be.
+
+That's this tool. Nae fuss. Nae ceremony. Just quietly doin' the job.
+
 ## Install
 
 ```bash
@@ -11,11 +19,11 @@
 uvx aya
 
 # From GitHub — works today, no PyPI required
-uvx --from git+https://github.com/shawnoster/helm aya
+uvx --from git+https://github.com/shawnoster/aya aya
 
 # From source
-git clone https://github.com/shawnoster/helm.git
-cd helm
+git clone https://github.com/shawnoster/aya.git
+cd aya
 uv sync
 ```
 
