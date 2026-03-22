@@ -337,14 +337,15 @@ async def poll_for_pair_response(
                     "kinds": [AYA_KIND],
                     "#t": [_TAG_PAIR_RESP],
                     "#p": [my_pubkey],
-                    "#aya-pair-request-id": [request_event_id],
+                    "#e": [request_event_id],
                     "since": since_ts,
                     "limit": 1,
                 }
                 sub_id = f"pair-poll-{datetime.now(UTC).timestamp():.0f}"
                 await ws.send(json.dumps(["REQ", sub_id, filter_]))
                 try:
-                    async for event in _read_until_eose(ws, sub_id):
+                    eose_timeout = max(1.0, deadline - datetime.now(UTC).timestamp())
+                    async for event in _read_until_eose(ws, sub_id, eose_timeout=eose_timeout):
                         await ws.send(json.dumps(["CLOSE", sub_id]))
                         content = json.loads(event["content"])
                         return TrustedKey(
@@ -355,7 +356,10 @@ async def poll_for_pair_response(
                 except TimeoutError:
                     logger.debug("EOSE not received within timeout on sub %s; retrying", sub_id)
                 await ws.send(json.dumps(["CLOSE", sub_id]))
-                await asyncio.sleep(PAIR_POLL_INTERVAL)
+                remaining = deadline - datetime.now(UTC).timestamp()
+                if remaining <= 0:
+                    break
+                await asyncio.sleep(min(PAIR_POLL_INTERVAL, remaining))
     except TimeoutError:
         logger.debug("Pair polling timed out after %d seconds", timeout_seconds)
     except Exception as exc:
@@ -454,7 +458,7 @@ def _build_pair_response(
     tags = [
         ["t", _TAG_PAIR_RESP],
         ["p", initiator_pubkey],
-        ["aya-pair-request-id", request_event_id],
+        ["e", request_event_id],
         ["expiration", str(expiration)],
         ["aya-version", "0.2"],
     ]
