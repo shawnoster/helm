@@ -374,9 +374,13 @@ _No projects yet. Create a directory in `projects/` to get started._
 
 ## Operating Cadence
 
-- **Session start**: read this file → scan project status files → load reminders → run `/status`
-- **During work**: update `status.md` as decisions are made
-- **Session end**: run `/eod` to reconcile and stage tomorrow
+- **Session start**: run `/status` → then `/morning`
+- **Starting a task**: run `/feature` (ticket → branch)
+- **During development**: `/discovery` → `/architecture` → `/plan` → `/implement`
+- **Completing a task**: run `/finish` (commit · push · PR · ticket)
+- **Between tasks**: run `/pivot` (tidy · scan signals · suggest next)
+- **In a meeting**: run `/meeting`
+- **Session end**: run `/eod` (reconcile · stage carry-overs · write tomorrow's stub)
 """
 
 

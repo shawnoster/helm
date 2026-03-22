@@ -74,7 +74,15 @@ Append to `assistant/notes/daily/{TODAY}.md` under `## Activity Log`:
 [{HH:MM}] Opened PR #{number} — {PR title} · {ticket ref}
 ```
 
-If no daily file exists for today, create it with just the Activity Log section.
+If no daily file exists for today, create it with the standard daily note frontmatter followed by the Activity Log section:
+
+```markdown
+---
+date: {TODAY}
+---
+
+## Activity Log
+```
 
 ---
 

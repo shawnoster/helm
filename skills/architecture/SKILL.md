@@ -18,6 +18,8 @@ When this skill is invoked with a project name:
 
 Read `assistant/config.json` (relative to the workspace root). Extract `projects_dir`.
 
+If the config is missing or does not contain `projects_dir`, ask the user where project files are stored before continuing. Offer to write `assistant/config.json` so future invocations don't need to re-ask.
+
 ---
 
 ## 2. Load project context

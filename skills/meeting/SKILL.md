@@ -16,8 +16,10 @@ Capture notes for a meeting in progress or just completed.
 
 ## 1. Determine storage location
 
-If a project name is provided and a corresponding directory exists under `projects/`, store the note at:
-`projects/{project-name}/meetings/{YYYY-MM-DD}.md`
+Read `projects_dir` from `assistant/config.json` (relative to the workspace root). If the config is missing or `projects_dir` is not set, fall back to `"projects"`.
+
+If a project name is provided and a corresponding directory exists under `{projects_dir}/`, store the note at:
+`{projects_dir}/{project-name}/meetings/{YYYY-MM-DD}.md`
 
 Otherwise store at:
 `assistant/notes/meetings/{YYYY-MM-DD}.md`
