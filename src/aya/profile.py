@@ -100,9 +100,7 @@ def _name_from_activity(now: datetime, entries: list[str]) -> str:
         return NAME_CANDIDATES[now.toordinal() % len(NAME_CANDIDATES)]
 
     scored = _activity_themes(entries)
-    top_themes = sorted(
-        scored.items(), key=lambda pair: (pair[1], pair[0]), reverse=True
-    )[:2]
+    top_themes = sorted(scored.items(), key=lambda pair: (pair[1], pair[0]), reverse=True)[:2]
     theme_order = [name for name, score in top_themes if score > 0]
 
     if not theme_order:
@@ -172,7 +170,9 @@ def ensure_profile(path: Path = PROFILE_PATH, now: datetime | None = None) -> di
     recent_activity = _activity_entries_last_days(ACTIVITY_TRACKER_PATH, now_dt, days=3)
 
     if next_eval is None:
-        profile["ship_mind_name"] = current_name if isinstance(current_name, str) else NAME_CANDIDATES[0]
+        profile["ship_mind_name"] = (
+            current_name if isinstance(current_name, str) else NAME_CANDIDATES[0]
+        )
         profile["name_last_evaluated_at"] = _iso_z(now_dt)
         profile["name_next_reevaluation_at"] = _iso_z(now_dt + timedelta(days=REEVALUATION_DAYS))
     elif now_dt >= next_eval:
@@ -191,5 +191,3 @@ def ensure_profile(path: Path = PROFILE_PATH, now: datetime | None = None) -> di
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(profile, indent=2))
     return profile
-
-

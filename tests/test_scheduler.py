@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 import pytest
 
-from ai_assist.scheduler import (
+from aya.scheduler import (
     LOCAL_TZ,
     _find,
     _parse_tags,
@@ -34,8 +34,8 @@ def _isolate_scheduler(tmp_path, monkeypatch):
     scheduler_file.write_text(json.dumps({"items": []}))
     alerts_file.write_text(json.dumps({"alerts": []}))
 
-    monkeypatch.setattr("ai_assist.scheduler.SCHEDULER_FILE", scheduler_file)
-    monkeypatch.setattr("ai_assist.scheduler.ALERTS_FILE", alerts_file)
+    monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+    monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
 
 
 # ── Time parsing ─────────────────────────────────────────────────────────────
@@ -222,25 +222,27 @@ class TestListItems:
 class TestCheckDue:
     def test_nothing_due(self):
         add_reminder("Future", "in 1 hour")
-        due, alerts = check_due()
+        due, _alerts = check_due()
         assert len(due) == 0
 
     def test_past_due(self):
         # Directly insert an already-due item
         items = load_items()
         past = (datetime.now(LOCAL_TZ) - timedelta(hours=1)).isoformat()
-        items.append({
-            "id": "test-due-id",
-            "type": "reminder",
-            "status": "pending",
-            "created_at": past,
-            "message": "Overdue",
-            "tags": [],
-            "session_required": False,
-            "due_at": past,
-            "delivered_at": None,
-            "snoozed_until": None,
-        })
+        items.append(
+            {
+                "id": "test-due-id",
+                "type": "reminder",
+                "status": "pending",
+                "created_at": past,
+                "message": "Overdue",
+                "tags": [],
+                "session_required": False,
+                "due_at": past,
+                "delivered_at": None,
+                "snoozed_until": None,
+            }
+        )
         save_items(items)
         due, _ = check_due()
         assert len(due) == 1
@@ -250,18 +252,20 @@ class TestCheckDue:
         items = load_items()
         future = (datetime.now(LOCAL_TZ) + timedelta(hours=1)).isoformat()
         past = (datetime.now(LOCAL_TZ) - timedelta(hours=1)).isoformat()
-        items.append({
-            "id": "snoozed-id",
-            "type": "reminder",
-            "status": "snoozed",
-            "created_at": past,
-            "message": "Snoozed",
-            "tags": [],
-            "session_required": False,
-            "due_at": past,
-            "delivered_at": None,
-            "snoozed_until": future,
-        })
+        items.append(
+            {
+                "id": "snoozed-id",
+                "type": "reminder",
+                "status": "snoozed",
+                "created_at": past,
+                "message": "Snoozed",
+                "tags": [],
+                "session_required": False,
+                "due_at": past,
+                "delivered_at": None,
+                "snoozed_until": future,
+            }
+        )
         save_items(items)
         due, _ = check_due()
         assert len(due) == 0
@@ -315,10 +319,16 @@ class TestShowAlerts:
         assert show_alerts() == []
 
     def test_mark_seen(self, monkeypatch):
-        from ai_assist import scheduler
+        from aya import scheduler
+
         alerts = [
-            {"id": "a1", "source_item_id": "s1", "created_at": datetime.now(LOCAL_TZ).isoformat(),
-             "message": "Alert 1", "seen": False},
+            {
+                "id": "a1",
+                "source_item_id": "s1",
+                "created_at": datetime.now(LOCAL_TZ).isoformat(),
+                "message": "Alert 1",
+                "seen": False,
+            },
         ]
         scheduler.ALERTS_FILE.write_text(json.dumps({"alerts": alerts}))
         unseen = show_alerts(mark_seen=True)

@@ -1,12 +1,19 @@
-# ai-assist
+# aya
 
 **Personal AI assistant toolkit.**
 
-`assist` is a CLI for managing your AI assistant across machines — sync context between instances, schedule reminders, and bootstrap new workspaces.
+`aya` is a CLI for managing your AI assistant across machines — sync context between instances, schedule reminders, and bootstrap new workspaces.
 
 ## Install
 
 ```bash
+# From PyPI (after first release)
+uvx aya
+
+# From GitHub — works today, no PyPI required
+uvx --from git+https://github.com/shawnoster/helm aya
+
+# From source
 git clone https://github.com/shawnoster/helm.git
 cd helm
 uv sync
@@ -16,33 +23,33 @@ uv sync
 
 ```bash
 # Bootstrap a workspace
-uv run assist bootstrap --root ~
+uv run aya bootstrap --root ~
 
 # Set up identity
-uv run assist init --label work
+uv run aya init --label work
 
 # Pair with another machine
-uv run assist pair --label work        # shows a code
-uv run assist pair --code WORD-WORD-0000 --label home  # on the other machine
+uv run aya pair --label work        # shows a code
+uv run aya pair --code WORD-WORD-0000 --label home  # on the other machine
 
 # Send a packet
-echo "Hello from work" | uv run assist pack --to home --intent "test" | uv run assist send /dev/stdin
+echo "Hello from work" | uv run aya pack --to home --intent "test" | uv run aya send /dev/stdin
 
 # Check inbox
-uv run assist inbox
+uv run aya inbox
 ```
 
 ## Commands
 
 | Command | What it does |
 | ---- | ---- |
-| `assist init` | Generate identity keypair for this instance |
-| `assist pair` | Pair two instances via short-lived relay code |
-| `assist trust` | Manually trust a DID |
-| `assist pack` | Create a signed knowledge packet |
-| `assist send` | Publish a packet to a Nostr relay |
-| `assist inbox` | List pending packets |
-| `assist receive` | Review and ingest packets |
+| `aya init` | Generate identity keypair for this instance |
+| `aya pair` | Pair two instances via short-lived relay code |
+| `aya trust` | Manually trust a DID |
+| `aya pack` | Create a signed knowledge packet |
+| `aya send` | Publish a packet to a Nostr relay |
+| `aya inbox` | List pending packets |
+| `aya receive` | Review and ingest packets |
 
 ## How it works
 

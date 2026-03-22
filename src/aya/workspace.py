@@ -48,7 +48,7 @@ def bootstrap_workspace(
 
     # Locate bundled framework scripts
     package_dir = Path(__file__).resolve().parent
-    repo_root = package_dir.parents[1]  # src/ai_assist -> repo root
+    repo_root = package_dir.parents[1]  # src/aya -> repo root
     framework_scripts_dir = repo_root / "framework" / "scripts"
 
     # Determine what to create
@@ -136,7 +136,7 @@ def bootstrap_workspace(
     con.print("Next steps:")
     con.print(f"  1. cd {root}")
     con.print("  2. claude                        # launch Claude Code")
-    con.print("  3. assist inbox                    # check for packets from work")
+    con.print("  3. aya inbox                    # check for packets from work")
 
 
 # ── File generators ──────────────────────────────────────────────────────────
@@ -414,11 +414,14 @@ def _scheduler_json() -> str:
 
 
 def _config_json(root: str) -> str:
-    return json.dumps({
-        "version": "1.0",
-        "projects_dir": f"{root}/projects",
-        "code_dirs": [f"{root}/code"],
-    }, indent=2)
+    return json.dumps(
+        {
+            "version": "1.0",
+            "projects_dir": f"{root}/projects",
+            "code_dirs": [f"{root}/code"],
+        },
+        indent=2,
+    )
 
 
 def _makefile() -> str:
@@ -428,7 +431,7 @@ def _makefile() -> str:
 # ── Assistant ────────────────────────────────────────────────────────────────
 
 assistant-status:
-\t@python3 scripts/status_check.py 2>/dev/null || echo "status_check.py not found — run assist bootstrap"
+\t@python3 scripts/status_check.py 2>/dev/null || echo "status_check.py not found — run aya bootstrap"
 
 # ── Scheduler ────────────────────────────────────────────────────────────────
 
@@ -466,10 +469,7 @@ def _setup_dotfiles(home: Path, con: Console) -> int:
     # ~/.claude/settings.json — merge hooks if not present
     settings_path = home / ".claude" / "settings.json"
     settings_path.parent.mkdir(parents=True, exist_ok=True)
-    if settings_path.exists():
-        settings = json.loads(settings_path.read_text())
-    else:
-        settings = {}
+    settings = json.loads(settings_path.read_text()) if settings_path.exists() else {}
 
     hooks = settings.setdefault("hooks", {})
     session_start = hooks.setdefault("SessionStart", [])
@@ -480,29 +480,37 @@ def _setup_dotfiles(home: Path, con: Console) -> int:
         for h in session_start
     )
     if not health_hook_exists:
-        session_start.append({
-            "hooks": [{
-                "type": "command",
-                "command": f"bash {home}/.claude/hooks/health_crons.sh",
-                "statusMessage": "Initializing health reminders...",
-            }]
-        })
+        session_start.append(
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": f"bash {home}/.claude/hooks/health_crons.sh",
+                        "statusMessage": "Initializing health reminders...",
+                    }
+                ]
+            }
+        )
         changes += 1
 
-    # Add assist receive hook if not present
-    helm_hook_exists = any(
-        "assist receive" in (h.get("hooks", [{}])[0].get("command", "") if h.get("hooks") else "")
+    # Add aya receive hook if not present
+    aya_hook_exists = any(
+        "aya receive" in (h.get("hooks", [{}])[0].get("command", "") if h.get("hooks") else "")
         for h in session_start
     )
-    if not helm_hook_exists:
-        session_start.append({
-            "hooks": [{
-                "type": "command",
-                "command": "assist receive --quiet --auto-ingest 2>/dev/null || true",
-                "statusMessage": "Checking for packets...",
-                "async": True,
-            }]
-        })
+    if not aya_hook_exists:
+        session_start.append(
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "aya receive --quiet --auto-ingest 2>/dev/null || true",
+                        "statusMessage": "Checking for packets...",
+                        "async": True,
+                    }
+                ]
+            }
+        )
         changes += 1
 
     settings_path.write_text(json.dumps(settings, indent=2))
@@ -528,24 +536,27 @@ def _setup_dotfiles(home: Path, con: Console) -> int:
 
 def _assistant_profile_json() -> str:
     """Default assistant profile — persona, alias, movement reminders."""
-    return json.dumps({
-        "alias": "Ace",
-        "ship_mind_name": "",
-        "persona": "Culture Ship Mind: sharp snark, genuine care, human-preserving bias.",
-        "user_name": "Shawn",
-        "movement_reminders": {
-            "micro_stretch_every_minutes": 30,
-            "stand_up_every_minutes": 60,
-            "walk_break_every_minutes": 120,
-            "hydration_nudge_every_minutes": 90,
-            "recommended_moments": [
-                "After any meeting >= 25 minutes",
-                "After sending a PR or closing a task",
-                "After 45-60 minutes of uninterrupted focus",
-                "When switching contexts/projects",
-            ],
+    return json.dumps(
+        {
+            "alias": "Ace",
+            "ship_mind_name": "",
+            "persona": "Culture Ship Mind: sharp snark, genuine care, human-preserving bias.",
+            "user_name": "Shawn",
+            "movement_reminders": {
+                "micro_stretch_every_minutes": 30,
+                "stand_up_every_minutes": 60,
+                "walk_break_every_minutes": 120,
+                "hydration_nudge_every_minutes": 90,
+                "recommended_moments": [
+                    "After any meeting >= 25 minutes",
+                    "After sending a PR or closing a task",
+                    "After 45-60 minutes of uninterrupted focus",
+                    "When switching contexts/projects",
+                ],
+            },
         },
-    }, indent=2)
+        indent=2,
+    )
 
 
 def _health_crons_sh() -> str:

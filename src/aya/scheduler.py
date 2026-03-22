@@ -23,12 +23,12 @@ import json
 import os
 import re
 import subprocess
-import sys
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
+
 
 def _find_workspace_root() -> Path:
     """Walk up from cwd looking for assistant/memory/scheduler.json."""
@@ -50,13 +50,25 @@ LOCAL_TZ = ZoneInfo("America/Denver")
 # ── time parsing ─────────────────────────────────────────────────────────────
 
 _WEEKDAYS = {
-    "monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
-    "friday": 4, "saturday": 5, "sunday": 6,
-    "mon": 0, "tue": 1, "wed": 2, "thu": 3, "fri": 4, "sat": 5, "sun": 6,
+    "monday": 0,
+    "tuesday": 1,
+    "wednesday": 2,
+    "thursday": 3,
+    "friday": 4,
+    "saturday": 5,
+    "sunday": 6,
+    "mon": 0,
+    "tue": 1,
+    "wed": 2,
+    "thu": 3,
+    "fri": 4,
+    "sat": 5,
+    "sun": 6,
 }
 
 _RELATIVE_RE = re.compile(
-    r"^in\s+(\d+)\s+(minute|min|hour|hr|day|week)s?$", re.IGNORECASE,
+    r"^in\s+(\d+)\s+(minute|min|hour|hr|day|week)s?$",
+    re.IGNORECASE,
 )
 
 _TIME_RE = re.compile(r"(\d{1,2})(?::(\d{2}))?\s*(am|pm)?", re.IGNORECASE)
@@ -110,9 +122,14 @@ def parse_due(text: str, now: datetime | None = None) -> datetime:
     if m:
         amount = int(m.group(1))
         unit = m.group(2).lower()
-        delta = {"minute": timedelta(minutes=amount), "min": timedelta(minutes=amount),
-                 "hour": timedelta(hours=amount), "hr": timedelta(hours=amount),
-                 "day": timedelta(days=amount), "week": timedelta(weeks=amount)}
+        delta = {
+            "minute": timedelta(minutes=amount),
+            "min": timedelta(minutes=amount),
+            "hour": timedelta(hours=amount),
+            "hr": timedelta(hours=amount),
+            "day": timedelta(days=amount),
+            "week": timedelta(weeks=amount),
+        }
         return now + delta.get(unit, timedelta())
 
     if text in ("eod", "end of day"):
@@ -137,6 +154,7 @@ def parse_due(text: str, now: datetime | None = None) -> datetime:
 
 
 # ── storage ──────────────────────────────────────────────────────────────────
+
 
 def load_items() -> list[dict[str, Any]]:
     if not SCHEDULER_FILE.exists():
@@ -181,11 +199,15 @@ def _new_id() -> str:
 
 # ── watch providers ──────────────────────────────────────────────────────────
 
+
 def _run_gh(args: list[str], timeout: int = 15) -> dict[str, Any] | list | None:
     """Run gh CLI and parse JSON output."""
     try:
         result = subprocess.run(
-            ["gh", *args], capture_output=True, text=True, timeout=timeout,
+            ["gh", *args],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
         )
         if result.returncode != 0:
             return None
@@ -200,17 +222,25 @@ def _check_github_pr(config: dict[str, Any]) -> dict[str, Any] | None:
     repo = config["repo"]
     pr = config["pr"]
 
-    pr_data = _run_gh([
-        "api", f"/repos/{owner}/{repo}/pulls/{pr}",
-        "--jq", "{ state: .state, merged: .merged, draft: .draft, title: .title }",
-    ])
+    pr_data = _run_gh(
+        [
+            "api",
+            f"/repos/{owner}/{repo}/pulls/{pr}",
+            "--jq",
+            "{ state: .state, merged: .merged, draft: .draft, title: .title }",
+        ]
+    )
     if not pr_data:
         return None
 
-    reviews = _run_gh([
-        "api", f"/repos/{owner}/{repo}/pulls/{pr}/reviews",
-        "--jq", "[.[] | { user: .user.login, state: .state }]",
-    ])
+    reviews = _run_gh(
+        [
+            "api",
+            f"/repos/{owner}/{repo}/pulls/{pr}/reviews",
+            "--jq",
+            "[.[] | { user: .user.login, state: .state }]",
+        ]
+    )
 
     return {
         "pr_state": pr_data.get("state"),
@@ -234,6 +264,7 @@ def _check_jira_query(config: dict[str, Any]) -> dict[str, Any] | None:
 
     try:
         import httpx
+
         resp = httpx.post(
             f"{server}/rest/api/3/search",
             auth=(email, token),
@@ -270,6 +301,7 @@ def _check_jira_ticket(config: dict[str, Any]) -> dict[str, Any] | None:
 
     try:
         import httpx
+
         resp = httpx.get(
             f"{server}/rest/api/3/issue/{ticket}",
             auth=(email, token),
@@ -316,12 +348,15 @@ def poll_watch(item: dict[str, Any]) -> tuple[dict | None, bool]:
         if condition == "approved_or_merged":
             was_approved = (last_state or {}).get("has_approval", False)
             was_merged = (last_state or {}).get("merged", False)
-            changed = (new_state["has_approval"] and not was_approved) or \
-                      (new_state["merged"] and not was_merged)
+            changed = (new_state["has_approval"] and not was_approved) or (
+                new_state["merged"] and not was_merged
+            )
         elif condition == "merged":
             changed = new_state["merged"] and not (last_state or {}).get("merged", False)
         else:
-            changed = json.dumps(new_state, sort_keys=True) != json.dumps(last_state, sort_keys=True)
+            changed = json.dumps(new_state, sort_keys=True) != json.dumps(
+                last_state, sort_keys=True
+            )
 
     elif provider == "jira-query":
         if condition == "new_results":
@@ -335,7 +370,9 @@ def poll_watch(item: dict[str, Any]) -> tuple[dict | None, bool]:
         if condition == "status_changed":
             changed = new_state.get("status") != (last_state or {}).get("status")
         else:
-            changed = json.dumps(new_state, sort_keys=True) != json.dumps(last_state, sort_keys=True)
+            changed = json.dumps(new_state, sort_keys=True) != json.dumps(
+                last_state, sort_keys=True
+            )
 
     return new_state, changed
 
@@ -426,7 +463,10 @@ def add_watch(
 
 
 def add_recurring(
-    message: str, cron: str, prompt: str = "", tags: str = "",
+    message: str,
+    cron: str,
+    prompt: str = "",
+    tags: str = "",
 ) -> dict[str, Any]:
     """Add a persistent recurring session job. Returns the created item."""
     now = datetime.now(LOCAL_TZ)
@@ -448,7 +488,8 @@ def add_recurring(
 
 
 def list_items(
-    show_all: bool = False, item_type: str | None = None,
+    show_all: bool = False,
+    item_type: str | None = None,
 ) -> list[dict[str, Any]]:
     """Return filtered list of scheduler items."""
     items = load_items()
@@ -523,7 +564,11 @@ def run_poll(quiet: bool = False) -> None:
     alerts_modified = False
 
     for item in items:
-        if item["type"] == "watch" and item["status"] == "active" and not item.get("session_required"):
+        if (
+            item["type"] == "watch"
+            and item["status"] == "active"
+            and not item.get("session_required")
+        ):
             last = item.get("last_checked_at")
             interval = item.get("poll_interval_minutes", 30)
             if last:
@@ -549,16 +594,16 @@ def run_poll(quiet: bool = False) -> None:
                     alerts.append(alert)
                     alerts_modified = True
                     if not quiet:
-                        print(f"  🔔 {item['id'][:8]} — {alert['message'][:60]}")
+                        pass
 
                 if _evaluate_auto_remove(item, new_state):
                     item["status"] = "dismissed"
                     items_modified = True
                     if not quiet:
-                        print(f"  ✓ Auto-dismissed {item['id'][:8]} (condition met)")
+                        pass
 
             elif not quiet:
-                print(f"  ⚠ {item['id'][:8]} — poll failed (network/auth?)")
+                pass
 
         elif item["type"] == "reminder" and item["status"] == "pending":
             due = datetime.fromisoformat(item["due_at"])
@@ -576,7 +621,7 @@ def run_poll(quiet: bool = False) -> None:
                     alerts.append(alert)
                     alerts_modified = True
                     if not quiet:
-                        print(f"  ⏰ {item['id'][:8]} — {item['message'][:55]}")
+                        pass
 
     if items_modified:
         save_items(items)
@@ -584,9 +629,8 @@ def run_poll(quiet: bool = False) -> None:
         save_alerts(alerts)
 
     if not quiet:
-        watch_count = sum(1 for i in items if i["type"] == "watch" and i["status"] == "active")
-        reminder_count = sum(1 for i in items if i["type"] == "reminder" and i["status"] == "pending")
-        print(f"\n  Poll complete. {watch_count} watches, {reminder_count} pending reminders.")
+        sum(1 for i in items if i["type"] == "watch" and i["status"] == "active")
+        sum(1 for i in items if i["type"] == "reminder" and i["status"] == "pending")
 
 
 def show_alerts(as_json: bool = False, mark_seen: bool = False) -> list[dict[str, Any]]:
@@ -631,6 +675,7 @@ def _format_watch_alert(item: dict[str, Any], state: dict[str, Any]) -> str:
 
 
 # ── programmatic API (for status_check.py, morning.md) ──────────────────────
+
 
 def get_due_reminders(now: datetime | None = None) -> list[dict[str, Any]]:
     """Return pending reminders that are due. No side effects."""
@@ -679,39 +724,35 @@ def get_active_watches() -> list[dict[str, Any]]:
 def _display_items(items: list[dict[str, Any]]) -> None:
     """Pretty-print scheduler items grouped by type."""
     if not items:
-        print("No active items.")
         return
 
     now = datetime.now(LOCAL_TZ)
-    type_icons = {"reminder": "⏰", "watch": "👁", "recurring": "🔄", "event": "⚡"}
 
     for item_type in ("reminder", "watch", "recurring", "event"):
         typed = [i for i in items if i["type"] == item_type]
         if not typed:
             continue
-        print(f"\n  {type_icons.get(item_type, '•')} {item_type.upper()}S")
         for i in typed:
-            status_icon = {"pending": "⏳", "active": "✅", "snoozed": "💤",
-                           "delivered": "📬", "dismissed": "✗"}.get(i["status"], "•")
-            tags = f" [{', '.join(i['tags'])}]" if i.get("tags") else ""
+            {
+                "pending": "⏳",
+                "active": "✅",
+                "snoozed": "💤",
+                "delivered": "📬",
+                "dismissed": "✗",
+            }.get(i["status"], "•")
+            f" [{', '.join(i['tags'])}]" if i.get("tags") else ""
 
             if i["type"] == "reminder":
                 due = datetime.fromisoformat(i["due_at"])
-                due_str = due.strftime("%a %b %d, %I:%M %p")
-                overdue = due <= now and i["status"] == "pending"
-                marker = " 🔴 OVERDUE" if overdue else ""
-                print(f"    {status_icon} {i['id'][:8]}  {due_str}  {i['message'][:45]}{tags}{marker}")
+                due.strftime("%a %b %d, %I:%M %p")
+                due <= now and i["status"] == "pending"
             elif i["type"] == "watch":
-                provider = i.get("provider", "?")
-                interval = i.get("poll_interval_minutes", "?")
+                i.get("provider", "?")
+                i.get("poll_interval_minutes", "?")
                 last = i.get("last_checked_at")
-                last_str = datetime.fromisoformat(last).strftime("%H:%M") if last else "never"
-                print(f"    {status_icon} {i['id'][:8]}  [{provider}] {i['message'][:40]}{tags}  (every {interval}m, last: {last_str})")
+                datetime.fromisoformat(last).strftime("%H:%M") if last else "never"
             elif i["type"] == "recurring":
-                cron = i.get("cron", "?")
-                sess = " [session]" if i.get("session_required") else ""
-                print(f"    {status_icon} {i['id'][:8]}  {i['message'][:45]}{tags}  ({cron}){sess}")
+                i.get("cron", "?")
+                " [session]" if i.get("session_required") else ""
             elif i["type"] == "event":
-                trigger = i.get("trigger", "?")
-                print(f"    {status_icon} {i['id'][:8]}  {i['message'][:45]}{tags}  on:{trigger}")
-    print()
+                i.get("trigger", "?")

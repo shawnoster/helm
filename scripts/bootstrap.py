@@ -558,11 +558,11 @@ def main() -> None:
     print("Next steps:")
     print(f"  1. cd {root}")
     print("  2. claude                        # launch Claude Code")
-    print("  3. helm inbox           # check for packets from work")
+    print("  3. aya inbox           # check for packets from work")
     print()
     print("To sync identity (if not already done):")
-    print("  helm init --label home")
-    print("  helm pair --code <CODE> --label home")
+    print("  aya init --label home")
+    print("  aya pair --code <CODE> --label home")
 
 
 if __name__ == "__main__":

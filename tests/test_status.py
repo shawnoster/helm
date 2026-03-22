@@ -2,14 +2,11 @@
 
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 
 import pytest
 
-from ai_assist.status import (
-    CheckResult,
+from aya.status import (
     _exists,
     _greeting,
     _parse_block_header,
@@ -19,7 +16,6 @@ from ai_assist.status import (
     _read_json,
     _time_flavor,
 )
-
 
 # ── CheckResult / _exists ────────────────────────────────────────────────────
 
@@ -153,7 +149,7 @@ class TestParseBlockHeader:
         assert end.hour == 17  # defaults to +1 hour
 
     def test_no_time(self):
-        start, end, label = _parse_block_header("No time here")
+        start, end, _label = _parse_block_header("No time here")
         assert start is None
         assert end is None
 
@@ -166,7 +162,7 @@ class TestParseDailyNotes:
     def _setup_notes_dir(self, tmp_path, monkeypatch):
         self.notes_dir = tmp_path / "assistant" / "notes" / "daily"
         self.notes_dir.mkdir(parents=True)
-        monkeypatch.setattr("ai_assist.status.ASSISTANT", tmp_path / "assistant")
+        monkeypatch.setattr("aya.status.ASSISTANT", tmp_path / "assistant")
 
     def test_no_file(self):
         result = _parse_daily_notes("2026-03-21")

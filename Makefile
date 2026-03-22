@@ -1,13 +1,27 @@
-VENV_BIN := .venv/bin
-RUFF := $(VENV_BIN)/ruff
-PYTEST := $(VENV_BIN)/pytest
+.PHONY: install lint fmt format type-check test check build clean
 
-.PHONY: lint test check
+install:
+	uv sync --all-groups
 
 lint:
-	$(RUFF) check src tests
+	uv run ruff check src tests
+	uv run ruff format --check src tests
+
+fmt format:
+	uv run ruff format src tests
+	uv run ruff check --fix src tests
+
+type-check:
+	uv run mypy src
 
 test:
-	$(PYTEST) -q
+	uv run pytest
 
-check: lint test
+check: lint type-check test
+
+build:
+	uv build
+
+clean:
+	rm -rf dist/ .mypy_cache/ .pytest_cache/ .ruff_cache/
+	find . -type d -name __pycache__ -not -path './.venv/*' -exec rm -rf {} +

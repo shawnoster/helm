@@ -13,7 +13,7 @@ import websockets
 from coincurve import PrivateKey as Secp256k1PrivateKey
 from websockets.asyncio.client import ClientConnection
 
-from ai_assist.packet import Packet
+from aya.packet import Packet
 
 logger = logging.getLogger(__name__)
 
@@ -149,9 +149,7 @@ class RelayClient:
         }
 
 
-async def _read_until_eose(
-    ws: ClientConnection, sub_id: str
-) -> AsyncIterator[dict]:
+async def _read_until_eose(ws: ClientConnection, sub_id: str) -> AsyncIterator[dict]:
     """Yield EVENT payloads until EOSE (end of stored events) from the relay."""
     async for raw_msg in ws:
         msg = json.loads(raw_msg)

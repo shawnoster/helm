@@ -6,8 +6,8 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from ai_assist.identity import Identity
-from ai_assist.packet import ConflictStrategy, ContentType, Packet
+from aya.identity import Identity
+from aya.packet import ConflictStrategy, ContentType, Packet
 
 
 @pytest.fixture
@@ -64,9 +64,7 @@ class TestPacketCreation:
 
 
 class TestPacketSigning:
-    def test_sign_and_verify(
-        self, basic_packet: Packet, work_identity: Identity
-    ) -> None:
+    def test_sign_and_verify(self, basic_packet: Packet, work_identity: Identity) -> None:
         signed = basic_packet.sign(work_identity)
         assert signed.signature is not None
         assert signed.verify(work_identity)
@@ -94,22 +92,19 @@ class TestPacketSigning:
     ) -> None:
         signed = basic_packet.sign(work_identity)
         # canonical bytes should be identical before and after signing
-        assert basic_packet.canonical_bytes() == signed.model_copy(
-            update={"signature": None}
-        ).canonical_bytes()
+        assert (
+            basic_packet.canonical_bytes()
+            == signed.model_copy(update={"signature": None}).canonical_bytes()
+        )
 
-    def test_verify_from_did(
-        self, basic_packet: Packet, work_identity: Identity
-    ) -> None:
+    def test_verify_from_did(self, basic_packet: Packet, work_identity: Identity) -> None:
         signed = basic_packet.sign(work_identity)
         assert signed.verify_from_did()
 
     def test_verify_from_did_unsigned(self, basic_packet: Packet) -> None:
         assert not basic_packet.verify_from_did()
 
-    def test_verify_from_did_tampered(
-        self, basic_packet: Packet, work_identity: Identity
-    ) -> None:
+    def test_verify_from_did_tampered(self, basic_packet: Packet, work_identity: Identity) -> None:
         signed = basic_packet.sign(work_identity)
         tampered = signed.model_copy(update={"content": "TAMPERED"})
         assert not tampered.verify_from_did()

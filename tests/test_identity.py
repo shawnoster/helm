@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ai_assist.identity import Identity, Profile, TrustedKey
+from aya.identity import Identity, Profile, TrustedKey
 
 
 class TestIdentityGeneration:
@@ -58,12 +58,16 @@ class TestProfilePersistence:
 
     def test_save_does_not_clobber_other_keys(self, tmp_path: Path) -> None:
         profile_path = tmp_path / "profile.json"
-        profile_path.write_text(json.dumps({
-            "alias": "Cipher",
-            "ship_mind_name": "Dramatically Unbothered",
-            "user_name": "Shawn",
-            "movement_reminders": True,
-        }))
+        profile_path.write_text(
+            json.dumps(
+                {
+                    "alias": "Cipher",
+                    "ship_mind_name": "Dramatically Unbothered",
+                    "user_name": "Shawn",
+                    "movement_reminders": True,
+                }
+            )
+        )
 
         p = Profile.load(profile_path)
         p.instances["work"] = Identity.generate("work")

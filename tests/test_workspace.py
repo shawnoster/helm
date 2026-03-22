@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from ai_assist.workspace import DIRS, bootstrap_workspace
+from aya.workspace import DIRS, bootstrap_workspace
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
@@ -169,13 +169,11 @@ class TestDotfileSetup:
         session_start = hooks.get("SessionStart", [])
         assert len(session_start) > 0
 
-        # Check that assist receive hook is present
+        # Check that aya receive hook is present
         all_commands = [
-            h.get("hooks", [{}])[0].get("command", "")
-            for h in session_start
-            if h.get("hooks")
+            h.get("hooks", [{}])[0].get("command", "") for h in session_start if h.get("hooks")
         ]
-        assert any("assist receive" in cmd for cmd in all_commands)
+        assert any("aya receive" in cmd for cmd in all_commands)
 
     def test_creates_health_crons_script(self, tmp_path: Path, fake_home: Path) -> None:
         root = tmp_path / "workspace"
@@ -230,16 +228,12 @@ class TestDotfileSetup:
             bootstrap_workspace(root, interactive=False, console=_silent_console())
 
         settings_path = fake_home / ".claude" / "settings.json"
-        first_run_count = len(
-            json.loads(settings_path.read_text())["hooks"]["SessionStart"]
-        )
+        first_run_count = len(json.loads(settings_path.read_text())["hooks"]["SessionStart"])
 
         with _patch_home(fake_home):
             bootstrap_workspace(root, interactive=False, console=_silent_console())
 
-        second_run_count = len(
-            json.loads(settings_path.read_text())["hooks"]["SessionStart"]
-        )
+        second_run_count = len(json.loads(settings_path.read_text())["hooks"]["SessionStart"])
 
         assert first_run_count == second_run_count
 
@@ -258,4 +252,4 @@ def _silent_console() -> MagicMock:
 def _patch_home(fake_home: Path):
     """Context manager that redirects Path.home() to a temp directory."""
     fake_home.mkdir(parents=True, exist_ok=True)
-    return patch("ai_assist.workspace.Path.home", return_value=fake_home)
+    return patch("aya.workspace.Path.home", return_value=fake_home)

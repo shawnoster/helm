@@ -29,10 +29,10 @@ class Identity:
 
     did: str
     label: str  # "work", "home", "laptop", etc.
-    private_key_hex: str     # ed25519 — identity / packet signing
-    public_key_hex: str      # ed25519
-    nostr_private_hex: str   # secp256k1 — Nostr transport
-    nostr_public_hex: str    # secp256k1 x-only (32 bytes)
+    private_key_hex: str  # ed25519 — identity / packet signing
+    public_key_hex: str  # ed25519
+    nostr_private_hex: str  # secp256k1 — Nostr transport
+    nostr_public_hex: str  # secp256k1 x-only (32 bytes)
 
     @classmethod
     def generate(cls, label: str) -> Identity:
@@ -128,7 +128,9 @@ class Profile:
             user_name=data.get("user_name", ""),
             instances=instances,
             trusted_keys=trusted,
-            default_relay=data.get("assistant_sync", {}).get("default_relay", "wss://relay.damus.io"),
+            default_relay=data.get("assistant_sync", {}).get(
+                "default_relay", "wss://relay.damus.io"
+            ),
             last_checked=data.get("assistant_sync", {}).get("last_checked", {}),
             ingested_ids=data.get("assistant_sync", {}).get("ingested_ids", []),
         )

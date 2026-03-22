@@ -13,27 +13,29 @@ from typing import Any
 from pydantic import BaseModel, Field, model_validator
 from ulid import ULID
 
-from ai_assist.identity import Identity
+from aya.identity import Identity
 
 PROTOCOL_VERSION = "assistant-sync/0.1"
 
 
 class ContentType(StrEnum):
     MARKDOWN = "text/markdown"
-    SEED = "application/ace-seed"     # conversation opener, not raw content
+    SEED = "application/ace-seed"  # conversation opener, not raw content
     JSON = "application/json"
 
 
 class ConflictStrategy(StrEnum):
     """How the receiving instance should handle conflicts with existing knowledge."""
-    LAST_WRITE_WINS = "last_write_wins"   # default — newer packet wins
+
+    LAST_WRITE_WINS = "last_write_wins"  # default — newer packet wins
     SURFACE_TO_USER = "surface_to_user"  # show both, let user decide
-    APPEND = "append"                    # add alongside, don't replace
-    SKIP_IF_NEWER = "skip_if_newer"      # discard if local is more recent
+    APPEND = "append"  # add alongside, don't replace
+    SKIP_IF_NEWER = "skip_if_newer"  # discard if local is more recent
 
 
 class SeedContent(BaseModel):
     """A conversation seed — tells the receiving assistant what to ask, not what to know."""
+
     opener: str
     context_summary: str
     open_questions: list[str] = Field(default_factory=list)
@@ -105,9 +107,9 @@ class Packet(BaseModel):
         if self.signature is None:
             return False
         try:
+            import base58
             from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-            import base58
             z_encoded = self.from_did.removeprefix("did:key:z")
             multicodec = base58.b58decode(z_encoded)
             pub_bytes = multicodec[2:]  # strip ed25519 multicodec prefix
@@ -191,11 +193,13 @@ class Packet(BaseModel):
         # Version check — warn on unknown minor, reject on unknown major
         if packet.version and "/" in packet.version:
             major = packet.version.split("/")[1].split(".")[0]
-            if major != PROTOCOL_VERSION.split("/")[1].split(".")[0]:
+            if major != PROTOCOL_VERSION.split("/")[1].split(".", maxsplit=1)[0]:
                 import logging
+
                 logging.getLogger(__name__).warning(
                     "Unknown protocol major version: %s (expected %s)",
-                    packet.version, PROTOCOL_VERSION,
+                    packet.version,
+                    PROTOCOL_VERSION,
                 )
         return packet
 

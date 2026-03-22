@@ -8,8 +8,8 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from ai_assist.identity import Identity
-from ai_assist.pair import (
+from aya.identity import Identity
+from aya.pair import (
     _TAG_PAIR_REQ,
     _TAG_PAIR_RESP,
     PAIR_TTL_SECONDS,
@@ -120,17 +120,13 @@ class TestPairResponseEvent:
         assert p_tags[0][1] == "initiator_pubkey_hex"
 
     def test_content_contains_did_and_label(self, home):
-        event = _build_pair_response(
-            home, "home", "init_pub", "req123", "wss://relay.example.com"
-        )
+        event = _build_pair_response(home, "home", "init_pub", "req123", "wss://relay.example.com")
         content = json.loads(event["content"])
         assert content["did"] == home.did
         assert content["label"] == "home"
 
     def test_type_tag_is_pair_response(self, home):
-        event = _build_pair_response(
-            home, "home", "init_pub", "req123", "wss://relay.example.com"
-        )
+        event = _build_pair_response(home, "home", "init_pub", "req123", "wss://relay.example.com")
         t_tags = [t for t in event["tags"] if t[0] == "t"]
         assert t_tags[0][1] == _TAG_PAIR_RESP
 
@@ -171,7 +167,7 @@ class TestPairingFlowMocked:
 
     async def test_publish_pair_request_returns_event_id(self, work):
         ws = _make_ws_mock([])
-        with patch("ai_assist.pair.websockets.connect", return_value=ws):
+        with patch("aya.pair.websockets.connect", return_value=ws):
             event_id = await publish_pair_request(work, "work", "code_hash", "wss://relay.test")
             assert event_id
             assert len(event_id) == 64  # sha256 hex
@@ -185,11 +181,11 @@ class TestPairingFlowMocked:
         # publish goes through a simple mock ws
         with (
             patch(
-                "ai_assist.pair._find_pair_request",
+                "aya.pair._find_pair_request",
                 return_value=request_event,
             ),
             patch(
-                "ai_assist.pair.websockets.connect",
+                "aya.pair.websockets.connect",
                 return_value=_make_ws_mock([]),
             ),
         ):
@@ -203,7 +199,7 @@ class TestPairingFlowMocked:
         # Relay returns EOSE immediately — no matching events
         ws = _make_ws_mock([json.dumps(["EOSE", "sub1"])])
 
-        with patch("ai_assist.pair.websockets.connect", return_value=ws):
+        with patch("aya.pair.websockets.connect", return_value=ws):
             result = await _find_pair_request("wss://relay.test", "nonexistent_hash")
 
         assert result is None
