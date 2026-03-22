@@ -41,11 +41,13 @@ SKILL_NAMES = [
     "eod",
     "status",
     "feature",
-    "dev-discovery",
-    "dev-plan",
-    "dev-implement",
-    "dev-architecture",
-    "dev-meeting",
+    "pivot",
+    "finish",
+    "discovery",
+    "plan",
+    "implement",
+    "architecture",
+    "meeting",
 ]
 
 
@@ -354,11 +356,13 @@ Invoke with `/skill-name` (Claude Code) or ask your assistant to run the task.
 | `/eod` | End of day — reconcile plan, stage tomorrow |
 | `/status` | Workspace readiness check |
 | `/feature` | Start a new feature (ticket → branch) |
-| `/dev-discovery` | Find relevant code for a project |
-| `/dev-architecture` | Understand how an existing system works |
-| `/dev-plan` | Design an implementation approach |
-| `/dev-implement` | Execute a plan and make code changes |
-| `/dev-meeting` | Capture meeting notes |
+| `/pivot` | Between tasks — tidy up, scan signals, suggest what's next |
+| `/finish` | Close out work — commit, push, PR, ticket, log |
+| `/discovery` | Find relevant code for a project |
+| `/architecture` | Understand how an existing system works |
+| `/plan` | Design an implementation approach |
+| `/implement` | Execute a plan and make code changes |
+| `/meeting` | Capture meeting notes |
 
 ---
 
@@ -370,9 +374,13 @@ _No projects yet. Create a directory in `projects/` to get started._
 
 ## Operating Cadence
 
-- **Session start**: read this file → scan project status files → load reminders → run `/status`
-- **During work**: update `status.md` as decisions are made
-- **Session end**: run `/eod` to reconcile and stage tomorrow
+- **Session start**: run `/status` → then `/morning`
+- **Starting a task**: run `/feature` (ticket → branch)
+- **During development**: `/discovery` → `/architecture` → `/plan` → `/implement`
+- **Completing a task**: run `/finish` (commit · push · PR · ticket)
+- **Between tasks**: run `/pivot` (tidy · scan signals · suggest next)
+- **In a meeting**: run `/meeting`
+- **Session end**: run `/eod` (reconcile · stage carry-overs · write tomorrow's stub)
 """
 
 

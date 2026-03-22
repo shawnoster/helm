@@ -12,6 +12,55 @@ So there we were, rootin' around for a name, and someone muttered *"aya"* — an
 
 That's this tool. Nae fuss. Nae ceremony. Just quietly doin' the job.
 
+## Skills
+
+`aya bootstrap` installs a set of AI-agnostic skills into your workspace. Any harness that reads `skills/*/SKILL.md` or `.claude/commands/*.md` can invoke them — Claude Code, Copilot, OpenCode, Windsurf, or any future tool.
+
+### Workflow cycle
+
+```
+STATUS ──────────────────► MORNING
+                              │
+               ┌──────────────┴────────────────────┐
+               │                                   │
+            FEATURE                          (open queue)
+         (ticket → branch)
+               │
+          DISCOVERY → ARCHITECTURE → PLAN → IMPLEMENT
+                                                │
+                                             FINISH
+                                  (commit · push · PR · ticket)
+                                                │
+                     ◄──────────────────── PIVOT ◄─── MEETING
+                                    (tidy · signals · next)    (stages your
+                                            │                 action items)
+                                      keep working
+                                            │
+                                          EOD
+                                  (reconcile · stage tomorrow)
+                                            │
+                                         MORNING ◄──────────────┘
+                                      (reads carry-overs)
+```
+
+### Skill reference
+
+| Skill | When to use |
+| ---- | ---- |
+| `/morning` | Start of day — briefing, priorities, calendar |
+| `/eod` | End of day — reconcile plan, stage tomorrow |
+| `/status` | Workspace readiness check |
+| `/feature` | Start a new feature (ticket → branch) |
+| `/pivot` | Between tasks — tidy up, scan signals, suggest what's next |
+| `/finish` | Close out work — commit, push, PR, ticket, log |
+| `/discovery` | Find relevant code for a project |
+| `/architecture` | Understand how an existing system works |
+| `/plan` | Design an implementation approach |
+| `/implement` | Execute a plan and make code changes |
+| `/meeting` | Capture meeting notes |
+
+Skills are AI-agnostic — no hardcoded tool names, just plain English descriptions. Any harness can pick up the right skill from conversational context: "what's next" → `/pivot`, "how does X work" → `/architecture`, "let's ship this" → `/finish`.
+
 ## Install
 
 ```bash

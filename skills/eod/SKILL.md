@@ -1,6 +1,10 @@
 ---
 name: eod
-description: End-of-day wrap — reconcile planned vs. actual, stage carry-overs, update done-log, write tomorrow's stub
+description: >
+  End-of-day wrap — reconcile planned vs. actual, stage carry-overs, update
+  done-log, write tomorrow's stub. Invoke when the user says "wrap up",
+  "end of day", "close out today", "I'm done for the day", or "let's
+  capture what got done".
 ---
 
 # End of Day
@@ -105,13 +109,20 @@ Check if `assistant/notes/daily/{TOMORROW}.md` exists.
 ```markdown
 ---
 date: "{TOMORROW}"
+carry_overs_from: "{TODAY}"
 ---
 
 # Daily Plan — {TOMORROW}
 
 ## Carry-overs from {TODAY}
 
-{List of ➡️ Carry and 🔄 In flight items with context note}
+<!--
+These items slipped from yesterday. Morning will pick these up automatically
+and place them at the top of Tier 1 — do not delete this section.
+-->
+
+{For each ➡️ Carry and 🔄 In flight item:}
+- [ ] {item description} — {ticket/PR ref} *(slip: {reason, e.g. "blocked: awaiting review", "displaced by X", "not started"})*
 
 ## Priority Stack
 
@@ -122,7 +133,9 @@ date: "{TOMORROW}"
 ## Activity Log
 ```
 
-- **Already exists**: append a `## Carry-overs from {TODAY}` section. Do not overwrite existing content.
+- **Already exists**: append a `## Carry-overs from {TODAY}` section with the same format. Do not overwrite existing content.
+
+**Always include the slip reason** — even if inferred. Mark inferred reasons with `(inferred)`. Morning reads this note to give context without re-deriving from scratch.
 
 Output: `✓ Tomorrow's stub → assistant/notes/daily/{TOMORROW}.md`
 

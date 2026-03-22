@@ -1,6 +1,10 @@
 ---
-name: dev-plan
-description: Enter PLANNING MODE — design an implementation approach collaboratively before writing any code
+name: plan
+description: >
+  Design an implementation approach before writing any code. Invoke when the
+  user says "let's plan this", "design the approach", "how should we implement
+  X", "think through the design", or "before we code, let's figure out the
+  approach".
 argument-hint: "<project-name>"
 ---
 
@@ -24,7 +28,7 @@ Set `projectPath` to `{projects_dir}/{project-name}`.
 
 Check for:
 - `discovery.md` — set `hasDiscovery` flag if present
-- `architecture.md` — set `hasArchitecture` flag; warn if missing ("Consider running /dev-architecture first")
+- `architecture.md` — set `hasArchitecture` flag; warn if missing ("Consider running /architecture first")
 - `plan.md` — set `hasPlan` flag; create from a blank template if missing
 
 ---
@@ -64,7 +68,7 @@ You are now in PLANNING MODE.
 - Identify open questions
 
 **Boundaries:**
-- Do NOT make actual code changes (that's `/dev-implement`)
+- Do NOT make actual code changes (that's `/implement`)
 - Stay in planning mode until the user explicitly switches
 
 **Approach:**
