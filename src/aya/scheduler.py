@@ -66,15 +66,11 @@ def _scheduler_file() -> Path:
 
 
 def _alerts_file() -> Path:
-    return globals().get("ALERTS_FILE") or (
-        _get_root() / "assistant" / "memory" / "alerts.json"
-    )
+    return globals().get("ALERTS_FILE") or (_get_root() / "assistant" / "memory" / "alerts.json")
 
 
 def _config_file() -> Path:
-    return globals().get("CONFIG_FILE") or (
-        _get_root() / "assistant" / "config.json"
-    )
+    return globals().get("CONFIG_FILE") or (_get_root() / "assistant" / "config.json")
 
 
 _LAZY_ATTRS: dict[str, Any] = {
