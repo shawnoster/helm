@@ -95,6 +95,9 @@ known-first-party = ["aya"]
     "RUF001",   # EN dashes intentional in time-range test data
     "PLC0415",  # module-level import inside test helper
 ]
+"src/aya/ci.py" = [
+    "S603",     # subprocess call — git/gh CLI, not untrusted input
+]
 "src/aya/workspace.py" = [
     "E501",     # long lines in embedded markdown/shell templates — can't wrap
     "S110",     # try-except-pass intentional (best-effort dotfile writes)
