@@ -1,6 +1,10 @@
 ---
-name: dev-meeting
-description: Capture meeting notes — structured format with decisions, action items, and follow-ups
+name: meeting
+description: >
+  Capture meeting notes in a structured format with decisions, action items,
+  and follow-ups. Invoke when the user says "take notes", "we're starting a
+  meeting", "capture this discussion", "stand-up notes", or "I need to
+  document this call".
 argument-hint: "[<project-name> | <meeting title>]"
 ---
 
@@ -12,8 +16,10 @@ Capture notes for a meeting in progress or just completed.
 
 ## 1. Determine storage location
 
-If a project name is provided and a corresponding directory exists under `projects/`, store the note at:
-`projects/{project-name}/meetings/{YYYY-MM-DD}.md`
+Read `projects_dir` from `assistant/config.json` (relative to the workspace root). If the config is missing or `projects_dir` is not set, fall back to `"projects"`.
+
+If a project name is provided and a corresponding directory exists under `{projects_dir}/`, store the note at:
+`{projects_dir}/{project-name}/meetings/{YYYY-MM-DD}.md`
 
 Otherwise store at:
 `assistant/notes/meetings/{YYYY-MM-DD}.md`
@@ -75,8 +81,18 @@ Capture notes as the conversation unfolds:
 - Keep the note factual and neutral — not editorialized
 
 After the meeting:
-- Review the action items with the user for accuracy
-- Ask if there's a follow-up meeting to note
-- Offer to post a summary to any connected communication channel (Slack, Teams, etc.) if appropriate
+
+1. Review the action items with the user for accuracy
+2. Ask if there's a follow-up meeting to note
+3. **Stage action items into the daily plan**: for any action item where the owner is the current user, offer to append it to `assistant/notes/daily/{TODAY}.md` (or tomorrow's stub if it's end of day):
+
+```markdown
+## Action items from meeting — {meeting title}
+- [ ] {action} *(from: {meeting title}, due: {date or "—"})*
+```
+
+   Ask: "Want me to add your action items to today's plan so they show up in `/pivot` and tomorrow's `/morning`?"
+
+4. Offer to post a summary to any connected communication channel (Slack, Teams, etc.) if appropriate
 
 Stay in meeting mode until the user says the meeting is over or asks to switch.

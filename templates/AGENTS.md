@@ -52,11 +52,13 @@ Invoke these with `/skill-name` (Claude Code) or by asking your assistant to run
 | `/eod` | End of day — reconcile plan, stage tomorrow |
 | `/status` | Workspace readiness check |
 | `/feature` | Start a new feature (ticket → branch) |
-| `/dev-discovery` | Find relevant code for a project |
-| `/dev-architecture` | Understand how an existing system works |
-| `/dev-plan` | Design an implementation approach |
-| `/dev-implement` | Execute a plan and make code changes |
-| `/dev-meeting` | Capture meeting notes |
+| `/pivot` | Between tasks — tidy up, scan signals, suggest what's next |
+| `/finish` | Close out work — commit, push, PR, ticket, log |
+| `/discovery` | Find relevant code for a project |
+| `/architecture` | Understand how an existing system works |
+| `/plan` | Design an implementation approach |
+| `/implement` | Execute a plan and make code changes |
+| `/meeting` | Capture meeting notes |
 
 ---
 
@@ -68,8 +70,12 @@ Invoke these with `/skill-name` (Claude Code) or by asking your assistant to run
 
 ## Operating Cadence
 
-- **Session start**: read this file → scan project status files → load reminders → run `/status`
-- **During work**: update `status.md` as decisions are made
+- **Session start**: run `/status` → then `/morning` for a full briefing
+- **Starting a task**: run `/feature` to scaffold ticket + branch
+- **During development**: `/discovery` → `/architecture` → `/plan` → `/implement`
+- **Completing a task**: run `/finish` to commit, push, PR, and update the ticket
+- **Between tasks**: run `/pivot` to tidy up, scan signals, and get the next suggestion
+- **In a meeting**: run `/meeting` to capture notes + stage action items
 - **Session end**: run `/eod` to reconcile and stage tomorrow
 
 ---

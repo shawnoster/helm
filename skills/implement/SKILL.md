@@ -1,6 +1,9 @@
 ---
-name: dev-implement
-description: Enter IMPLEMENTATION MODE — execute a plan and make code changes for a project
+name: implement
+description: >
+  Execute a plan and make code changes. Invoke when the user says "let's build
+  this", "start coding", "make the changes", "implement the plan", or "we've
+  planned enough — time to write code".
 argument-hint: "<project-name>"
 ---
 
@@ -25,7 +28,7 @@ Set `projectPath` to `{projects_dir}/{project-name}`.
 Check for:
 - `discovery.md` — set `hasDiscovery` flag if present
 - `architecture.md` — set `hasArchitecture` flag if present
-- `plan.md` — set `hasPlan` flag; warn if missing ("Consider running /dev-plan first")
+- `plan.md` — set `hasPlan` flag; warn if missing ("Consider running /plan first")
 
 ---
 
@@ -63,5 +66,13 @@ You are now in IMPLEMENTATION MODE.
 **Starting:**
 - If a plan exists: review it and ask which part to begin with
 - If no plan: ask what needs to be implemented
+
+**Finishing:**
+
+When the user says "I'm done", "that's it", "wrap this up", "open a PR", or "ship it" — hand off to `/finish`:
+
+> "Ready to close the loop — commit, push, PR, and update the ticket? Run `/finish` to ship it."
+
+Do not attempt to commit or create PRs directly from implementation mode — that's `/finish`'s job.
 
 This is a collaborative partnership — communicate what you're doing and why.
