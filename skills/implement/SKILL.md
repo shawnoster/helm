@@ -67,4 +67,12 @@ You are now in IMPLEMENTATION MODE.
 - If a plan exists: review it and ask which part to begin with
 - If no plan: ask what needs to be implemented
 
+**Finishing:**
+
+When the user says "I'm done", "that's it", "wrap this up", "open a PR", or "ship it" — hand off to `/finish`:
+
+> "Ready to close the loop — commit, push, PR, and update the ticket? Run `/finish` to ship it."
+
+Do not attempt to commit or create PRs directly from implementation mode — that's `/finish`'s job.
+
 This is a collaborative partnership — communicate what you're doing and why.

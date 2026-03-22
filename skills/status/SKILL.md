@@ -68,9 +68,19 @@ Output a status summary:
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-If DEGRADED, list the missing items and propose the smallest repair steps.
+**If DEGRADED**, list each failing item with its smallest repair step — output as runnable commands or direct actions where possible:
 
-If ONLINE, confirm the assistant persona and memory links are active.
+| Item | Fix |
+| ---- | ---- |
+| Identity missing | Run `aya identity init` |
+| Config missing | Run `aya bootstrap` or create `assistant/config.json` |
+| Integration offline | Check MCP server config / auth token |
+
+Then ask: "Want me to walk through these, or handle one now?"
+
+**If ONLINE**, confirm the assistant persona and memory links are active, then offer:
+
+> "All systems nominal. Want a morning briefing (`/morning`), or shall I check what's next (`/pivot`)?"
 
 ---
 

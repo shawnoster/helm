@@ -41,6 +41,8 @@ SKILL_NAMES = [
     "eod",
     "status",
     "feature",
+    "pivot",
+    "finish",
     "discovery",
     "plan",
     "implement",
@@ -354,6 +356,8 @@ Invoke with `/skill-name` (Claude Code) or ask your assistant to run the task.
 | `/eod` | End of day — reconcile plan, stage tomorrow |
 | `/status` | Workspace readiness check |
 | `/feature` | Start a new feature (ticket → branch) |
+| `/pivot` | Between tasks — tidy up, scan signals, suggest what's next |
+| `/finish` | Close out work — commit, push, PR, ticket, log |
 | `/discovery` | Find relevant code for a project |
 | `/architecture` | Understand how an existing system works |
 | `/plan` | Design an implementation approach |

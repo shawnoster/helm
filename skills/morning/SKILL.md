@@ -35,7 +35,15 @@ Note the current date and time. Determine:
 
 ---
 
-## 1. Workspace readiness
+## 1. Workspace readiness and carry-overs
+
+Check for `assistant/notes/daily/{TODAY}.md`. If it exists and has a `## Carry-overs` section (written by last night's `/eod`), **treat those items as the top of Tier 1** — do not re-derive them from integrations. Preserve the slip reason note so context isn't lost:
+
+```
+Carrying from {YESTERDAY}: {item} — {slip reason, e.g. "blocked: waiting on review"}
+```
+
+If today's file already has a full `## Priority Stack` (i.e. `/morning` was already run today), summarize what's already in the plan rather than rebuilding from scratch.
 
 Look for a `Makefile` with an `assistant-status` or `status-check` target in the workspace root. If present, run it and surface any DEGRADED state before proceeding.
 
@@ -183,4 +191,4 @@ After delivering the briefing:
 
 > "Anything missing? Want me to drill into a specific area?"
 
-Save the briefing to `assistant/notes/daily/{YYYY-MM-DD}.md` if that file doesn't already exist.
+Save the briefing to `assistant/notes/daily/{YYYY-MM-DD}.md` if that file doesn't already exist. If carry-overs were present, note the count: `({N} carried from yesterday)`.
