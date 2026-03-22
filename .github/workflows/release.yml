@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  schedule:
+    - cron: "0 10 * * 1"  # Every Monday at 10:00 UTC
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run — show what would be released without publishing"
+        type: boolean
+        default: false
+
+# No cancel-in-progress — never kill a release mid-flight
+concurrency:
+  group: ${{ github.workflow }}
+
+permissions:
+  contents: write   # tag + GitHub Release creation
+  id-token: write   # OIDC token for PyPI trusted publishing
+
+jobs:
+  release:
+    name: Semantic release
+    runs-on: ubuntu-latest
+    environment: pypi
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0  # full history required for version determination
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --all-groups
+
+      - name: Run semantic release
+        id: release
+        uses: python-semantic-release/python-semantic-release@v10
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          noop: ${{ inputs.dry_run || false }}
+
+      - name: Publish to PyPI
+        if: steps.release.outputs.released == 'true'
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # No username/password — uses OIDC trusted publishing
+        # Configure trusted publisher on PyPI:
+        #   Settings → Publishing → Add publisher
+        #   repo: shawnoster/helm, workflow: release.yml

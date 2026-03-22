@@ -8,9 +8,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
-from zoneinfo import ZoneInfo
 
-from ai_assist.scheduler import _find_workspace_root
+from aya.scheduler import _find_workspace_root
 
 ROOT = _find_workspace_root()
 ASSISTANT = ROOT / "assistant"
@@ -21,6 +20,7 @@ CONFIG = ASSISTANT / "config.json"
 
 # ── data ──────────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class CheckResult:
     name: str
@@ -29,6 +29,7 @@ class CheckResult:
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
+
 
 def _read_json(path: Path) -> dict[str, Any] | None:
     try:
@@ -43,6 +44,7 @@ def _exists(path: Path, name: str) -> CheckResult:
 
 
 # ── greeting ──────────────────────────────────────────────────────────────────
+
 
 def _greeting(now: datetime, user: str, ship: str) -> str:
     hour = now.hour
@@ -62,12 +64,15 @@ def _greeting(now: datetime, user: str, ship: str) -> str:
 def _time_flavor(now: datetime) -> str:
     hour = now.hour
     table = [
-        (range(6, 9),  "Coffee consumed? Let's make the day count."),
-        (range(9, 12), "Morning focus window. Best cognition of the day — use it before the meetings eat it."),
-        (range(12, 14),"Post-lunch territory. Carbs are the enemy of momentum. Push through."),
-        (range(14, 17),"Afternoon. Attention debt accumulates here. One thing at a time."),
-        (range(17, 19),"End-of-day push. Close the loop on something before you log off."),
-        (range(19, 22),"Late session. Diminishing returns are real. Mind the clock."),
+        (range(6, 9), "Coffee consumed? Let's make the day count."),
+        (
+            range(9, 12),
+            "Morning focus window. Best cognition of the day — use it before the meetings eat it.",
+        ),
+        (range(12, 14), "Post-lunch territory. Carbs are the enemy of momentum. Push through."),
+        (range(14, 17), "Afternoon. Attention debt accumulates here. One thing at a time."),
+        (range(17, 19), "End-of-day push. Close the loop on something before you log off."),
+        (range(19, 22), "Late session. Diminishing returns are real. Mind the clock."),
     ]
     for rng, flavor in table:
         if hour in rng:
@@ -76,6 +81,7 @@ def _time_flavor(now: datetime) -> str:
 
 
 # ── daily notes parser ────────────────────────────────────────────────────────
+
 
 def _parse_time(time_str: str, pm_context: bool = False) -> datetime | None:
     """Parse 'H:MM' or 'HH:MM' into today's datetime, respecting AM/PM context."""
@@ -99,24 +105,27 @@ def _parse_block_header(header: str) -> tuple[datetime | None, datetime | None, 
     '2:30–2:55 PM', '4:00 PM+', '11:05 AM'.
     Returns (start_dt, end_dt_or_None, label).
     """
-    upper = header.upper()
+    header.upper()
 
     # Range with explicit AM/PM on each side: '11:05 AM–12:00 PM'
     mixed_m = re.match(
         r"(\d{1,2}:\d{2})\s*(AM|PM)[\u2013\-](\d{1,2}:\d{2})\s*(AM|PM)",
-        header, re.IGNORECASE,
+        header,
+        re.IGNORECASE,
     )
     if mixed_m:
         start = _parse_time(mixed_m.group(1), mixed_m.group(2).upper() == "PM")
-        end   = _parse_time(mixed_m.group(3), mixed_m.group(4).upper() == "PM")
+        end = _parse_time(mixed_m.group(3), mixed_m.group(4).upper() == "PM")
         return start, end, header
 
     # Range with shared AM/PM suffix: '9:00–10:00 AM' or '2:30–2:55 PM'
-    shared_m = re.match(r"(\d{1,2}:\d{2})[\u2013\-](\d{1,2}:\d{2})\s*(AM|PM)", header, re.IGNORECASE)
+    shared_m = re.match(
+        r"(\d{1,2}:\d{2})[\u2013\-](\d{1,2}:\d{2})\s*(AM|PM)", header, re.IGNORECASE
+    )
     if shared_m:
         is_pm = shared_m.group(3).upper() == "PM"
         start = _parse_time(shared_m.group(1), is_pm)
-        end   = _parse_time(shared_m.group(2), is_pm)
+        end = _parse_time(shared_m.group(2), is_pm)
         if start and end and end <= start:  # e.g. 12:15–2:00 PM where start wraps
             end = end.replace(hour=end.hour + 12)
         return start, end, header
@@ -154,7 +163,9 @@ def _parse_daily_notes(today: str) -> dict[str, Any]:
         result["priorities"] = [
             ln.strip()
             for ln in prio_m.group(1).strip().splitlines()
-            if re.match(r"^\d+\.", ln.strip()) and "✅" not in ln and not ln.strip().startswith("~~")
+            if re.match(r"^\d+\.", ln.strip())
+            and "✅" not in ln
+            and not ln.strip().startswith("~~")
         ]
 
     # Filter out priorities referencing past time-of-day events
@@ -164,8 +175,9 @@ def _parse_daily_notes(today: str) -> dict[str, Any]:
         for p in result["priorities"]:
             m_time = time_ref_re.search(p)
             if m_time:
-                ref_time = _parse_time(m_time.group(1) + ":" + m_time.group(2),
-                                       m_time.group(3).upper() == "PM")
+                ref_time = _parse_time(
+                    m_time.group(1) + ":" + m_time.group(2), m_time.group(3).upper() == "PM"
+                )
                 if ref_time and ref_time < now:
                     continue
             filtered.append(p)
@@ -215,6 +227,7 @@ def _parse_daily_notes(today: str) -> dict[str, Any]:
 
 # ── cron watch summary ────────────────────────────────────────────────────────
 
+
 def _cron_watches() -> list[str]:
     """
     Extract named cron job entries from cron-schedules.md.
@@ -224,7 +237,7 @@ def _cron_watches() -> list[str]:
     if not path.exists():
         return []
 
-    job_id_re    = re.compile(r"`[0-9a-f]{8}`")          # e.g. `e6a8407c`
+    job_id_re = re.compile(r"`[0-9a-f]{8}`")  # e.g. `e6a8407c`
     cron_expr_re = re.compile(r"`[\d\*,/\- ]+ [\d\*,/\- ]+")  # e.g. `17,47 * * * *`
 
     watches = []
@@ -238,7 +251,7 @@ def _cron_watches() -> list[str]:
         end = stripped.index("**", 2)
         label = stripped[2:end]
         # Short descriptor: text after the label, before first parens or long dash
-        rest = stripped[end + 2:].strip(" —–-").strip()
+        rest = stripped[end + 2 :].strip(" —–-").strip()
         short = re.split(r"\s*[\(—]", rest)[0].strip(" -–").strip()
         entry = label + (f" — {short}" if short else "")
         watches.append(entry)
@@ -247,6 +260,7 @@ def _cron_watches() -> list[str]:
 
 
 # ── perspective ───────────────────────────────────────────────────────────────
+
 
 def _perspective() -> str:
     lines = [
@@ -262,27 +276,28 @@ def _perspective() -> str:
 
 # ── main ──────────────────────────────────────────────────────────────────────
 
+
 def main() -> None:
     now_local = datetime.now()
     today = now_local.strftime("%Y-%m-%d")
 
     # Profile
     profile = _read_json(PROFILE)
-    ship = profile.get("ship_mind_name", "GSV Unknown Vessel") if profile else "GSV Unknown Vessel"
-    user = profile.get("user_name", "Shawn") if profile else "Shawn"
+    profile.get("ship_mind_name", "GSV Unknown Vessel") if profile else "GSV Unknown Vessel"
+    profile.get("user_name", "Shawn") if profile else "Shawn"
     next_eval = profile.get("name_next_reevaluation_at", "unknown") if profile else "unknown"
 
     # System checks
     checks: list[CheckResult] = [
-        _exists(ROOT / "CLAUDE.md",                        "root CLAUDE"),
-        _exists(ASSISTANT / "AGENTS.md",                   "assistant AGENTS"),
-        _exists(ASSISTANT / "CLAUDE.md",                   "assistant CLAUDE"),
-        _exists(ASSISTANT / "ship_mind_persona.prompt",    "Ship persona prompt"),
-        _exists(MEMORY / "README.md",                      "memory::README.md"),
-        _exists(MEMORY / "preferences.md",                 "memory::preferences.md"),
-        _exists(MEMORY / "cron-schedules.md",              "memory::cron-schedules.md"),
-        _exists(MEMORY / "activity-tracker.md",            "memory::activity-tracker.md"),
-        _exists(MEMORY / "done-log.md",                    "memory::done-log.md"),
+        _exists(ROOT / "CLAUDE.md", "root CLAUDE"),
+        _exists(ASSISTANT / "AGENTS.md", "assistant AGENTS"),
+        _exists(ASSISTANT / "CLAUDE.md", "assistant CLAUDE"),
+        _exists(ASSISTANT / "ship_mind_persona.prompt", "Ship persona prompt"),
+        _exists(MEMORY / "README.md", "memory::README.md"),
+        _exists(MEMORY / "preferences.md", "memory::preferences.md"),
+        _exists(MEMORY / "cron-schedules.md", "memory::cron-schedules.md"),
+        _exists(MEMORY / "activity-tracker.md", "memory::activity-tracker.md"),
+        _exists(MEMORY / "done-log.md", "memory::done-log.md"),
         CheckResult("Assistant profile", profile is not None, str(PROFILE)),
         CheckResult("workflow config", _read_json(CONFIG) is not None, str(CONFIG)),
     ]
@@ -295,123 +310,98 @@ def main() -> None:
 
     # ── Output ──────────────────────────────────────────────────────────────
 
-    W = 72
-    print()
-    print("─" * W)
-
     # Greeting
-    print()
-    print(f"  {_greeting(now_local, user, ship)}")
-    print(f"  {_time_flavor(now_local)}")
-    print()
 
     # Systems — compact when green, verbose on failure
     if all_ok:
-        print(f"  ◈  Systems     {ok}/{total} green. Control plane nominal.")
+        pass
     else:
-        print(f"  ◈  Systems     ⚠  {ok}/{total} — degraded:")
         for c in checks:
             if not c.ok:
-                print(f"       ✗  {c.name:<24} {c.detail}")
+                pass
 
     if isinstance(next_eval, str) and len(next_eval) >= 10:
-        print(f"     Name rotation  {next_eval[:10]}")
-    print()
+        pass
 
     # Focus — current time block
     if notes["found"] and notes["current_block"]:
         blk = notes["current_block"]
-        print(f"  ◈  Right now   {blk['time']}")
-        for task in blk["tasks"]:
-            print(f"       →  {task[:70]}")
+        for _task in blk["tasks"]:
+            pass
     elif notes["found"] and notes["priorities"]:
-        remaining = len(notes["priorities"])
-        print(f"  ◈  Focus       {remaining} remaining priorities:")
-        for p in notes["priorities"][:3]:
-            print(f"       →  {p.strip()[:70]}")
+        len(notes["priorities"])
+        for _p in notes["priorities"][:3]:
+            pass
     elif notes["found"]:
-        print("  ◈  Focus       Day's priorities are done or past. Nice work.")
+        pass
     else:
-        print("  ◈  Focus       No daily notes found. Run /morning to load your day.")
-    print()
+        pass
 
     # Up next
     if notes["found"] and notes["next_block"]:
         nb = notes["next_block"]
-        print(f"  ◈  Up next     {nb['time']}")
-        for task in nb["tasks"][:2]:
-            print(f"       →  {task[:70]}")
-        print()
+        for _task in nb["tasks"][:2]:
+            pass
 
     # Reminders and alerts
     try:
-        from ai_assist.scheduler import get_due_reminders, get_upcoming_reminders, get_unseen_alerts, get_active_watches, LOCAL_TZ
+        from aya.scheduler import (
+            LOCAL_TZ,
+            get_active_watches,
+            get_due_reminders,
+            get_unseen_alerts,
+            get_upcoming_reminders,
+        )
+
         local_tz = LOCAL_TZ
         now_tz = datetime.now(local_tz)
 
         # Unseen alerts from daemon
         unseen = get_unseen_alerts()
         if unseen:
-            print(f"  🔔 Alerts      {len(unseen)} from background watcher:")
-            for a in unseen[:4]:
-                print(f"       📢 {a['source_item_id'][:8]}  {a['message'][:58]}")
+            for _a in unseen[:4]:
+                pass
             if len(unseen) > 4:
-                print(f"       … and {len(unseen) - 4} more")
-            print()
+                pass
 
         # Due reminders
         due = get_due_reminders(now_tz)
         if due:
-            print(f"  ⏰ Reminders   {len(due)} due NOW:")
             for r in due[:4]:
-                print(f"       🔴 {r['id'][:8]}  {r['message'][:60]}")
+                pass
             if len(due) > 4:
-                print(f"       … and {len(due) - 4} more")
-            print()
+                pass
 
         # Upcoming reminders
         upcoming = get_upcoming_reminders(now_tz, hours=12)
         if upcoming:
-            print(f"  ◈  Upcoming    {len(upcoming)} in next 12h:")
             for r in upcoming[:3]:
                 rd = datetime.fromisoformat(r["due_at"])
-                time_str = rd.strftime("%I:%M %p")
-                print(f"       ⏳ {time_str}  {r['message'][:58]}")
-            print()
+                rd.strftime("%I:%M %p")
 
         # Active watches
         active_watches = get_active_watches()
         if active_watches:
-            print(f"  ◈  Watches     {len(active_watches)} active:")
             for w in active_watches[:4]:
                 last = w.get("last_checked_at")
-                last_str = datetime.fromisoformat(last).strftime("%H:%M") if last else "never"
-                print(f"       👁 {w['id'][:8]}  {w['message'][:48]}  (last: {last_str})")
-            print()
+                datetime.fromisoformat(last).strftime("%H:%M") if last else "never"
     except Exception:
         pass  # scheduler module not available — skip silently
 
     # Active watches (legacy cron-schedules.md — fallback only)
-    if 'active_watches' not in dir() or not active_watches:
+    if "active_watches" not in dir() or not active_watches:
         watches = _cron_watches()
         if watches:
-            print("  ◈  Watches")
             for w in watches:
-                print(f"       ◦  {w[:66]}")
-            print()
+                pass
 
     # Perspective + sign-off
-    print(f"  ◈  {_perspective()}")
-    print()
     if all_ok:
-        print("  Bridge clear. What are we getting done?")
+        pass
     else:
-        print("  Bridge partially clear — repair flagged items above.")
-    print()
-    print("─" * W)
-    print()
+        pass
 
 
 def run_status() -> None:
-    """Entry point for assist status subcommand."""
+    """Entry point for aya status subcommand."""
     main()

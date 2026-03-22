@@ -15,6 +15,13 @@ That's this tool. Nae fuss. Nae ceremony. Just quietly doin' the job.
 ## Install
 
 ```bash
+# From PyPI (after first release)
+uvx aya
+
+# From GitHub — works today, no PyPI required
+uvx --from git+https://github.com/shawnoster/aya aya
+
+# From source
 git clone https://github.com/shawnoster/aya.git
 cd aya
 uv sync

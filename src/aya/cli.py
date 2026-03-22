@@ -1,4 +1,4 @@
-"""CLI entry point — assist command."""
+"""CLI entry point — aya command."""
 
 from __future__ import annotations
 
@@ -11,9 +11,9 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
-from ai_assist.identity import Identity, Profile, TrustedKey
-from ai_assist.packet import ConflictStrategy, ContentType, Packet, human_age
-from ai_assist.pair import (
+from aya.identity import Identity, Profile, TrustedKey
+from aya.packet import ConflictStrategy, ContentType, Packet, human_age
+from aya.pair import (
     PairingError,
     generate_code,
     hash_code,
@@ -21,10 +21,10 @@ from ai_assist.pair import (
     poll_for_pair_response,
     publish_pair_request,
 )
-from ai_assist.relay import RelayClient
+from aya.relay import RelayClient
 
 app = typer.Typer(
-    name="assist",
+    name="aya",
     help="Personal AI assistant toolkit — sync, schedule, bootstrap.",
     no_args_is_help=True,
 )
@@ -47,8 +47,7 @@ DEFAULT_PROFILE = Path.home() / ".copilot" / "assistant_profile.json"
 def _load_profile(profile_path: Path) -> Profile:
     if not profile_path.exists():
         err.print(
-            f"[red]Profile not found at {profile_path}.[/red]\n"
-            "Run [bold]assist init[/bold] first."
+            f"[red]Profile not found at {profile_path}.[/red]\nRun [bold]aya init[/bold] first."
         )
         raise typer.Exit(1)
     return Profile.load(profile_path)
@@ -76,14 +75,16 @@ def init(
     p.default_relay = relay
     p.save(profile)
 
-    console.print(Panel.fit(
-        f"[bold green]✓ Instance created[/bold green]\n\n"
-        f"Label:  [cyan]{label}[/cyan]\n"
-        f"DID:    [dim]{identity.did}[/dim]\n"
-        f"Relay:  [cyan]{relay}[/cyan]\n\n"
-        "[dim]Share your DID with other instances you want to trust.[/dim]",
-        title="assist — init",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold green]✓ Instance created[/bold green]\n\n"
+            f"Label:  [cyan]{label}[/cyan]\n"
+            f"DID:    [dim]{identity.did}[/dim]\n"
+            f"Relay:  [cyan]{relay}[/cyan]\n\n"
+            "[dim]Share your DID with other instances you want to trust.[/dim]",
+            title="aya — init",
+        )
+    )
 
 
 # ── trust ─────────────────────────────────────────────────────────────────────
@@ -137,7 +138,7 @@ def pack(
     p = _load_profile(profile)
     local = p.instances.get(instance)
     if not local:
-        err.print(f"[red]Instance '{instance}' not found. Run assist init.[/red]")
+        err.print(f"[red]Instance '{instance}' not found. Run aya init.[/red]")
         raise typer.Exit(1)
 
     # Resolve recipient DID
@@ -223,7 +224,9 @@ def receive(
     relay: str = typer.Option(None),
     instance: str = typer.Option("default"),
     auto_ingest: bool = typer.Option(False, help="Ingest all trusted packets without prompting"),
-    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress output when inbox is empty (for startup hooks)"),
+    quiet: bool = typer.Option(
+        False, "--quiet", "-q", help="Suppress output when inbox is empty (for startup hooks)"
+    ),
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Poll for pending packets and surface them for review."""
@@ -244,6 +247,7 @@ def receive(
         last_ts = p.last_checked.get(relay_url)
         if last_ts:
             from datetime import datetime as _dt
+
             since = _dt.fromisoformat(last_ts)
 
         packets: list[Packet] = []
@@ -258,6 +262,7 @@ def receive(
         # Update last_checked timestamp
         from datetime import UTC
         from datetime import datetime as _dt
+
         p.last_checked[relay_url] = _dt.now(UTC).isoformat()
         p.save(profile)
 
@@ -359,7 +364,7 @@ def pair(
     p = _load_profile(profile)
     local = p.instances.get(instance)
     if not local:
-        err.print(f"[red]Instance '{instance}' not found. Run assist init first.[/red]")
+        err.print(f"[red]Instance '{instance}' not found. Run aya init first.[/red]")
         raise typer.Exit(1)
 
     relay_url = relay or p.default_relay
@@ -374,12 +379,14 @@ def pair(
 
         p.trusted_keys[trusted.label] = trusted
         p.save(profile)
-        console.print(Panel.fit(
-            f"[bold green]✓ Paired![/bold green]\n\n"
-            f"Trusted: [cyan]{trusted.label}[/cyan]\n"
-            f"DID:     [dim]{trusted.did}[/dim]",
-            title="assist — pair (joined)",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold green]✓ Paired![/bold green]\n\n"
+                f"Trusted: [cyan]{trusted.label}[/cyan]\n"
+                f"DID:     [dim]{trusted.did}[/dim]",
+                title="aya — pair (joined)",
+            )
+        )
 
     else:
         # ── Initiator mode ───────────────────────────────────────────
@@ -388,18 +395,18 @@ def pair(
 
         # Publish the request
         console.print("[dim]Publishing pairing request…[/dim]")
-        request_event_id = asyncio.run(
-            publish_pair_request(local, label, code_h, relay_url)
-        )
+        request_event_id = asyncio.run(publish_pair_request(local, label, code_h, relay_url))
 
         # Show the code — user reads this aloud or types it on the other machine
-        console.print(Panel.fit(
-            f"[bold]Pairing code:[/bold]  [bold cyan]{pairing_code}[/bold cyan]\n\n"
-            "Enter this on your other machine:\n"
-            f"  [dim]assist pair --code {pairing_code} --label <their-label>[/dim]\n\n"
-            "[dim]Expires in 10 minutes.[/dim]",
-            title="assist — pair",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold]Pairing code:[/bold]  [bold cyan]{pairing_code}[/bold cyan]\n\n"
+                "Enter this on your other machine:\n"
+                f"  [dim]aya pair --code {pairing_code} --label <their-label>[/dim]\n\n"
+                "[dim]Expires in 10 minutes.[/dim]",
+                title="aya — pair",
+            )
+        )
 
         # Poll for response
         with console.status("[bold cyan]Waiting for the other instance…[/bold cyan]"):
@@ -410,18 +417,20 @@ def pair(
         if trusted is None:
             console.print(
                 "[bold yellow]Pairing timed out.[/bold yellow] "
-                "Run [bold]assist pair[/bold] again for a new code."
+                "Run [bold]aya pair[/bold] again for a new code."
             )
             raise typer.Exit(1)
 
         p.trusted_keys[trusted.label] = trusted
         p.save(profile)
-        console.print(Panel.fit(
-            f"[bold green]✓ Paired![/bold green]\n\n"
-            f"Trusted: [cyan]{trusted.label}[/cyan]\n"
-            f"DID:     [dim]{trusted.did}[/dim]",
-            title="assist — pair (complete)",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold green]✓ Paired![/bold green]\n\n"
+                f"Trusted: [cyan]{trusted.label}[/cyan]\n"
+                f"DID:     [dim]{trusted.did}[/dim]",
+                title="aya — pair (complete)",
+            )
+        )
 
 
 # ── schedule subcommands ──────────────────────────────────────────────────────
@@ -434,10 +443,13 @@ def schedule_remind(
     tag: str = typer.Option("", "--tag", "-t", help="Comma-separated tags"),
 ) -> None:
     """Add a one-shot reminder."""
-    from ai_assist.scheduler import add_reminder, parse_due
+    from aya.scheduler import add_reminder, parse_due
+
     item = add_reminder(message, due, tag)
     due_dt = parse_due(due)
-    console.print(f"[green]✓[/green] Reminder {item['id'][:8]} — {due_dt.strftime('%a %b %d, %I:%M %p')}")
+    console.print(
+        f"[green]✓[/green] Reminder {item['id'][:8]} — {due_dt.strftime('%a %b %d, %I:%M %p')}"
+    )
     console.print(f"  {message}")
 
 
@@ -447,12 +459,15 @@ def schedule_watch(
     target: str = typer.Argument(help="Target: owner/repo#123, JQL, or TICKET-123"),
     message: str = typer.Option(..., "--message", "-m", help="Watch description"),
     tag: str = typer.Option("", "--tag", "-t", help="Comma-separated tags"),
-    condition: str = typer.Option("", "--condition", "-c", help="Condition: approved_or_merged, etc."),
+    condition: str = typer.Option(
+        "", "--condition", "-c", help="Condition: approved_or_merged, etc."
+    ),
     interval: int = typer.Option(30, "--interval", "-i", help="Poll interval minutes"),
     remove_when: str = typer.Option("", help="Auto-remove: merged_or_closed"),
 ) -> None:
     """Add a condition-based watch."""
-    from ai_assist.scheduler import add_watch
+    from aya.scheduler import add_watch
+
     try:
         item = add_watch(provider, target, message, tag, condition, interval, remove_when)
     except ValueError as exc:
@@ -469,7 +484,8 @@ def schedule_list(
     item_type: str = typer.Option(None, "--type", help="Filter: reminder, watch, recurring, event"),
 ) -> None:
     """List scheduled items."""
-    from ai_assist.scheduler import _display_items, list_items
+    from aya.scheduler import _display_items, list_items
+
     items = list_items(show_all=all_items, item_type=item_type)
     _display_items(items)
 
@@ -479,12 +495,11 @@ def schedule_check(
     as_json: bool = typer.Option(False, "--json", help="Output as JSON"),
 ) -> None:
     """Check for due reminders and alerts."""
-    from ai_assist.scheduler import check_due
+    from aya.scheduler import check_due
+
     due_items, unseen = check_due()
 
     if as_json:
-        import json as _json
-        print(_json.dumps({"due_reminders": due_items, "alerts": unseen}, indent=2, default=str))
         return
 
     if not due_items and not unseen:
@@ -495,8 +510,11 @@ def schedule_check(
         console.print(f"\n  [bold]⏰ {len(due_items)} reminder(s) due:[/bold]")
         for r in due_items:
             from datetime import datetime
+
             due_dt = datetime.fromisoformat(r["due_at"])
-            console.print(f"    🔴 {r['id'][:8]}  {due_dt.strftime('%I:%M %p')}  {r['message'][:55]}")
+            console.print(
+                f"    🔴 {r['id'][:8]}  {due_dt.strftime('%I:%M %p')}  {r['message'][:55]}"
+            )
 
     if unseen:
         console.print(f"\n  [bold]🔔 {len(unseen)} alert(s):[/bold]")
@@ -509,7 +527,8 @@ def schedule_dismiss(
     item_id: str = typer.Argument(help="Item ID (prefix match ok)"),
 ) -> None:
     """Dismiss an item."""
-    from ai_assist.scheduler import dismiss_item
+    from aya.scheduler import dismiss_item
+
     try:
         item = dismiss_item(item_id)
     except ValueError as exc:
@@ -521,16 +540,21 @@ def schedule_dismiss(
 @schedule_app.command("snooze")
 def schedule_snooze(
     item_id: str = typer.Argument(help="Item ID (prefix match ok)"),
-    until: str = typer.Option(..., "--until", "-u", help="Snooze until: 'in 1 hour', 'tomorrow 9am'"),
+    until: str = typer.Option(
+        ..., "--until", "-u", help="Snooze until: 'in 1 hour', 'tomorrow 9am'"
+    ),
 ) -> None:
     """Snooze a reminder."""
-    from ai_assist.scheduler import snooze_item
+    from aya.scheduler import snooze_item
+
     try:
         item, snooze_until = snooze_item(item_id, until)
     except ValueError as exc:
         err.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
-    console.print(f"💤 Snoozed {item['id'][:8]} until {snooze_until.strftime('%a %b %d, %I:%M %p')}")
+    console.print(
+        f"💤 Snoozed {item['id'][:8]} until {snooze_until.strftime('%a %b %d, %I:%M %p')}"
+    )
 
 
 @schedule_app.command("poll")
@@ -538,7 +562,8 @@ def schedule_poll(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress output on no changes"),
 ) -> None:
     """Run one poll cycle (for daemon/cron)."""
-    from ai_assist.scheduler import run_poll
+    from aya.scheduler import run_poll
+
     run_poll(quiet=quiet)
 
 
@@ -548,12 +573,11 @@ def schedule_alerts(
     mark_seen: bool = typer.Option(False, "--mark-seen", help="Mark all alerts as seen"),
 ) -> None:
     """Show alerts from background watcher."""
-    from ai_assist.scheduler import show_alerts
+    from aya.scheduler import show_alerts
+
     unseen = show_alerts(as_json=as_json, mark_seen=mark_seen)
 
     if as_json:
-        import json as _json
-        print(_json.dumps(unseen, indent=2, default=str))
         return
 
     if not unseen:
@@ -563,6 +587,7 @@ def schedule_alerts(
     console.print(f"\n  [bold]🔔 {len(unseen)} alert(s):[/bold]")
     for a in unseen:
         from datetime import datetime
+
         ts = datetime.fromisoformat(a["created_at"]).strftime("%b %d %I:%M %p")
         console.print(f"    📢 {a['source_item_id'][:8]}  {ts}  {a['message'][:55]}")
 
@@ -575,10 +600,13 @@ def schedule_alerts(
 
 @app.command()
 def profile(
-    profile_path: Path = typer.Option(DEFAULT_PROFILE, "--profile", help="Path to assistant_profile.json"),
+    profile_path: Path = typer.Option(
+        DEFAULT_PROFILE, "--profile", help="Path to assistant_profile.json"
+    ),
 ) -> None:
     """Initialize or rotate the persistent assistant profile."""
-    from ai_assist.profile import PROFILE_PATH, ensure_profile
+    from aya.profile import PROFILE_PATH, ensure_profile
+
     path = profile_path if str(profile_path) != str(DEFAULT_PROFILE) else PROFILE_PATH
     p = ensure_profile(path)
     console.print(f"[green]✓[/green] Profile: [dim]{path}[/dim]")
@@ -593,7 +621,8 @@ def profile(
 @app.command()
 def status() -> None:
     """Workspace readiness check — systems, schedule, focus."""
-    from ai_assist.status import run_status
+    from aya.status import run_status
+
     run_status()
 
 
@@ -608,7 +637,7 @@ def bootstrap(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompts"),
 ) -> None:
     """Scaffold a personal assistant workspace."""
-    from ai_assist.workspace import bootstrap_workspace
+    from aya.workspace import bootstrap_workspace
 
     bootstrap_workspace(root.expanduser().resolve(), interactive=not yes, console=console)
 
@@ -624,7 +653,7 @@ def _resolve_did(to: str, profile: Profile) -> str:
     if not key:
         err.print(
             f"[red]Unknown recipient '{to}'.[/red]\n"
-            "Use a full DID or add with [bold]assist trust[/bold]."
+            "Use a full DID or add with [bold]aya trust[/bold]."
         )
         raise typer.Exit(1)
     return key.did
@@ -681,20 +710,25 @@ def _ingest(packet: Packet) -> None:
 
     if packet.content_type == "application/ace-seed":
         seed = packet.content if isinstance(packet.content, dict) else {}
-        console.print(Panel(
-            f"[bold]Opening question:[/bold]\n{seed.get('opener', '')}\n\n"
-            f"[bold]Context:[/bold]\n{seed.get('context_summary', '')}\n\n"
-            + (
-                "[bold]Open questions:[/bold]\n"
-                + "\n".join(f"  • {q}" for q in seed.get("open_questions", []))
-                if seed.get("open_questions") else ""
-            ),
-            title="Conversation Seed",
-            border_style="cyan",
-        ))
+        console.print(
+            Panel(
+                f"[bold]Opening question:[/bold]\n{seed.get('opener', '')}\n\n"
+                f"[bold]Context:[/bold]\n{seed.get('context_summary', '')}\n\n"
+                + (
+                    "[bold]Open questions:[/bold]\n"
+                    + "\n".join(f"  • {q}" for q in seed.get("open_questions", []))
+                    if seed.get("open_questions")
+                    else ""
+                ),
+                title="Conversation Seed",
+                border_style="cyan",
+            )
+        )
     else:
-        console.print(Panel(
-            str(packet.content),
-            title=packet.intent,
-            subtitle=f"[dim]{packet.id[:8]} · {packet.sent_at[:10]}[/dim]",
-        ))
+        console.print(
+            Panel(
+                str(packet.content),
+                title=packet.intent,
+                subtitle=f"[dim]{packet.id[:8]} · {packet.sent_at[:10]}[/dim]",
+            )
+        )
