@@ -527,9 +527,7 @@ class TestMultiRelayPublish:
         with patch("aya.relay.websockets.connect", side_effect=fake_connect):
             event_id = await multi_client.publish(packet, recipient.nostr_public_hex)
 
-        assert len(connected_urls) == 2
-        assert "wss://relay1.example.com" in connected_urls
-        assert "wss://relay2.example.com" in connected_urls
+        assert set(connected_urls) == {"wss://relay1.example.com", "wss://relay2.example.com"}
         assert len(event_id) == 64
 
     async def test_publish_succeeds_if_one_relay_accepts(
