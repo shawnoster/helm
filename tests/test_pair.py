@@ -223,8 +223,9 @@ class TestPollForPairResponseErrors:
 
     async def test_returns_none_on_eose_timeout(self, work):
         """EOSE timeout is normal operation — returns None, no exception raised."""
-        with patch("aya.pair._read_until_eose", side_effect=TimeoutError), patch(
-            "aya.pair.asyncio.sleep"
+        with (
+            patch("aya.pair._read_until_eose", side_effect=TimeoutError),
+            patch("aya.pair.asyncio.sleep"),
         ):
             mock_ws = AsyncMock()
             mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
@@ -279,8 +280,9 @@ class TestPollForPairResponseErrors:
             async def __aexit__(self, *args):
                 pass
 
-        with patch("aya.pair.websockets.connect", return_value=FilterCapturingWS()), patch(
-            "aya.pair.asyncio.sleep"
+        with (
+            patch("aya.pair.websockets.connect", return_value=FilterCapturingWS()),
+            patch("aya.pair.asyncio.sleep"),
         ):
             await poll_for_pair_response(
                 "wss://relay.test", work.nostr_public_hex, "req_event_id_abc", timeout_seconds=1
@@ -301,8 +303,9 @@ class TestPollForPairResponseErrors:
             sleep_durations.append(t)
             await original_sleep(0)  # don't actually wait
 
-        with patch("aya.pair._read_until_eose", side_effect=TimeoutError), patch(
-            "aya.pair.asyncio.sleep", side_effect=capturing_sleep
+        with (
+            patch("aya.pair._read_until_eose", side_effect=TimeoutError),
+            patch("aya.pair.asyncio.sleep", side_effect=capturing_sleep),
         ):
             mock_ws = AsyncMock()
             mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
