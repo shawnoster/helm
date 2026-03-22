@@ -603,6 +603,29 @@ def _setup_dotfiles(home: Path, con: Console) -> int:
         )
         changes += 1
 
+    # Add aya ci watch PostToolUse hook if not present
+    post_tool_use = hooks.setdefault("PostToolUse", [])
+    ci_watch_exists = any(
+        "aya ci watch" in (h.get("hooks", [{}])[0].get("command", "") if h.get("hooks") else "")
+        for h in post_tool_use
+    )
+    if not ci_watch_exists:
+        post_tool_use.insert(
+            0,
+            {
+                "matcher": "Bash",
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "aya ci watch 2>/dev/null || true",
+                        "statusMessage": "Watching CI...",
+                        "asyncRewake": True,
+                    }
+                ],
+            },
+        )
+        changes += 1
+
     settings_path.write_text(json.dumps(settings, indent=2))
     if changes:
         con.print(f"  [green]+[/green] {settings_path} (hooks added)")

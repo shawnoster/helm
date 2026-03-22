@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -56,6 +57,15 @@ schedule_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(schedule_app, name="schedule")
+
+# ── CI sub-app ────────────────────────────────────────────────────────────────
+
+ci_app = typer.Typer(
+    name="ci",
+    help="CI integration — watch checks, report failures.",
+    no_args_is_help=True,
+)
+app.add_typer(ci_app, name="ci")
 
 console = Console()
 err = Console(stderr=True)
@@ -587,6 +597,24 @@ def schedule_alerts(
 
     if mark_seen:
         console.print(f"\n  Marked {len(unseen)} alert(s) as seen.")
+
+
+# ── ci ────────────────────────────────────────────────────────────────────────
+
+
+@ci_app.command("watch")
+def ci_watch() -> None:
+    """Watch CI checks after git push. Reads Claude hook JSON from stdin."""
+    import sys
+
+    from aya.ci import watch_pr_checks
+
+    try:
+        payload = json.loads(sys.stdin.read())
+    except (json.JSONDecodeError, ValueError):
+        payload = {}
+
+    raise typer.Exit(watch_pr_checks(payload))
 
 
 # ── profile ───────────────────────────────────────────────────────────────────
