@@ -232,12 +232,14 @@ class TestMain:
 
         profile_file = tmp_path / "profile.json"
         profile_file.write_text(
-            json.dumps({
-                "ship_mind_name": "GSV Test",
-                "user_name": "Test",
-                # yesterday — will trigger the "due" branch
-                "name_next_reevaluation_at": "2026-03-22T00:00:00Z",
-            })
+            json.dumps(
+                {
+                    "ship_mind_name": "GSV Test",
+                    "user_name": "Test",
+                    # yesterday — will trigger the "due" branch
+                    "name_next_reevaluation_at": "2026-03-22T00:00:00Z",
+                }
+            )
         )
         monkeypatch.setattr("aya.status.PROFILE", profile_file)
         monkeypatch.setattr("aya.status.get_unseen_alerts", list)

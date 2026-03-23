@@ -442,9 +442,7 @@ def main(console: Console | None = None) -> None:
     console.print(Rule(style="dim"))
     console.print(f"[dim italic]{_perspective()}[/dim italic]")
     if not all_ok:
-        console.print(
-            f"[yellow]⚠ {total - ok} check(s) degraded — verify paths above.[/yellow]"
-        )
+        console.print(f"[yellow]⚠ {total - ok} check(s) degraded — verify paths above.[/yellow]")
     console.print()
 
 
