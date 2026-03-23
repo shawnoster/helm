@@ -111,7 +111,9 @@ def bootstrap_workspace(
         else:
             scripts_to_copy.append(script_name)
 
-    skills_to_install, skills_to_skip = _plan_skills(root, skills_source_dir, SKILL_NAMES)
+    skills_to_install, skills_to_skip, skills_missing = _plan_skills(
+        root, skills_source_dir, SKILL_NAMES
+    )
 
     # Show plan
     if dirs_to_create:
@@ -136,6 +138,12 @@ def bootstrap_workspace(
         con.print("[bold]Skills to install:[/bold]")
         for name in skills_to_install:
             con.print(f"  [green]+[/green] .claude/commands/{name}.md  +  skills/{name}/SKILL.md")
+        con.print()
+
+    if skills_missing:
+        con.print("[yellow]Skills not bundled (source not found):[/yellow]")
+        for name in skills_missing:
+            con.print(f"  [yellow]⚠[/yellow] {name}")
         con.print()
 
     skipped = [
@@ -616,20 +624,21 @@ def _plan_skills(
     root: Path,
     skills_source_dir: Path,
     skill_names: list[str],
-) -> tuple[list[str], list[str]]:
-    """Return (to_install, to_skip) skill name lists."""
-    to_install, to_skip = [], []
+) -> tuple[list[str], list[str], list[str]]:
+    """Return (to_install, to_skip, missing) skill name lists."""
+    to_install, to_skip, missing = [], [], []
     for name in skill_names:
         source = skills_source_dir / name / "SKILL.md"
         if not source.exists():
-            continue  # skill not bundled — skip silently
+            missing.append(name)
+            continue
         legacy_target = root / ".claude" / "commands" / f"{name}.md"
         skill_target = root / "skills" / name / "SKILL.md"
         if legacy_target.exists() or skill_target.exists():
             to_skip.append(name)
         else:
             to_install.append(name)
-    return to_install, to_skip
+    return to_install, to_skip, missing
 
 
 def _install_skills(
@@ -641,6 +650,9 @@ def _install_skills(
     """Copy each skill to both .claude/commands/ (legacy) and skills/ (SKILL.md format)."""
     for name in skill_names:
         source = skills_source_dir / name / "SKILL.md"
+        if not source.exists():
+            con.print(f"  [yellow]⚠[/yellow] skill: {name} (source not found, skipping)")
+            continue
         content = source.read_text()
 
         # Legacy flat format — Claude Code .claude/commands/
@@ -722,6 +734,26 @@ def _setup_dotfiles(home: Path, con: Console) -> int:
         )
         changes += 1
 
+    # Add aya schedule pending hook if not present
+    pending_hook_exists = any(
+        "aya schedule pending"
+        in (h.get("hooks", [{}])[0].get("command", "") if h.get("hooks") else "")
+        for h in session_start
+    )
+    if not pending_hook_exists:
+        session_start.append(
+            {
+                "hooks": [
+                    {
+                        "type": "command",
+                        "command": "aya schedule pending --format text 2>/dev/null || true",
+                        "statusMessage": "Loading scheduler...",
+                    }
+                ]
+            }
+        )
+        changes += 1
+
     # Add aya ci watch PostToolUse hook if not present
     post_tool_use = hooks.setdefault("PostToolUse", [])
     ci_watch_exists = any(
@@ -766,14 +798,14 @@ def _setup_dotfiles(home: Path, con: Console) -> int:
     return changes
 
 
-def _assistant_profile_json() -> str:
+def _assistant_profile_json(user_name: str = "") -> str:
     """Default assistant profile — persona, alias, movement reminders."""
     return json.dumps(
         {
             "alias": "Ace",
             "ship_mind_name": "",
             "persona": "Culture Ship Mind: sharp snark, genuine care, human-preserving bias.",
-            "user_name": "Shawn",
+            "user_name": user_name,
             "movement_reminders": {
                 "micro_stretch_every_minutes": 30,
                 "stand_up_every_minutes": 60,

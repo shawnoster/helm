@@ -100,13 +100,96 @@ uv run aya inbox
 
 | Command | What it does |
 | ---- | ---- |
+| `aya bootstrap` | Scaffold a workspace — config, skills, hooks, dotfiles |
+| `aya reset` | Remove bootstrap files, keep persona and user data |
 | `aya init` | Generate identity keypair for this instance |
 | `aya pair` | Pair two instances via short-lived relay code |
 | `aya trust` | Manually trust a DID |
 | `aya pack` | Create a signed knowledge packet |
 | `aya send` | Publish a packet to a Nostr relay |
+| `aya dispatch` | Pack + send in one step (no temp file) |
 | `aya inbox` | List pending packets |
 | `aya receive` | Review and ingest packets |
+| `aya schedule tick` | One scheduler cycle — poll watches, expire alerts |
+| `aya schedule pending` | Show unclaimed alerts + session crons (SessionStart hook) |
+| `aya schedule status` | Scheduler overview — watches, reminders, deliveries |
+| `aya schedule remind` | Add a one-shot reminder |
+| `aya schedule watch` | Add a polling watch (GitHub PR, Jira ticket/query) |
+
+## Bootstrap
+
+`aya bootstrap` scaffolds a personal assistant workspace. Run it once on a new machine, re-run safely anytime — it's fully idempotent.
+
+```bash
+aya bootstrap --root ~/guild
+```
+
+### What gets created
+
+```
+~/guild/
+├── CLAUDE.md                     # Root config — links to assistant docs
+├── AGENTS.md                     # Workspace structure overview
+├── Makefile                      # Convenience targets for scheduler
+├── assistant/
+│   ├── AGENTS.md                 # Duplicate for harness auto-discovery
+│   ├── CLAUDE.md                 # Behavioral instructions
+│   ├── persona.md                # Ship's Mind voice and tone
+│   ├── config.json               # Workspace paths (projects_dir, code_dirs)
+│   ├── memory/
+│   │   ├── scheduler.json        # Persistent reminders, watches, crons
+│   │   └── README.md             # Memory hub docs
+│   ├── notes/                    # daily/, meetings/, ideas/
+│   ├── templates/                # Project file templates
+│   └── rules/                    # Repo conventions
+├── projects/                     # Per-project status, plans, discovery
+├── code/                         # Cloned code repositories
+├── scripts/                      # Framework scripts (scheduler, status)
+├── .claude/commands/             # Skills in legacy Claude Code format
+└── skills/                       # Skills in harness-agnostic SKILL.md format
+```
+
+### Dotfiles
+
+Bootstrap also sets up user-level config:
+
+| File | Purpose |
+| ---- | ---- |
+| `~/.copilot/assistant_profile.json` | Persona, alias, movement reminder cadence |
+| `~/.claude/settings.json` | SessionStart hooks (health crons, packet receive, scheduler pending) |
+| `~/.claude/hooks/health_crons.sh` | Registers micro-nudge and stand-and-walk cron jobs |
+
+Existing dotfiles are merged, not overwritten. Hooks are deduplicated on re-run.
+
+### Idempotency
+
+- Existing files are skipped (your edits are preserved)
+- Existing hooks are not duplicated
+- Running `aya bootstrap` twice is a no-op
+
+## Reset
+
+`aya reset` removes everything bootstrap created, keeping your work:
+
+```bash
+aya reset --root ~/guild
+```
+
+### Preserved on reset
+
+- `assistant/persona.md` — your customized persona
+- `assistant/memory/scheduler.json` — your reminders and watches
+- `assistant/notes/` — all daily logs, meeting notes, ideas
+- `projects/` — all project status, plans, discovery docs
+- Dotfiles (`~/.copilot/`, `~/.claude/`) — not touched by reset
+
+### Bootstrap-reset cycle
+
+```
+bootstrap → customize → reset → bootstrap
+```
+
+Your persona and data survive the cycle. Config files are regenerated fresh.
 
 ## How it works
 
