@@ -287,8 +287,8 @@ def _perspective() -> str:
 # ── main ──────────────────────────────────────────────────────────────────────
 
 
-def main() -> None:
-    console = Console()
+def main(console: Console | None = None) -> None:
+    console = console or Console()
     now_local = datetime.now(LOCAL_TZ)
     today = now_local.strftime("%Y-%m-%d")
 
@@ -338,7 +338,9 @@ def main() -> None:
 
     if isinstance(next_eval, str) and len(next_eval) >= 10:
         try:
-            eval_dt = datetime.fromisoformat(next_eval)
+            # Profile stores timestamps as ISO 8601 with trailing "Z"; normalize
+            # to "+00:00" so fromisoformat() handles it across all Python versions.
+            eval_dt = datetime.fromisoformat(next_eval.replace("Z", "+00:00"))
             days_until = (eval_dt.date() - now_local.date()).days
             if days_until <= 1:
                 console.print(f"  [dim]Name re-eval due: {next_eval[:10]}[/dim]")

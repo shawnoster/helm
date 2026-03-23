@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
+from rich.console import Console
 
 from aya.status import (
     _exists,
@@ -15,6 +16,7 @@ from aya.status import (
     _perspective,
     _read_json,
     _time_flavor,
+    main,
 )
 
 # ── CheckResult / _exists ────────────────────────────────────────────────────
@@ -204,3 +206,46 @@ class TestPerspective:
 
     def test_deterministic_per_day(self):
         assert _perspective() == _perspective()
+
+
+# ── main() rendering ─────────────────────────────────────────────────────────
+
+
+class TestMain:
+    def test_renders_output(self, monkeypatch):
+        """main() must produce output — regression guard for the 'prints nothing' bug."""
+        console = Console(record=True)
+        # Patch scheduler helpers so they don't hit the filesystem
+        monkeypatch.setattr("aya.status.get_unseen_alerts", list)
+        monkeypatch.setattr("aya.status.get_due_reminders", lambda *a, **kw: [])
+        monkeypatch.setattr("aya.status.get_upcoming_reminders", lambda *a, **kw: [])
+        monkeypatch.setattr("aya.status.get_active_watches", list)
+
+        main(console=console)
+
+        output = console.export_text()
+        assert "Systems" in output
+
+    def test_name_reeval_z_suffix(self, monkeypatch, tmp_path):
+        """name_next_reevaluation_at stored with 'Z' suffix must parse without error."""
+        import json
+
+        profile_file = tmp_path / "profile.json"
+        profile_file.write_text(
+            json.dumps({
+                "ship_mind_name": "GSV Test",
+                "user_name": "Test",
+                # yesterday — will trigger the "due" branch
+                "name_next_reevaluation_at": "2026-03-22T00:00:00Z",
+            })
+        )
+        monkeypatch.setattr("aya.status.PROFILE", profile_file)
+        monkeypatch.setattr("aya.status.get_unseen_alerts", list)
+        monkeypatch.setattr("aya.status.get_due_reminders", lambda *a, **kw: [])
+        monkeypatch.setattr("aya.status.get_upcoming_reminders", lambda *a, **kw: [])
+        monkeypatch.setattr("aya.status.get_active_watches", list)
+
+        console = Console(record=True)
+        main(console=console)  # must not raise
+
+        assert "Name re-eval due" in console.export_text()
