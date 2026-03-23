@@ -721,9 +721,9 @@ def check_due() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         due_items = []
 
         for item in items:
-            if item["type"] != "reminder" or item["status"] not in ("pending", "snoozed"):
+            if item.get("type") != "reminder" or item.get("status") not in ("pending", "snoozed"):
                 continue
-            if item["status"] == "snoozed" and item.get("snoozed_until"):
+            if item.get("status") == "snoozed" and item.get("snoozed_until"):
                 snooze_end = datetime.fromisoformat(item["snoozed_until"])
                 if snooze_end > now:
                     continue
@@ -927,9 +927,9 @@ def get_due_reminders(now: datetime | None = None) -> list[dict[str, Any]]:
         now = datetime.now(_get_local_tz())
     due = []
     for item in items:
-        if item["type"] != "reminder" or item["status"] not in ("pending", "snoozed"):
+        if item.get("type") != "reminder" or item.get("status") not in ("pending", "snoozed"):
             continue
-        if item["status"] == "snoozed" and item.get("snoozed_until"):
+        if item.get("status") == "snoozed" and item.get("snoozed_until"):
             if datetime.fromisoformat(item["snoozed_until"]) > now:
                 continue
         if datetime.fromisoformat(item["due_at"]) <= now:
@@ -945,7 +945,7 @@ def get_upcoming_reminders(now: datetime | None = None, hours: int = 24) -> list
     horizon = now + timedelta(hours=hours)
     upcoming = []
     for item in items:
-        if item["type"] != "reminder" or item["status"] not in ("pending", "snoozed"):
+        if item.get("type") != "reminder" or item.get("status") not in ("pending", "snoozed"):
             continue
         reminder_due = datetime.fromisoformat(item["due_at"])
         if now < reminder_due <= horizon:
@@ -1201,7 +1201,7 @@ def _display_items(items: list[dict[str, Any]]) -> None:
     now = datetime.now(_get_local_tz())
 
     for item_type in ("reminder", "watch", "recurring", "event"):
-        typed = [i for i in items if i["type"] == item_type]
+        typed = [i for i in items if i.get("type") == item_type]
         if not typed:
             continue
         for i in typed:
@@ -1211,20 +1211,20 @@ def _display_items(items: list[dict[str, Any]]) -> None:
                 "snoozed": "💤",
                 "delivered": "📬",
                 "dismissed": "✗",
-            }.get(i["status"], "•")
+            }.get(i.get("status", "active"), "•")
             f" [{', '.join(i['tags'])}]" if i.get("tags") else ""
 
-            if i["type"] == "reminder":
+            if i.get("type") == "reminder":
                 due = datetime.fromisoformat(i["due_at"])
                 due.strftime("%a %b %d, %I:%M %p")
-                due <= now and i["status"] == "pending"
-            elif i["type"] == "watch":
+                due <= now and i.get("status") == "pending"
+            elif i.get("type") == "watch":
                 i.get("provider", "?")
                 i.get("poll_interval_minutes", "?")
                 last = i.get("last_checked_at")
                 datetime.fromisoformat(last).strftime("%H:%M") if last else "never"
-            elif i["type"] == "recurring":
+            elif i.get("type") == "recurring":
                 i.get("cron", "?")
                 " [session]" if i.get("session_required") else ""
-            elif i["type"] == "event":
+            elif i.get("type") == "event":
                 i.get("trigger", "?")

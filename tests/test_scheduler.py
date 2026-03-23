@@ -357,3 +357,61 @@ class TestHelpers:
         assert _parse_tags("foo, bar, baz") == ["foo", "bar", "baz"]
         assert _parse_tags("") == []
         assert _parse_tags("single") == ["single"]
+
+
+# ── Regression: missing fields ───────────────────────────────────────────────
+
+
+class TestMissingFields:
+    """Items with missing status/type fields should not crash the scheduler."""
+
+    def test_display_items_missing_status(self):
+        """Regression: _display_items crashed with KeyError on items missing 'status'."""
+        from aya.scheduler import _display_items
+
+        items = [
+            {"id": "no-status", "type": "recurring", "session_required": True, "cron": "0 * * * *"},
+        ]
+        # Should not raise
+        _display_items(items)
+
+    def test_display_items_missing_type(self):
+        """Items missing 'type' should be silently skipped."""
+        from aya.scheduler import _display_items
+
+        items = [
+            {"id": "no-type", "status": "active"},
+        ]
+        _display_items(items)
+
+    def test_list_items_with_missing_status(self):
+        """list_items should handle items that lack a status field."""
+        from aya.scheduler import save_items
+
+        save_items([
+            {"id": "bare", "type": "recurring", "session_required": True, "cron": "0 * * * *"},
+        ])
+        # list_items filters on status — missing status should not crash
+        result = list_items(show_all=True)
+        assert len(result) == 1
+
+    def test_get_pending_missing_status(self):
+        """get_pending should treat missing status as 'active' for recurring items."""
+        from aya.scheduler import get_pending, save_items
+
+        save_items([
+            {"id": "no-status-cron", "type": "recurring", "session_required": True, "cron": "*/30 * * * *", "prompt": "test"},
+        ])
+        pending = get_pending("test-instance")
+        assert len(pending["session_crons"]) == 1
+
+    def test_check_due_missing_status(self):
+        """check_due should not crash on items missing status."""
+        from aya.scheduler import check_due, save_items
+
+        save_items([
+            {"id": "bare-reminder", "type": "reminder", "due_at": "2020-01-01T00:00:00-07:00", "message": "old"},
+        ])
+        # Should not raise — item is skipped because status not in ("pending", "snoozed")
+        due, unseen = check_due()
+        assert isinstance(due, list)
