@@ -203,6 +203,11 @@ class TestConcurrentWriters:
             p.start()
         for p in processes:
             p.join(timeout=30)
+        for p in processes:
+            if p.is_alive():
+                p.terminate()
+                pytest.fail(f"Worker process {p.pid} did not finish within timeout")
+            assert p.exitcode == 0, f"Worker process exited with code {p.exitcode}"
 
         # Verify all items present
         data = json.loads(scheduler_file.read_text())
@@ -259,8 +264,15 @@ class TestConcurrentWriters:
             p.start()
         for p in writers:
             p.join(timeout=30)
+        for p in writers:
+            if p.is_alive():
+                p.terminate()
+                pytest.fail(f"Writer process {p.pid} did not finish within timeout")
+            assert p.exitcode == 0, f"Writer process exited with code {p.exitcode}"
 
         stop_event.set()
         reader.join(timeout=5)
+        if reader.is_alive():
+            reader.terminate()
 
         assert list(errors) == [], f"File corruption detected during writes: {errors}"

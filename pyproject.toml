@@ -151,7 +151,7 @@ ignore_errors = true
 
 [tool.semantic_release]
 version_toml = ["pyproject.toml:project.version"]
-build_command = "pip install --quiet build && python -m build"
+build_command = "python -m pip install --quiet build && python -m build"
 commit_parser = "angular"
 changelog_file = "CHANGELOG.md"
 

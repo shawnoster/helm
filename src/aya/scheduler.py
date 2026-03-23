@@ -27,7 +27,7 @@ import re
 import subprocess
 import tempfile
 import uuid
-from collections.abc import Generator
+from collections.abc import Iterator
 from contextlib import contextmanager, suppress
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -209,7 +209,7 @@ def _lock_file() -> Path:
 
 
 @contextmanager
-def _file_lock(*, shared: bool = False) -> Generator[int]:
+def _file_lock(*, shared: bool = False) -> Iterator[int]:
     """Acquire an advisory lock on the scheduler lock file.
 
     Args:
@@ -238,16 +238,22 @@ def _atomic_write(path: Path, data: dict[str, Any]) -> None:
     content = json.dumps(data, indent=2, default=str) + "\n"
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
     try:
-        os.write(fd, content.encode())
+        encoded = content.encode()
+        total = 0
+        while total < len(encoded):
+            written = os.write(fd, encoded[total:])
+            if written == 0:
+                raise OSError("os.write returned 0 bytes during atomic write")
+            total += written
         os.fsync(fd)
         os.close(fd)
         fd = -1
-        Path(tmp).rename(path)
+        Path(tmp).replace(path)
     except BaseException:
         if fd >= 0:
             os.close(fd)
         with suppress(OSError):
-            Path(tmp).unlink()
+            Path(tmp).unlink(missing_ok=True)
         raise
 
 
@@ -971,7 +977,27 @@ def run_tick(quiet: bool = False) -> dict[str, int]:
     """
     run_poll(quiet=quiet)
     swept = sweep_stale_claims()
-    return {"claims_swept": swept}
+    expired = expire_old_alerts()
+    return {"claims_swept": swept, "alerts_expired": expired}
+
+
+_ALERT_MAX_AGE_DAYS = 7
+
+
+def expire_old_alerts(max_age_days: int = _ALERT_MAX_AGE_DAYS) -> int:
+    """Remove alerts older than max_age_days. Returns count removed."""
+    with _file_lock():
+        alerts = _load_alerts_unlocked()
+        if not alerts:
+            return 0
+        now = datetime.now(_get_local_tz())
+        cutoff = now - timedelta(days=max_age_days)
+        original_count = len(alerts)
+        alerts = [a for a in alerts if datetime.fromisoformat(a["created_at"]) > cutoff]
+        removed = original_count - len(alerts)
+        if removed > 0:
+            _atomic_write(_alerts_file(), {"alerts": alerts})
+        return removed
 
 
 def get_pending(instance_id: str | None = None) -> dict[str, Any]:
@@ -994,9 +1020,22 @@ def get_pending(instance_id: str | None = None) -> dict[str, Any]:
 
     # Claim and collect deliverable alerts
     deliverable = []
+    claimed_ids: set[str] = set()
     for alert in unseen:
         if claim_alert(alert["id"], instance_id):
             deliverable.append(alert)
+            claimed_ids.add(alert["id"])
+
+    # Stamp delivery receipts on claimed alerts
+    if claimed_ids:
+        now = datetime.now(_get_local_tz())
+        with _file_lock():
+            alerts = _load_alerts_unlocked()
+            for a in alerts:
+                if a["id"] in claimed_ids:
+                    a["delivered_at"] = now.isoformat()
+                    a["delivered_by"] = instance_id
+            _atomic_write(_alerts_file(), {"alerts": alerts})
 
     # Collect session-required recurring items
     items = load_items()
@@ -1045,6 +1084,111 @@ def format_pending(pending: dict[str, Any]) -> str:
 
     if not alerts and not crons:
         lines.append("No pending items.")
+
+    return "\n".join(lines)
+
+
+# ── scheduler status (Phase 5C) ─────────────────────────────────────────────
+
+
+def get_scheduler_status() -> dict[str, Any]:
+    """Return a structured overview of the scheduler state.
+
+    Used by `aya scheduler status` and `make assistant-status`.
+    """
+    items = load_items()
+    alerts = load_alerts()
+    now = datetime.now(_get_local_tz())
+
+    active_watches = [i for i in items if i.get("type") == "watch" and i.get("status") == "active"]
+    pending_reminders = [
+        i
+        for i in items
+        if i.get("type") == "reminder" and i.get("status") in ("pending", "snoozed")
+    ]
+    session_crons = [
+        i
+        for i in items
+        if (
+            i.get("type") == "recurring"
+            and i.get("status", "active") == "active"
+            and i.get("session_required")
+        )
+    ]
+    unseen_alerts = [a for a in alerts if not a.get("seen")]
+    recent_deliveries = [
+        a
+        for a in alerts
+        if a.get("delivered_at")
+        and (now - datetime.fromisoformat(a["delivered_at"])).total_seconds() < 86400
+    ]
+
+    return {
+        "active_watches": active_watches,
+        "pending_reminders": pending_reminders,
+        "session_crons": session_crons,
+        "unseen_alerts": unseen_alerts,
+        "recent_deliveries": recent_deliveries,
+        "total_items": len(items),
+        "total_alerts": len(alerts),
+    }
+
+
+def format_scheduler_status(status: dict[str, Any]) -> str:
+    """Format scheduler status as human-readable text."""
+    lines: list[str] = []
+    now = datetime.now(_get_local_tz())
+
+    watches = status["active_watches"]
+    if watches:
+        lines.append(f"👁  {len(watches)} active watch(es):")
+        for w in watches:
+            provider = w.get("provider", "?")
+            last = w.get("last_checked_at")
+            interval = w.get("poll_interval_minutes", 30)
+            if last:
+                last_dt = datetime.fromisoformat(last)
+                next_dt = last_dt + timedelta(minutes=interval)
+                last_str = last_dt.strftime("%H:%M")
+                next_str = next_dt.strftime("%H:%M")
+                timing = f"last: {last_str}, next: ~{next_str}"
+            else:
+                timing = "never polled"
+            lines.append(f"  • [{provider}] {w.get('message', '?')[:50]} ({timing})")
+    else:
+        lines.append("👁  No active watches")
+
+    reminders = status["pending_reminders"]
+    if reminders:
+        lines.append(f"\n⏳ {len(reminders)} pending reminder(s):")
+        for r in reminders:
+            due = datetime.fromisoformat(r["due_at"])
+            overdue = " ⚠️ OVERDUE" if due <= now else ""
+            due_str = due.strftime("%a %b %d %I:%M %p")
+            lines.append(f"  • {r['message'][:50]} — due {due_str}{overdue}")
+
+    crons = status["session_crons"]
+    if crons:
+        lines.append(f"\n🔄 {len(crons)} session cron(s):")
+        for c in crons:
+            cron_msg = c.get("message", c.get("prompt", "?"))[:50]
+            lines.append(f'  • "{c.get("cron", "?")}" — {cron_msg}')
+
+    unseen = status["unseen_alerts"]
+    if unseen:
+        lines.append(f"\n🔔 {len(unseen)} unseen alert(s):")
+        for a in unseen:
+            lines.append(f"  • {a['message'][:60]}")
+
+    deliveries = status["recent_deliveries"]
+    if deliveries:
+        lines.append(f"\n📬 {len(deliveries)} delivery(ies) in last 24h:")
+        for d in deliveries:
+            by = d.get("delivered_by", "?")
+            at = datetime.fromisoformat(d["delivered_at"]).strftime("%H:%M")
+            lines.append(f"  • {d['message'][:45]} → {by} at {at}")
+
+    lines.append(f"\n📊 {status['total_items']} items, {status['total_alerts']} alerts")
 
     return "\n".join(lines)
 
