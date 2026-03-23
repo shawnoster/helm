@@ -88,11 +88,15 @@ class TestClaimAlert:
 
         # Write a claim from 10 minutes ago (past 5-min TTL)
         stale_time = (datetime.now(_get_local_tz()) - timedelta(minutes=10)).isoformat()
-        claim_path.write_text(json.dumps({
-            "instance": "claude-old",
-            "claimed_at": stale_time,
-            "ttl_seconds": _CLAIM_TTL_SECONDS,
-        }))
+        claim_path.write_text(
+            json.dumps(
+                {
+                    "instance": "claude-old",
+                    "claimed_at": stale_time,
+                    "ttl_seconds": _CLAIM_TTL_SECONDS,
+                }
+            )
+        )
 
         assert claim_alert("alert-stale", "claude-new") is True
 
@@ -116,11 +120,15 @@ class TestSweepStaleClaims:
 
         # Write a claim from 2 days ago
         old_time = (datetime.now(_get_local_tz()) - timedelta(days=2)).isoformat()
-        (claims / "old-alert.claimed").write_text(json.dumps({
-            "instance": "claude-1",
-            "claimed_at": old_time,
-            "ttl_seconds": 300,
-        }))
+        (claims / "old-alert.claimed").write_text(
+            json.dumps(
+                {
+                    "instance": "claude-1",
+                    "claimed_at": old_time,
+                    "ttl_seconds": 300,
+                }
+            )
+        )
 
         # Write a fresh claim
         claim_alert("fresh-alert", "claude-2")
@@ -152,11 +160,15 @@ class TestRunTick:
         claims = _claims_dir()
         claims.mkdir(parents=True, exist_ok=True)
         old_time = (datetime.now(_get_local_tz()) - timedelta(days=2)).isoformat()
-        (claims / "old.claimed").write_text(json.dumps({
-            "instance": "claude-1",
-            "claimed_at": old_time,
-            "ttl_seconds": 300,
-        }))
+        (claims / "old.claimed").write_text(
+            json.dumps(
+                {
+                    "instance": "claude-1",
+                    "claimed_at": old_time,
+                    "ttl_seconds": 300,
+                }
+            )
+        )
 
         result = run_tick(quiet=True)
         assert result["claims_swept"] == 1
@@ -177,12 +189,30 @@ class TestGetPending:
         from aya.scheduler import _alerts_file
 
         alerts_file = _alerts_file()
-        alerts_file.write_text(json.dumps({"alerts": [
-            {"id": "a1", "source_item_id": "s1", "created_at": datetime.now(UTC).isoformat(),
-             "message": "PR merged", "details": {}, "seen": False},
-            {"id": "a2", "source_item_id": "s2", "created_at": datetime.now(UTC).isoformat(),
-             "message": "Reminder due", "details": {}, "seen": False},
-        ]}))
+        alerts_file.write_text(
+            json.dumps(
+                {
+                    "alerts": [
+                        {
+                            "id": "a1",
+                            "source_item_id": "s1",
+                            "created_at": datetime.now(UTC).isoformat(),
+                            "message": "PR merged",
+                            "details": {},
+                            "seen": False,
+                        },
+                        {
+                            "id": "a2",
+                            "source_item_id": "s2",
+                            "created_at": datetime.now(UTC).isoformat(),
+                            "message": "Reminder due",
+                            "details": {},
+                            "seen": False,
+                        },
+                    ]
+                }
+            )
+        )
 
         pending = get_pending("test-session")
         assert len(pending["alerts"]) == 2
@@ -196,23 +226,29 @@ class TestGetPending:
         from aya.scheduler import _scheduler_file
 
         sf = _scheduler_file()
-        sf.write_text(json.dumps({"items": [
-            {
-                "id": "cron-1",
-                "type": "recurring",
-                "status": "active",
-                "session_required": True,
-                "cron": "0,30 * * * *",
-                "prompt": "Update daily notes",
-                "message": "Daily progress logger",
-            },
-            {
-                "id": "watch-1",
-                "type": "watch",
-                "status": "active",
-                "session_required": False,
-            },
-        ]}))
+        sf.write_text(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "cron-1",
+                            "type": "recurring",
+                            "status": "active",
+                            "session_required": True,
+                            "cron": "0,30 * * * *",
+                            "prompt": "Update daily notes",
+                            "message": "Daily progress logger",
+                        },
+                        {
+                            "id": "watch-1",
+                            "type": "watch",
+                            "status": "active",
+                            "session_required": False,
+                        },
+                    ]
+                }
+            )
+        )
 
         pending = get_pending("test-1")
         assert len(pending["session_crons"]) == 1
@@ -233,8 +269,11 @@ class TestFormatPending:
         now = datetime.now(_get_local_tz())
         pending = {
             "alerts": [
-                {"id": "a1", "message": "PR #42 merged",
-                 "created_at": (now - timedelta(minutes=5)).isoformat()},
+                {
+                    "id": "a1",
+                    "message": "PR #42 merged",
+                    "created_at": (now - timedelta(minutes=5)).isoformat(),
+                },
             ],
             "session_crons": [],
             "instance_id": "test",
@@ -248,8 +287,12 @@ class TestFormatPending:
         pending = {
             "alerts": [],
             "session_crons": [
-                {"id": "cron-abc123", "cron": "*/30 * * * *",
-                 "message": "Update notes", "prompt": "do stuff"},
+                {
+                    "id": "cron-abc123",
+                    "cron": "*/30 * * * *",
+                    "message": "Update notes",
+                    "prompt": "do stuff",
+                },
             ],
             "instance_id": "test",
         }
