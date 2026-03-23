@@ -88,6 +88,9 @@ class TrustedKey:
     nostr_pubkey: str | None = None
 
 
+_DEFAULT_RELAYS = ["wss://relay.damus.io", "wss://nos.lol"]
+
+
 @dataclass
 class Profile:
     """
@@ -100,15 +103,26 @@ class Profile:
     user_name: str
     instances: dict[str, Identity] = field(default_factory=dict)
     trusted_keys: dict[str, TrustedKey] = field(default_factory=dict)
-    default_relay: str = "wss://relay.damus.io"
+    default_relays: list[str] = field(default_factory=lambda: list(_DEFAULT_RELAYS))
     last_checked: dict[str, str] = field(default_factory=dict)  # relay → ISO timestamp
     ingested_ids: list[str] = field(default_factory=list)  # packet IDs already ingested (dedup)
+
+    @property
+    def default_relay(self) -> str:
+        """Return the primary relay URL (first in the list). Backward-compat alias."""
+        return self.default_relays[0] if self.default_relays else _DEFAULT_RELAYS[0]
+
+    @default_relay.setter
+    def default_relay(self, value: str) -> None:
+        """Set a single relay, replacing the list. Backward-compat alias."""
+        self.default_relays = [value]
 
     @classmethod
     def load(cls, path: Path) -> Profile:
         """Load from assistant_profile.json.
 
         Reads from 'aya' key; migrates 'assistant_sync' if present.
+        Accepts both legacy ``default_relay`` (string) and ``default_relays`` (list).
         """
         data = json.loads(path.read_text())
         # Migrate profiles written by older versions (assistant_sync → aya)
@@ -124,13 +138,30 @@ class Profile:
                 v["nostr_public_hex"] = nostr_pub_xonly.hex()
             instances[k] = Identity(**v)
         trusted = {k: TrustedKey(**v) for k, v in aya_data.get("trusted_keys", {}).items()}
+
+        # Support both default_relays (list) and legacy default_relay (string).
+        # Coerce a bare string to a list, strip non-string entries, fall back to
+        # _DEFAULT_RELAYS if the result is empty or the key is missing entirely.
+        if "default_relays" in aya_data:
+            raw = aya_data["default_relays"]
+            if isinstance(raw, str):
+                relays: list[str] = [raw]
+            else:
+                relays = [u for u in raw if isinstance(u, str) and u.strip()]
+            if not relays:
+                relays = list(_DEFAULT_RELAYS)
+        elif "default_relay" in aya_data:
+            relays = [aya_data["default_relay"]]
+        else:
+            relays = list(_DEFAULT_RELAYS)
+
         return cls(
             alias=data.get("alias", "Ace"),
             ship_mind_name=data.get("ship_mind_name", ""),
             user_name=data.get("user_name", ""),
             instances=instances,
             trusted_keys=trusted,
-            default_relay=aya_data.get("default_relay", "wss://relay.damus.io"),
+            default_relays=relays,
             last_checked=aya_data.get("last_checked", {}),
             ingested_ids=aya_data.get("ingested_ids", []),
         )
@@ -156,7 +187,10 @@ class Profile:
             k: {"did": v.did, "label": v.label, "nostr_pubkey": v.nostr_pubkey}
             for k, v in self.trusted_keys.items()
         }
-        data["aya"]["default_relay"] = self.default_relay
+        # Always write the list form and remove the legacy scalar key so that
+        # profiles migrated from older versions don't keep a stale default_relay entry.
+        data["aya"].pop("default_relay", None)
+        data["aya"]["default_relays"] = self.default_relays
         data["aya"]["last_checked"] = self.last_checked
         data["aya"]["ingested_ids"] = self.ingested_ids[-100:]  # keep last 100
         path.write_text(json.dumps(data, indent=2))

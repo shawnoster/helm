@@ -38,7 +38,7 @@ def recipient() -> Identity:
 @pytest.fixture
 def client(sender: Identity) -> RelayClient:
     return RelayClient(
-        relay_url="wss://relay.example.com",
+        relay_urls="wss://relay.example.com",
         nostr_private_hex=sender.nostr_private_hex,
         nostr_public_hex=sender.nostr_public_hex,
     )
@@ -457,3 +457,205 @@ class TestPublish:
             pytest.raises(RelayError),
         ):
             await client.publish(packet, recipient.nostr_public_hex)
+
+
+# ── Backoff helpers ───────────────────────────────────────────────────────────
+
+
+class TestBackoffHelpers:
+    def test_backoff_delay_increases_with_attempt(self) -> None:
+        from aya.relay import _backoff_delay
+
+        with patch("aya.relay.random.random", return_value=0.5):  # no jitter
+            d0 = _backoff_delay(0)
+            d1 = _backoff_delay(1)
+            d2 = _backoff_delay(2)
+
+        assert d0 < d1 < d2
+
+    def test_backoff_delay_caps_at_60s(self) -> None:
+        from aya.relay import _backoff_delay
+
+        with patch("aya.relay.random.random", return_value=0.5):  # no jitter
+            assert _backoff_delay(20) <= 60.0
+
+    def test_backoff_delay_nonnegative(self) -> None:
+        from aya.relay import _backoff_delay
+
+        with patch("aya.relay.random.random", return_value=0.0):  # max negative jitter
+            assert _backoff_delay(0) >= 0.0
+
+    def test_is_rate_limited_true(self) -> None:
+        from aya.relay import _is_rate_limited
+
+        assert _is_rate_limited(["OK", "abc", False, "rate-limited: slow down"])
+
+    def test_is_rate_limited_false_for_ok_accepted(self) -> None:
+        from aya.relay import _is_rate_limited
+
+        assert not _is_rate_limited(["OK", "abc", True, ""])
+
+    def test_is_rate_limited_false_for_other_rejection(self) -> None:
+        from aya.relay import _is_rate_limited
+
+        assert not _is_rate_limited(["OK", "abc", False, "blocked: spam"])
+
+
+# ── Multi-relay publish ───────────────────────────────────────────────────────
+
+
+class TestMultiRelayPublish:
+    async def test_publish_fans_out_to_all_relays(
+        self, sender: Identity, packet: Packet, recipient: Identity
+    ) -> None:
+        """publish() should attempt both relay URLs."""
+        connected_urls: list[str] = []
+
+        def fake_connect(url, **kwargs):
+            connected_urls.append(url)
+            mock_ws = AsyncMock()
+            mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+            mock_ws.__aexit__ = AsyncMock(return_value=False)
+            mock_ws.recv = AsyncMock(return_value=json.dumps(["OK", "a" * 64, True, ""]))
+            return mock_ws
+
+        multi_client = RelayClient(
+            relay_urls=["wss://relay1.example.com", "wss://relay2.example.com"],
+            nostr_private_hex=sender.nostr_private_hex,
+            nostr_public_hex=sender.nostr_public_hex,
+        )
+
+        with patch("aya.relay.websockets.connect", side_effect=fake_connect):
+            event_id = await multi_client.publish(packet, recipient.nostr_public_hex)
+
+        assert set(connected_urls) == {"wss://relay1.example.com", "wss://relay2.example.com"}
+        assert len(event_id) == 64
+
+    async def test_publish_succeeds_if_one_relay_accepts(
+        self, sender: Identity, packet: Packet, recipient: Identity
+    ) -> None:
+        """publish() succeeds even when the first relay rejects."""
+        call_count = 0
+
+        def fake_connect(url, **kwargs):
+            nonlocal call_count
+            call_count += 1
+            mock_ws = AsyncMock()
+            mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+            mock_ws.__aexit__ = AsyncMock(return_value=False)
+            # First relay rejects; second accepts
+            if call_count == 1:
+                mock_ws.recv = AsyncMock(
+                    return_value=json.dumps(["OK", "a" * 64, False, "blocked"])
+                )
+            else:
+                mock_ws.recv = AsyncMock(return_value=json.dumps(["OK", "b" * 64, True, ""]))
+            return mock_ws
+
+        multi_client = RelayClient(
+            relay_urls=["wss://relay1.example.com", "wss://relay2.example.com"],
+            nostr_private_hex=sender.nostr_private_hex,
+            nostr_public_hex=sender.nostr_public_hex,
+        )
+
+        with patch("aya.relay.websockets.connect", side_effect=fake_connect):
+            event_id = await multi_client.publish(packet, recipient.nostr_public_hex)
+
+        assert len(event_id) == 64
+
+    async def test_publish_raises_when_all_relays_fail(
+        self, sender: Identity, packet: Packet, recipient: Identity
+    ) -> None:
+        """publish() raises RelayError only if all relays fail."""
+        multi_client = RelayClient(
+            relay_urls=["wss://relay1.example.com", "wss://relay2.example.com"],
+            nostr_private_hex=sender.nostr_private_hex,
+            nostr_public_hex=sender.nostr_public_hex,
+        )
+
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+        mock_ws.recv = AsyncMock(return_value=json.dumps(["OK", "a" * 64, False, "blocked"]))
+
+        with (
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+            pytest.raises(RelayError),
+        ):
+            await multi_client.publish(packet, recipient.nostr_public_hex)
+
+    async def test_publish_retries_on_rate_limit(
+        self, sender: Identity, packet: Packet, recipient: Identity
+    ) -> None:
+        """publish() retries after a rate-limited response."""
+        client_single = RelayClient(
+            relay_urls="wss://relay.example.com",
+            nostr_private_hex=sender.nostr_private_hex,
+            nostr_public_hex=sender.nostr_public_hex,
+        )
+        recv_iter = iter(
+            [
+                json.dumps(["OK", "a" * 64, False, "rate-limited: too fast"]),
+                json.dumps(["OK", "a" * 64, True, ""]),
+            ]
+        )
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+        mock_ws.recv = AsyncMock(side_effect=lambda: next(recv_iter))
+
+        with (
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+            patch("aya.relay.asyncio.sleep"),
+        ):
+            event_id = await client_single.publish(packet, recipient.nostr_public_hex)
+
+        assert len(event_id) == 64
+
+
+# ── Multi-relay fetch ─────────────────────────────────────────────────────────
+
+
+class TestMultiRelayFetch:
+    async def test_fetch_deduplicates_across_relays(
+        self, sender: Identity, recipient: Identity
+    ) -> None:
+        """fetch_pending() deduplicates packets returned by multiple relays."""
+        p = Packet(
+            **{"from": sender.did, "to": recipient.did},
+            intent="Dedup test",
+            content="Content.",
+        )
+
+        async def fake_read_eose(ws, sub_id):
+            yield {"id": "evt1", "content": p.to_json()}
+
+        multi_client = RelayClient(
+            relay_urls=["wss://relay1.example.com", "wss://relay2.example.com"],
+            nostr_private_hex=sender.nostr_private_hex,
+            nostr_public_hex=sender.nostr_public_hex,
+        )
+
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("aya.relay._read_until_eose", side_effect=fake_read_eose),
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+        ):
+            packets = [pkt async for pkt in multi_client.fetch_pending()]
+
+        # Same packet from two relays → only one copy
+        assert len(packets) == 1
+        assert packets[0].id == p.id
+
+    async def test_single_url_string_backward_compat(self, sender: Identity) -> None:
+        """RelayClient still accepts a plain string relay_urls."""
+        c = RelayClient(
+            relay_urls="wss://relay.example.com",
+            nostr_private_hex=sender.nostr_private_hex,
+            nostr_public_hex=sender.nostr_public_hex,
+        )
+        assert c.relay_url == "wss://relay.example.com"
+        assert c._relay_urls == ["wss://relay.example.com"]

@@ -83,7 +83,7 @@ class TestInit:
         result = runner.invoke(app, ["init", "--profile", str(path), "--relay", relay])
         assert result.exit_code == 0
         data = json.loads(path.read_text())
-        assert data["aya"]["default_relay"] == relay
+        assert data["aya"]["default_relays"] == [relay]
 
 
 # ── trust ─────────────────────────────────────────────────────────────────────

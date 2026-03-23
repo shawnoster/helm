@@ -105,3 +105,72 @@ class TestProfilePersistence:
         restored = Profile.load(profile_path)
         # "default" label doesn't exist but should fall back to first instance
         assert restored.active_instance("default") is not None
+
+
+# ── Multi-relay profile ───────────────────────────────────────────────────────
+
+
+class TestProfileMultiRelay:
+    def test_default_relays_saved_as_list(self, tmp_path: Path) -> None:
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text("{}")
+
+        p = Profile.load(profile_path)
+        p.default_relays = ["wss://relay1.example.com", "wss://relay2.example.com"]
+        p.save(profile_path)
+
+        data = json.loads(profile_path.read_text())
+        assert data["aya"]["default_relays"] == [
+            "wss://relay1.example.com",
+            "wss://relay2.example.com",
+        ]
+        assert "default_relay" not in data["aya"]
+
+    def test_load_legacy_default_relay_string(self, tmp_path: Path) -> None:
+        """Profiles with the old scalar default_relay key are migrated transparently."""
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text(json.dumps({"aya": {"default_relay": "wss://legacy.example.com"}}))
+
+        p = Profile.load(profile_path)
+        assert p.default_relays == ["wss://legacy.example.com"]
+        assert p.default_relay == "wss://legacy.example.com"
+
+    def test_load_new_default_relays_list(self, tmp_path: Path) -> None:
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text(
+            json.dumps(
+                {
+                    "aya": {
+                        "default_relays": [
+                            "wss://relay1.example.com",
+                            "wss://relay2.example.com",
+                        ]
+                    }
+                }
+            )
+        )
+
+        p = Profile.load(profile_path)
+        assert p.default_relays == ["wss://relay1.example.com", "wss://relay2.example.com"]
+        assert p.default_relay == "wss://relay1.example.com"
+
+    def test_default_relay_setter_updates_list(self, tmp_path: Path) -> None:
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text("{}")
+
+        p = Profile.load(profile_path)
+        p.default_relay = "wss://single.example.com"
+        assert p.default_relays == ["wss://single.example.com"]
+        assert p.default_relay == "wss://single.example.com"
+
+    def test_legacy_key_dropped_on_save(self, tmp_path: Path) -> None:
+        """After loading a legacy profile and saving, default_relay key is removed."""
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text(json.dumps({"aya": {"default_relay": "wss://legacy.example.com"}}))
+
+        p = Profile.load(profile_path)
+        p.save(profile_path)
+
+        data = json.loads(profile_path.read_text())
+        assert "default_relay" not in data["aya"]
+        assert data["aya"]["default_relays"] == ["wss://legacy.example.com"]
