@@ -36,7 +36,9 @@ from aya.scheduler import (
     check_due,
     dismiss_item,
     format_pending,
+    format_scheduler_status,
     get_pending,
+    get_scheduler_status,
     list_items,
     parse_due,
     run_poll,
@@ -717,6 +719,18 @@ def schedule_pending(
         console.print(json.dumps(pending, indent=2, default=str))
     else:
         console.print(format_pending(pending))
+
+
+@schedule_app.command("status")
+def schedule_status(
+    as_json: bool = typer.Option(False, "--json", help="Output as JSON"),
+) -> None:
+    """Show scheduler overview — watches, reminders, crons, deliveries."""
+    status = get_scheduler_status()
+    if as_json:
+        console.print(json.dumps(status, indent=2, default=str))
+    else:
+        console.print(format_scheduler_status(status))
 
 
 @schedule_app.command("alerts")
