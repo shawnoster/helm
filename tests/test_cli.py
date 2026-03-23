@@ -542,3 +542,52 @@ class TestDispatch:
             )
         assert result.exit_code != 0
         assert "Could not reach relay" in result.output
+
+
+# ── schedule status ──────────────────────────────────────────────────────────
+
+
+@pytest.fixture
+def _isolate_scheduler(tmp_path, monkeypatch):
+    """Point scheduler at a temp directory for CLI tests."""
+    scheduler_file = tmp_path / "assistant" / "memory" / "scheduler.json"
+    alerts_file = tmp_path / "assistant" / "memory" / "alerts.json"
+    scheduler_file.parent.mkdir(parents=True)
+    scheduler_file.write_text(json.dumps({"items": []}))
+    alerts_file.write_text(json.dumps({"alerts": []}))
+    monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+    monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+
+
+class TestScheduleStatusCLI:
+    def test_status_exits_zero(self, _isolate_scheduler):
+        result = runner.invoke(app, ["schedule", "status"])
+        assert result.exit_code == 0
+
+    def test_status_json_is_valid(self, _isolate_scheduler):
+        result = runner.invoke(app, ["schedule", "status", "--json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "active_watches" in data
+        assert "pending_reminders" in data
+        assert "total_items" in data
+
+    def test_status_text_has_summary(self, _isolate_scheduler):
+        result = runner.invoke(app, ["schedule", "status"])
+        assert result.exit_code == 0
+        assert "items" in result.output
+
+    def test_pending_exits_zero(self, _isolate_scheduler):
+        result = runner.invoke(app, ["schedule", "pending"])
+        assert result.exit_code == 0
+
+    def test_pending_json_is_valid(self, _isolate_scheduler):
+        result = runner.invoke(app, ["schedule", "pending", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "alerts" in data
+        assert "session_crons" in data
+
+    def test_tick_exits_zero(self, _isolate_scheduler):
+        result = runner.invoke(app, ["schedule", "tick", "--quiet"])
+        assert result.exit_code == 0
