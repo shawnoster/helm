@@ -47,8 +47,12 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           no_operation_mode: ${{ inputs.dry_run || false }}
 
+      - name: Build package
+        if: steps.release.outputs.released == 'true' && inputs.dry_run != true
+        run: uv build
+
       - name: Publish to PyPI
-        if: steps.release.outputs.released == 'true'
+        if: steps.release.outputs.released == 'true' && inputs.dry_run != true
         uses: pypa/gh-action-pypi-publish@release/v1
         # No username/password — uses OIDC trusted publishing
         # Configure trusted publisher on PyPI:
