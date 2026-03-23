@@ -1,5 +1,5 @@
 [project]
-name = "aya"
+name = "aya-ai-assist"
 version = "0.2.0"
 description = "Personal AI assistant toolkit — sync, schedule, bootstrap"
 readme = "README.md"

@@ -53,4 +53,4 @@ jobs:
         # No username/password — uses OIDC trusted publishing
         # Configure trusted publisher on PyPI:
         #   Settings → Publishing → Add publisher
-        #   repo: shawnoster/helm, workflow: release.yml
+        #   repo: shawnoster/aya, workflow: release.yml, environment: pypi
