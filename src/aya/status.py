@@ -361,7 +361,7 @@ def main() -> None:
         if n > 3:
             console.print(f"  [dim]… and {n - 3} more[/dim]")
     elif notes["found"]:
-        console.print(f"[dim]Daily note found — no priorities or time blocks.[/dim]")
+        console.print("[dim]Daily note found — no priorities or time blocks.[/dim]")
     else:
         console.print(f"[dim]No daily note for {today}.[/dim]")
 
