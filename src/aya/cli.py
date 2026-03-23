@@ -90,8 +90,8 @@ def _load_profile(profile_path: Path) -> Profile:
 def init(
     label: str = typer.Option("default", help="Label for this instance (work, home, laptop…)"),
     profile: Path = typer.Option(DEFAULT_PROFILE, help="Path to assistant_profile.json"),
-    relay: str = typer.Option(
-        "wss://relay.damus.io", help="Default Nostr relay URL (or first of multiple)"
+    relay: str | None = typer.Option(
+        None, help="Override the default relay URL (omit to use the built-in two-relay default)"
     ),
 ) -> None:
     """Generate a keypair for this instance and register it in your profile."""
@@ -104,15 +104,17 @@ def init(
         p = Profile(alias="Ace", ship_mind_name="", user_name="")
 
     p.instances[label] = identity
-    p.default_relay = relay  # sets default_relays = [relay]
+    if relay is not None:
+        p.default_relay = relay  # sets default_relays = [relay]
     p.save(profile)
 
+    relay_display = relay or ", ".join(p.default_relays)
     console.print(
         Panel.fit(
             f"[bold green]✓ Instance created[/bold green]\n\n"
             f"Label:  [cyan]{label}[/cyan]\n"
             f"DID:    [dim]{identity.did}[/dim]\n"
-            f"Relay:  [cyan]{relay}[/cyan]\n\n"
+            f"Relay:  [cyan]{relay_display}[/cyan]\n\n"
             "[dim]Share your DID with other instances you want to trust.[/dim]",
             title="aya — init",
         )
