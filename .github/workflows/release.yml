@@ -45,7 +45,7 @@ jobs:
         uses: python-semantic-release/python-semantic-release@v10
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          noop: ${{ inputs.dry_run || false }}
+          no_operation_mode: ${{ inputs.dry_run || false }}
 
       - name: Publish to PyPI
         if: steps.release.outputs.released == 'true'
