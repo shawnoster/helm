@@ -53,7 +53,7 @@ def _is_rate_limited(response: list) -> bool:
 
 def _is_transient_error(exc: BaseException) -> bool:
     """Return True for connection/OS errors worth retrying."""
-    return isinstance(exc, OSError | websockets.exceptions.WebSocketException | TimeoutError)
+    return isinstance(exc, (OSError, websockets.exceptions.WebSocketException, TimeoutError))
 
 
 class RelayClient:
@@ -82,6 +82,10 @@ class RelayClient:
             self._relay_urls: list[str] = [relay_urls]
         else:
             self._relay_urls = list(relay_urls)
+        if not self._relay_urls or any(
+            not isinstance(url, str) or not url.strip() for url in self._relay_urls
+        ):
+            raise ValueError("relay_urls must contain at least one non-empty string URL")
         # Keep relay_url as a single-URL alias for backward compatibility.
         self.relay_url: str = self._relay_urls[0]
         self._private_key_hex = nostr_private_hex
@@ -90,7 +94,7 @@ class RelayClient:
     async def publish(self, packet: Packet, recipient_nostr_pubkey: str) -> str:
         """Publish a packet to all configured relays.
 
-        Fans out to every relay and returns as soon as at least one accepts.
+        Fans out to every relay regardless of individual results.
         Retries individual relays on transient failures (rate-limit, 503, network)
         with exponential back-off + jitter.  Raises *RelayError* only if all
         relays fail after exhausting retries.

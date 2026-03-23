@@ -16,6 +16,7 @@ from aya.relay import (
     AYA_KIND,
     _backoff_delay,
     _compute_event_id,
+    _is_rate_limited,
     _read_until_eose,
     _sign_hex,
 )
@@ -325,12 +326,7 @@ async def publish_pair_request(
                         logger.info("Published pair request %s via %s", last_event_id[:8], url)
                         published = True
                         break
-                    if (
-                        len(resp) >= 4
-                        and isinstance(resp[3], str)
-                        and resp[3].startswith("rate-limited")
-                        and attempt < 2
-                    ):
+                    if _is_rate_limited(resp) and attempt < 2:
                         delay = _backoff_delay(attempt)
                         logger.warning("Rate-limited by %s, retrying in %.1fs", url, delay)
                         await asyncio.sleep(delay)
@@ -363,16 +359,29 @@ async def poll_for_pair_response(
     """Poll all configured relays for a pair-response.
 
     Polls each relay in turn, returning as soon as any relay yields a response.
+    Applies per-relay exponential backoff when a relay has transient failures to
+    avoid hammering rate-limited relays on reconnect.
     """
     relay_urls = [relay_url] if isinstance(relay_url, str) else relay_url
     since_ts = int(datetime.now(UTC).timestamp()) - 5
     deadline = datetime.now(UTC).timestamp() + timeout_seconds
+    relay_failures: dict[str, int] = dict.fromkeys(relay_urls, 0)
 
     while datetime.now(UTC).timestamp() < deadline:
         for url in relay_urls:
-            result = await _poll_single_relay(url, my_pubkey, request_event_id, since_ts, deadline)
+            failures = relay_failures[url]
+            if failures > 0:
+                delay = _backoff_delay(failures - 1)
+                remaining = deadline - datetime.now(UTC).timestamp()
+                if remaining <= 0:
+                    return None
+                await asyncio.sleep(min(delay, remaining))
+            result, had_error = await _poll_single_relay(
+                url, my_pubkey, request_event_id, since_ts, deadline
+            )
             if result is not None:
                 return result
+            relay_failures[url] = (failures + 1) if had_error else 0
         remaining = deadline - datetime.now(UTC).timestamp()
         if remaining <= 0:
             break
@@ -387,8 +396,13 @@ async def _poll_single_relay(
     request_event_id: str,
     since_ts: int,
     deadline: float,
-) -> TrustedKey | None:
-    """Poll a single relay once for a pair-response. Returns TrustedKey or None."""
+) -> tuple[TrustedKey | None, bool]:
+    """Poll a single relay once for a pair-response.
+
+    Returns ``(TrustedKey, False)`` on success, ``(None, False)`` when no
+    response is available yet, and ``(None, True)`` on a connection/transient
+    error so the caller can apply backoff before retrying.
+    """
     try:
         async with websockets.connect(relay_url) as ws:
             filter_ = {
@@ -410,15 +424,17 @@ async def _poll_single_relay(
                         did=content["did"],
                         label=content["label"],
                         nostr_pubkey=event["pubkey"],
-                    )
+                    ), False
             except TimeoutError:
                 logger.debug("EOSE not received within timeout on %s; continuing", relay_url)
             await ws.send(json.dumps(["CLOSE", sub_id]))
     except TimeoutError:
         logger.debug("Pair polling timed out on %s", relay_url)
+        return None, True
     except Exception as exc:
         logger.warning("Pair polling connection error on %s: %s", relay_url, exc)
-    return None
+        return None, True
+    return None, False
 
 
 async def join_pairing(

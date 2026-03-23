@@ -140,8 +140,16 @@ class Profile:
         trusted = {k: TrustedKey(**v) for k, v in aya_data.get("trusted_keys", {}).items()}
 
         # Support both default_relays (list) and legacy default_relay (string).
+        # Coerce a bare string to a list, strip non-string entries, fall back to
+        # _DEFAULT_RELAYS if the result is empty or the key is missing entirely.
         if "default_relays" in aya_data:
-            relays: list[str] = aya_data["default_relays"]
+            raw = aya_data["default_relays"]
+            if isinstance(raw, str):
+                relays: list[str] = [raw]
+            else:
+                relays = [u for u in raw if isinstance(u, str) and u.strip()]
+            if not relays:
+                relays = list(_DEFAULT_RELAYS)
         elif "default_relay" in aya_data:
             relays = [aya_data["default_relay"]]
         else:

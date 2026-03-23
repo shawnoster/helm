@@ -276,13 +276,16 @@ def receive(
         relay_urls = [relay] if relay else p.default_relays
         client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
 
-        # Use last_checked to avoid re-fetching old packets
-        # Track by primary relay URL for backward compatibility
-        primary_relay = relay_urls[0]
-        since = None
-        last_ts = p.last_checked.get(primary_relay)
-        if last_ts:
-            since = datetime.fromisoformat(last_ts)
+        # Use last_checked to avoid re-fetching old packets.
+        # Use the oldest timestamp across all configured relays so we never miss
+        # events that were only available on a secondary relay.  Only apply the
+        # filter when every relay has been checked at least once.
+        checked_timestamps = [
+            datetime.fromisoformat(p.last_checked[url])
+            for url in relay_urls
+            if url in p.last_checked
+        ]
+        since = min(checked_timestamps) if len(checked_timestamps) == len(relay_urls) else None
 
         packets: list[Packet] = []
         try:
@@ -293,8 +296,10 @@ def receive(
                 err.print("[yellow]Could not reach relay — skipping inbox check.[/yellow]")
             return
 
-        # Update last_checked timestamp
-        p.last_checked[primary_relay] = datetime.now(UTC).isoformat()
+        # Update last_checked for every configured relay
+        now_iso = datetime.now(UTC).isoformat()
+        for url in relay_urls:
+            p.last_checked[url] = now_iso
         p.save(profile)
 
         if not packets:
