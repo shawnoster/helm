@@ -499,3 +499,46 @@ class TestDispatch:
             input="data\n",
         )
         assert result.exit_code != 0
+
+    def test_dispatch_missing_nostr_pubkey_fails(self, profile_with_instance: Path) -> None:
+        """Trusted key without a Nostr pubkey should exit with a clear message."""
+        p = Profile.load(profile_with_instance)
+        home = Identity.generate("home")
+        p.trusted_keys["home"] = TrustedKey(did=home.did, label="home", nostr_pubkey=None)
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            [
+                "dispatch",
+                "--to",
+                "home",
+                "--intent",
+                "no pubkey",
+                "--profile",
+                str(profile_with_instance),
+            ],
+            input="data\n",
+        )
+        assert result.exit_code != 0
+        assert "Nostr pubkey" in result.output
+
+    def test_dispatch_relay_error_exits_cleanly(self, profile_with_trusted: Path) -> None:
+        """Relay connection failure should print a friendly message, not a traceback."""
+        with patch("aya.cli.RelayClient") as mock_client_cls:
+            mock_client_cls.return_value.publish = AsyncMock(side_effect=Exception("conn refused"))
+            result = runner.invoke(
+                app,
+                [
+                    "dispatch",
+                    "--to",
+                    "home",
+                    "--intent",
+                    "relay down",
+                    "--profile",
+                    str(profile_with_trusted),
+                ],
+                input="data\n",
+            )
+        assert result.exit_code != 0
+        assert "Could not reach relay" in result.output

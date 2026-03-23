@@ -315,8 +315,20 @@ def dispatch(
 
         relay_urls = [relay] if relay else p.default_relays
         recipient_nostr_pub = _resolve_nostr_pubkey(signed.to_did, p)
+        if recipient_nostr_pub is None:
+            err.print(
+                "[red]No Nostr pubkey found for recipient.[/red]\n"
+                "Add one with [bold]aya trust --nostr-pubkey ...[/bold] "
+                "or establish pairing with [bold]aya pair[/bold]."
+            )
+            raise typer.Exit(1)
+
         client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
-        event_id = await client.publish(signed, recipient_nostr_pub)
+        try:
+            event_id = await client.publish(signed, recipient_nostr_pub)
+        except Exception:
+            err.print("[yellow]Could not reach relay — dispatch failed.[/yellow]")
+            raise typer.Exit(1) from None
 
         relay_count = len(relay_urls)
         relay_display = (
