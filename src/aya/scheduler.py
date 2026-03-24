@@ -389,6 +389,47 @@ def save_alerts(alerts: list[dict[str, Any]]) -> None:
         _atomic_write(_alerts_file(), {"alerts": alerts})
 
 
+def add_seed_alert(
+    intent: str,
+    opener: str,
+    context_summary: str,
+    open_questions: list[str],
+    from_label: str,
+    packet_id: str = "",
+) -> dict[str, Any]:
+    """Persist a seed packet as an unseen alert so it surfaces via pending on next session start."""
+    now = datetime.now(_get_local_tz())
+    detail_lines = [f"**From:** {from_label}", f"**Opener:** {opener}"]
+    if context_summary:
+        detail_lines.append(f"**Context:** {context_summary}")
+    if open_questions:
+        detail_lines.append("**Open questions:**")
+        detail_lines.extend(f"  • {q}" for q in open_questions)
+    alert = {
+        "id": _new_id(),
+        # source_item_id is required by run_poll/tick for existing_sources dedup;
+        # use the originating packet ID so the alert can be traced back to its source.
+        "source_item_id": packet_id or _new_id(),
+        "created_at": now.isoformat(),
+        "message": f"Seed from {from_label}: {intent}",
+        "details": {
+            "type": "seed",
+            "intent": intent,
+            "opener": opener,
+            "context_summary": context_summary,
+            "open_questions": open_questions,
+            "from_label": from_label,
+            "body": "\n".join(detail_lines),
+        },
+        "seen": False,
+    }
+    with _file_lock():
+        alerts = _load_alerts_unlocked()
+        alerts.append(alert)
+        _atomic_write(_alerts_file(), {"alerts": alerts})
+    return alert
+
+
 def _find(items: list[dict[str, Any]], item_id: str) -> dict[str, Any] | None:
     for item in items:
         if item["id"] == item_id or item["id"].startswith(item_id):

@@ -33,6 +33,7 @@ from aya.scheduler import (
     _display_items,
     add_recurring,
     add_reminder,
+    add_seed_alert,
     add_watch,
     check_due,
     dismiss_alert,
@@ -953,6 +954,18 @@ def _ingest(packet: Packet) -> None:
                 title="Conversation Seed",
                 border_style="cyan",
             )
+        )
+        # Persist seed as an unseen alert so it surfaces via `aya schedule pending`
+        # on the next session start, even if ingested via the async SessionStart hook
+        # (where stdout is not captured by Claude).
+        from_label = packet.from_did[:16]
+        add_seed_alert(
+            intent=packet.intent,
+            opener=seed.get("opener", ""),
+            context_summary=seed.get("context_summary", ""),
+            open_questions=seed.get("open_questions", []),
+            from_label=from_label,
+            packet_id=packet.id,
         )
     else:
         console.print(
