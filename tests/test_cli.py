@@ -11,6 +11,7 @@ from typer.testing import CliRunner
 
 from aya.cli import app
 from aya.identity import Identity, Profile, TrustedKey
+from aya.packet import Packet
 from aya.scheduler import add_reminder
 
 runner = CliRunner()
@@ -592,3 +593,112 @@ class TestScheduleStatusCLI:
     def test_tick_exits_zero(self):
         result = runner.invoke(app, ["schedule", "tick", "--quiet"])
         assert result.exit_code == 0
+
+
+# ── receive ───────────────────────────────────────────────────────────────────
+
+
+class TestReceive:
+    @pytest.fixture
+    def sender(self) -> Identity:
+        return Identity.generate("work")
+
+    @pytest.fixture
+    def profile_with_sender(self, profile_with_instance: Path, sender: Identity) -> Path:
+        """Profile with a 'default' instance and 'work' registered as a trusted sender."""
+        p = Profile.load(profile_with_instance)
+        p.trusted_keys["work"] = TrustedKey(
+            did=sender.did, label="work", nostr_pubkey=sender.nostr_public_hex
+        )
+        p.save(profile_with_instance)
+        return profile_with_instance
+
+    def _signed_packet(self, sender: Identity, to_did: str, intent: str = "Test packet") -> Packet:
+        pkt = Packet(
+            **{"from": sender.did, "to": to_did},
+            intent=intent,
+            content="Test content.",
+        )
+        return pkt.sign(sender)
+
+    def test_fetch_pending_called_without_since(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        """receive must call fetch_pending() with no since argument."""
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did)
+
+        fetch_calls: list[tuple] = []
+
+        async def mock_fetch(*args, **kwargs):
+            fetch_calls.append((args, kwargs))
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            runner.invoke(
+                app,
+                ["receive", "--auto-ingest", "--quiet", "--profile", str(profile_with_sender)],
+            )
+
+        assert len(fetch_calls) == 1
+        assert fetch_calls[0] == ((), {})  # called with no positional or keyword args
+
+    def test_skips_already_ingested_packets(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        """Packets whose IDs are already in ingested_ids must be silently skipped."""
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did, intent="Already seen")
+        p.ingested_ids.append(packet.id)
+        p.save(profile_with_sender)
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["receive", "--auto-ingest", "--profile", str(profile_with_sender)],
+            )
+
+        assert "Already seen" not in result.output
+
+    def test_auto_ingest_persists_packet_id(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        """After auto-ingesting a trusted packet, its ID must be saved to ingested_ids."""
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did, intent="New packet")
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["receive", "--auto-ingest", "--profile", str(profile_with_sender)],
+            )
+
+        assert result.exit_code == 0, result.output
+        saved = Profile.load(profile_with_sender)
+        assert packet.id in saved.ingested_ids
+
+    def test_relay_error_shows_friendly_message(self, profile_with_sender: Path) -> None:
+        """A relay connection failure must print a friendly message, not raise."""
+
+        async def mock_fetch(*args, **kwargs):
+            if False:  # pragma: no cover
+                yield  # makes this an async generator
+            raise OSError("connection refused")
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["receive", "--profile", str(profile_with_sender)],
+            )
+
+        assert "Could not reach relay" in result.output

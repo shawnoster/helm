@@ -393,15 +393,16 @@ def receive(
         relay_urls = [relay] if relay else p.default_relays
         client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
 
-        # Fetch all packets addressed to this instance — ingested_ids is the
-        # authoritative dedup mechanism and filters already-seen packets below.
+        # Fetch pending packets for this instance (subject to fetch_pending()'s
+        # limit); ingested_ids is the authoritative dedup mechanism and filters
+        # already-seen packets below.
         packets: list[Packet] = []
         try:
             async for packet in client.fetch_pending():
                 packets.append(packet)
         except Exception:
             if not quiet:
-                err.print("[yellow]Could not reach relay — skipping inbox check.[/yellow]")
+                err.print("[yellow]Could not reach relay — skipping relay fetch.[/yellow]")
             return
 
         if not packets:
