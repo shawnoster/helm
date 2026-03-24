@@ -24,7 +24,7 @@ from aya.scheduler import (
 ROOT = _find_workspace_root()
 ASSISTANT = ROOT / "assistant"
 MEMORY = ASSISTANT / "memory"
-PROFILE = Path.home() / ".copilot" / "assistant_profile.json"
+PROFILE = ASSISTANT / "profile.json"
 CONFIG = ASSISTANT / "config.json"
 
 

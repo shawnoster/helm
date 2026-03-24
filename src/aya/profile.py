@@ -1,4 +1,8 @@
-"""Initialize or rotate the persistent assistant profile in ~/.copilot/assistant_profile.json."""
+"""Initialize or rotate the persistent assistant profile.
+
+Canonical location: {workspace}/assistant/profile.json
+Legacy location:    ~/.copilot/assistant_profile.json (symlinked by bootstrap)
+"""
 
 from __future__ import annotations
 
@@ -19,8 +23,9 @@ def _find_workspace_root() -> Path:
 
 ROOT = _find_workspace_root()
 ACTIVITY_TRACKER_PATH = ROOT / "assistant" / "memory" / "activity-tracker.md"
-PROFILE_PATH = Path.home() / ".copilot" / "assistant_profile.json"
-LEGACY_PROFILE_PATH = Path.home() / ".copilot" / "ace_profile.json"
+PROFILE_PATH = ROOT / "assistant" / "profile.json"
+LEGACY_COPILOT_PATH = Path.home() / ".copilot" / "assistant_profile.json"
+LEGACY_ACE_PATH = Path.home() / ".copilot" / "ace_profile.json"
 REEVALUATION_DAYS = 3
 
 NAME_CANDIDATES = [
@@ -153,9 +158,14 @@ def ensure_profile(path: Path = PROFILE_PATH, now: datetime | None = None) -> di
     now_dt = now or datetime.now(UTC)
     profile = _default_profile(now_dt)
 
-    # Migrate from legacy ace_profile.json if new path doesn't exist yet
-    if not path.exists() and LEGACY_PROFILE_PATH.exists():
-        LEGACY_PROFILE_PATH.rename(path)
+    # Migrate from legacy locations if canonical path doesn't exist yet.
+    # Priority: ~/.copilot/assistant_profile.json > ~/.copilot/ace_profile.json
+    if not path.exists():
+        for legacy in (LEGACY_COPILOT_PATH, LEGACY_ACE_PATH):
+            if legacy.exists() and not legacy.is_symlink():
+                path.parent.mkdir(parents=True, exist_ok=True)
+                legacy.rename(path)
+                break
 
     if path.exists():
         try:

@@ -76,7 +76,17 @@ app.add_typer(ci_app, name="ci")
 console = Console()
 err = Console(stderr=True)
 
-DEFAULT_PROFILE = Path.home() / ".copilot" / "assistant_profile.json"
+
+def _find_workspace_root() -> Path:
+    """Walk up from cwd looking for assistant/memory/scheduler.json."""
+    cwd = Path.cwd()
+    for parent in [cwd, *cwd.parents]:
+        if (parent / "assistant" / "memory" / "scheduler.json").exists():
+            return parent
+    return cwd
+
+
+DEFAULT_PROFILE = _find_workspace_root() / "assistant" / "profile.json"
 
 
 def _load_profile(profile_path: Path) -> Profile:

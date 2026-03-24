@@ -42,7 +42,7 @@ wheels = [
 ]
 
 [[package]]
-name = "aya"
+name = "aya-ai-assist"
 version = "0.2.0"
 source = { editable = "." }
 dependencies = [

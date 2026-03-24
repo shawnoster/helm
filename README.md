@@ -135,6 +135,7 @@ aya bootstrap --root ~/guild
 │   ├── AGENTS.md                 # Duplicate for harness auto-discovery
 │   ├── CLAUDE.md                 # Behavioral instructions
 │   ├── persona.md                # Ship's Mind voice and tone
+│   ├── profile.json              # Persona alias, movement reminders (canonical)
 │   ├── config.json               # Workspace paths (projects_dir, code_dirs)
 │   ├── memory/
 │   │   ├── scheduler.json        # Persistent reminders, watches, crons
@@ -155,9 +156,11 @@ Bootstrap also sets up user-level config:
 
 | File | Purpose |
 | ---- | ---- |
-| `~/.copilot/assistant_profile.json` | Persona, alias, movement reminder cadence |
+| `~/.copilot/assistant_profile.json` | Symlink → `assistant/profile.json` (backward compat) |
 | `~/.claude/settings.json` | SessionStart hooks (health crons, packet receive, scheduler pending) |
 | `~/.claude/hooks/health_crons.sh` | Registers micro-nudge and stand-and-walk cron jobs |
+
+The profile lives in the workspace (`assistant/profile.json`) — not in a harness-specific dotfile. The `~/.copilot/` symlink exists for tools that still look there.
 
 Existing dotfiles are merged, not overwritten. Hooks are deduplicated on re-run.
 
@@ -178,9 +181,11 @@ aya reset --root ~/guild
 ### Preserved on reset
 
 - `assistant/persona.md` — your customized persona
+- `assistant/profile.json` — your alias, movement reminders, identity
 - `assistant/memory/scheduler.json` — your reminders and watches
-- `assistant/notes/` — all daily logs, meeting notes, ideas
-- `projects/` — all project status, plans, discovery docs
+- `assistant/memory/alerts.json` — unseen watcher alerts
+- `assistant/memory/done-log.md` — completed work log
+- `projects/` — all project status, plans, meeting notes, discovery docs
 - Dotfiles (`~/.copilot/`, `~/.claude/`) — not touched by reset
 
 ### Bootstrap-reset cycle
