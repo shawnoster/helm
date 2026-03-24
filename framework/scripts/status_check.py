@@ -11,7 +11,6 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
-
 ROOT = Path(__file__).resolve().parents[1]
 ASSISTANT = ROOT / "assistant"
 MEMORY = ASSISTANT / "memory"
@@ -277,7 +276,7 @@ def main() -> None:
         _exists(ROOT / "CLAUDE.md",                        "root CLAUDE"),
         _exists(ASSISTANT / "AGENTS.md",                   "assistant AGENTS"),
         _exists(ASSISTANT / "CLAUDE.md",                   "assistant CLAUDE"),
-        _exists(ASSISTANT / "ship_mind_persona.prompt",    "Ship persona prompt"),
+        _exists(ASSISTANT / "persona.md",                   "Ship persona prompt"),
         _exists(MEMORY / "README.md",                      "memory::README.md"),
         _exists(MEMORY / "preferences.md",                 "memory::preferences.md"),
         _exists(MEMORY / "cron-schedules.md",              "memory::cron-schedules.md"),
@@ -345,7 +344,12 @@ def main() -> None:
 
     # Reminders and alerts
     try:
-        from scheduler import get_due_reminders, get_upcoming_reminders, get_unseen_alerts, get_active_watches
+        from scheduler import (
+            get_active_watches,
+            get_due_reminders,
+            get_unseen_alerts,
+            get_upcoming_reminders,
+        )
         local_tz = ZoneInfo("America/Denver")
         now_tz = datetime.now(local_tz)
 
@@ -392,7 +396,7 @@ def main() -> None:
         pass  # scheduler module not available — skip silently
 
     # Active watches (legacy cron-schedules.md — fallback only)
-    if 'active_watches' not in dir() or not active_watches:
+    if "active_watches" not in dir() or not active_watches:
         watches = _cron_watches()
         if watches:
             print("  ◈  Watches")
