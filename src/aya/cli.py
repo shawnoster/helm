@@ -31,6 +31,7 @@ from aya.relay import RelayClient
 # subcommand is actually called, so startup cost is acceptable.
 from aya.scheduler import (
     _display_items,
+    add_recurring,
     add_reminder,
     add_seed_alert,
     add_watch,
@@ -624,6 +625,19 @@ def schedule_watch(
     console.print(f"[green]✓[/green] Watch {item['id'][:8]} ({provider})")
     console.print(f"  {message}")
     console.print(f"  Condition: {item['condition']}, poll every {item['poll_interval_minutes']}m")
+
+
+@schedule_app.command("recurring")
+def schedule_recurring(
+    message: str = typer.Option(..., "--message", "-m", help="Short label for this recurring job"),
+    cron: str = typer.Option(..., "--cron", "-c", help="Cron expression, e.g. '13,43 * * * *'"),
+    prompt: str = typer.Option("", "--prompt", "-p", help="Prompt delivered to Claude each firing"),
+    tag: str = typer.Option("", "--tag", "-t", help="Comma-separated tags"),
+) -> None:
+    """Add a persistent recurring session job (session_required cron)."""
+    item = add_recurring(message, cron, prompt, tag)
+    console.print(f"[green]✓[/green] Recurring {item['id'][:8]} — {cron}")
+    console.print(f"  {message}")
 
 
 @schedule_app.command("list")
