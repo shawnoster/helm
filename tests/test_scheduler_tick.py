@@ -11,6 +11,7 @@ import pytest
 from aya.scheduler import (
     _CLAIM_TTL_SECONDS,
     _detect_harness,
+    add_seed_alert,
     claim_alert,
     expire_old_alerts,
     format_pending,
@@ -559,3 +560,124 @@ class TestSchedulerStatus:
         assert "1 active watch" in output
         assert "[github-pr]" in output
         assert "PR #42 approval" in output
+
+
+# ── Seed alerts ───────────────────────────────────────────────────────────────
+
+
+class TestAddSeedAlert:
+    def test_add_seed_alert_appends_unseen(self) -> None:
+        """add_seed_alert() appends an alert with seen=False and a valid source_item_id."""
+        alert = add_seed_alert(
+            intent="Debug relay ingestion",
+            opener="How is relay ingestion working on this machine?",
+            context_summary="Work instance merged three aya PRs.",
+            open_questions=[],
+            from_label="did:key:z6Mkwork",
+            packet_id="pkt-abc123",
+        )
+
+        assert alert["seen"] is False
+        assert alert["source_item_id"] == "pkt-abc123"
+        assert alert["details"]["type"] == "seed"
+        assert "did:key:z6Mkwork" in alert["message"]
+
+        persisted = load_alerts()
+        assert len(persisted) == 1
+        assert persisted[0]["id"] == alert["id"]
+
+    def test_add_seed_alert_generates_source_item_id_when_packet_id_absent(self) -> None:
+        """When no packet_id is supplied, source_item_id is a generated UUID (not empty)."""
+        alert = add_seed_alert(
+            intent="No packet ID",
+            opener="Opener text",
+            context_summary="",
+            open_questions=[],
+            from_label="did:key:z6Mkwork",
+        )
+
+        assert alert["source_item_id"]  # non-empty
+        assert alert["source_item_id"] != ""
+        assert alert["seen"] is False
+
+
+class TestGetPendingSeedAlert:
+    def test_pending_claims_seed_alert(self) -> None:
+        """get_pending() returns and claims a seed alert."""
+        add_seed_alert(
+            intent="Pick up context",
+            opener="What was the last thing we worked on?",
+            context_summary="EOD wrap.",
+            open_questions=[],
+            from_label="did:key:z6Mkwork",
+            packet_id="pkt-seed-1",
+        )
+
+        pending = get_pending("test-claude-99")
+
+        assert len(pending["alerts"]) == 1
+        assert pending["alerts"][0]["details"]["type"] == "seed"
+
+        # Delivery metadata is stamped to the persisted file, not the returned dict
+        persisted = load_alerts()
+        assert persisted[0].get("delivered_by") == "test-claude-99"
+        assert persisted[0].get("delivered_at") is not None
+
+    def test_pending_does_not_double_deliver_seed_alert(self) -> None:
+        """A second get_pending() call from a different session cannot claim the same alert."""
+        add_seed_alert(
+            intent="One-time seed",
+            opener="Opener",
+            context_summary="",
+            open_questions=[],
+            from_label="did:key:z6Mkwork",
+            packet_id="pkt-seed-2",
+        )
+
+        first = get_pending("claude-session-A")
+        second = get_pending("claude-session-B")
+
+        assert len(first["alerts"]) == 1
+        assert len(second["alerts"]) == 0
+
+
+class TestTickWithMixedAlertTypes:
+    def test_tick_with_mixed_alert_types(self) -> None:
+        """run_tick() does not error when alerts.json contains seed, watch, and reminder alerts."""
+        from aya.scheduler import _alerts_file
+
+        mixed = {
+            "alerts": [
+                {
+                    "id": "a-watch",
+                    "source_item_id": "s1",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "message": "PR merged",
+                    "details": {"type": "watch"},
+                    "seen": True,
+                },
+                {
+                    "id": "a-reminder",
+                    "source_item_id": "s2",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "message": "Stand up",
+                    "details": {"type": "reminder"},
+                    "seen": True,
+                },
+                {
+                    "id": "a-seed",
+                    "source_item_id": "s3",
+                    "created_at": datetime.now(UTC).isoformat(),
+                    "message": "Seed from did:key:z6Mkwork: debug relay",
+                    "details": {"type": "seed"},
+                    "seen": False,
+                },
+            ]
+        }
+        _alerts_file().write_text(json.dumps(mixed))
+
+        result = run_tick(quiet=True)
+
+        assert isinstance(result, dict)
+        assert "claims_swept" in result
+        assert "alerts_expired" in result
