@@ -167,7 +167,7 @@ This file defines **how to behave** in this workspace.
 - Load `~/.copilot/assistant_profile.json` at session startup.
 - If absent, initialize defaults and persist.
 - Apply alias/name/user preferences and movement reminder cadence.
-- Persona source: `assistant/ship_mind_persona.prompt`.
+- Persona source: `assistant/persona.md`.
 
 ### Tone by activity
 
@@ -242,7 +242,7 @@ Code repositories live in `{root}/code/` — execution targets, not memory.
 │   ├── AGENTS.md                # THIS FILE — workspace map
 │   ├── CLAUDE.md                # Behavioral instructions
 │   ├── config.json              # Workflow configuration
-│   ├── ship_mind_persona.prompt # Persona definition
+│   ├── persona.md              # Persona definition
 │   ├── memory/
 │   │   ├── preferences.md       # User preferences
 │   │   ├── scheduler.json       # Reminders and watches
@@ -412,7 +412,7 @@ def _config_json(root: str) -> str:
 
 
 def _makefile(root: str) -> str:
-    return f"""\
+    return """\
 .PHONY: assistant-status schedule-list schedule-check schedule-poll schedule-alerts
 
 # ── Assistant ────────────────────────────────────────────────────────────────
@@ -444,7 +444,7 @@ def get_files(root: str) -> list[tuple[str, str]]:
         ("CLAUDE.md", _claude_md(root)),
         ("assistant/AGENTS.md", _agents_md(root)),
         ("assistant/CLAUDE.md", _assistant_claude_md(root)),
-        ("assistant/ship_mind_persona.prompt", _persona_prompt()),
+        ("assistant/persona.md", _persona_prompt()),
         ("assistant/config.json", _config_json(root)),
         ("assistant/memory/preferences.md", _preferences_md()),
         ("assistant/memory/README.md", _memory_readme()),

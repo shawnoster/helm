@@ -303,7 +303,7 @@ def main(console: Console | None = None) -> None:
         _exists(ROOT / "CLAUDE.md", "root CLAUDE"),
         _exists(ASSISTANT / "AGENTS.md", "assistant AGENTS"),
         _exists(ASSISTANT / "CLAUDE.md", "assistant CLAUDE"),
-        _exists(ASSISTANT / "ship_mind_persona.prompt", "Ship persona prompt"),
+        _exists(ASSISTANT / "persona.md", "Ship persona prompt"),
         _exists(MEMORY / "README.md", "memory::README.md"),
         _exists(MEMORY / "preferences.md", "memory::preferences.md"),
         _exists(MEMORY / "cron-schedules.md", "memory::cron-schedules.md"),
