@@ -755,6 +755,18 @@ def dismiss_item(item_id: str) -> dict[str, Any]:
     return item
 
 
+def dismiss_alert(alert_id: str) -> dict[str, Any]:
+    """Dismiss an alert by ID (prefix match). Returns the dismissed alert."""
+    with _file_lock():
+        alerts = _load_alerts_unlocked()
+        alert = _find(alerts, alert_id)
+        if not alert:
+            raise ValueError(f"Alert {alert_id} not found.")
+        alert["seen"] = True
+        _atomic_write(_alerts_file(), {"alerts": alerts})
+    return alert
+
+
 def snooze_item(item_id: str, until_text: str) -> tuple[dict[str, Any], datetime]:
     """Snooze a reminder. Returns (item, snooze_until_datetime)."""
     with _file_lock():

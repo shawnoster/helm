@@ -34,6 +34,7 @@ from aya.scheduler import (
     add_reminder,
     add_watch,
     check_due,
+    dismiss_alert,
     dismiss_item,
     format_pending,
     format_scheduler_status,
@@ -666,12 +667,15 @@ def schedule_check(
 def schedule_dismiss(
     item_id: str = typer.Argument(help="Item ID (prefix match ok)"),
 ) -> None:
-    """Dismiss an item."""
+    """Dismiss a scheduled item or alert."""
     try:
         item = dismiss_item(item_id)
-    except ValueError as exc:
-        err.print(f"[red]{exc}[/red]")
-        raise typer.Exit(1) from exc
+    except ValueError:
+        try:
+            item = dismiss_alert(item_id)
+        except ValueError as exc:
+            err.print(f"[red]{exc}[/red]")
+            raise typer.Exit(1) from exc
     console.print(f"[green]✓[/green] Dismissed {item['id'][:8]} — {item['message'][:60]}")
 
 
