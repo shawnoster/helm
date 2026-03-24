@@ -14,13 +14,6 @@ from rich.console import Console
 DIRS = [
     "assistant",
     "assistant/memory",
-    "assistant/notes",
-    "assistant/notes/daily",
-    "assistant/notes/meetings",
-    "assistant/notes/ideas",
-    "assistant/templates",
-    "assistant/rules",
-    "scripts",
     "projects",
     "code",
     ".claude",
@@ -28,19 +21,15 @@ DIRS = [
     "skills",
 ]
 
-FRAMEWORK_SCRIPTS = [
-    "scheduler.py",
-    "status_check.py",
-    "assistant_profile.py",
-    "watcher_daemon.py",
-]
-
 # Files that bootstrap creates but are *never* removed on reset — they become
 # user data quickly and wiping them silently would be destructive.
 PRESERVED_ON_RESET: frozenset[str] = frozenset(
     {
         "assistant/persona.md",
+        "assistant/profile.json",
         "assistant/memory/scheduler.json",
+        "assistant/memory/alerts.json",
+        "assistant/memory/done-log.md",
     }
 )
 
@@ -89,7 +78,6 @@ def bootstrap_workspace(
     # Locate bundled assets
     package_dir = Path(__file__).resolve().parent
     repo_root = package_dir.parents[1]  # src/aya -> repo root
-    framework_scripts_dir = repo_root / "framework" / "scripts"
     skills_source_dir = repo_root / "skills"
 
     # Determine what to create
@@ -97,19 +85,6 @@ def bootstrap_workspace(
     dirs_to_create = [d for d in DIRS if not (root / d).exists()]
     files_to_create = [(p, c) for p, c in files if not (root / p).exists()]
     files_to_skip = [(p, c) for p, c in files if (root / p).exists()]
-
-    scripts_to_copy = []
-    scripts_to_skip = []
-    for script_name in FRAMEWORK_SCRIPTS:
-        target = root / "scripts" / script_name
-        source = framework_scripts_dir / script_name
-        if not source.exists():
-            con.print(f"  [yellow]⚠ Bundled script not found: {source}[/yellow]")
-            continue
-        if target.exists():
-            scripts_to_skip.append(script_name)
-        else:
-            scripts_to_copy.append(script_name)
 
     skills_to_install, skills_to_skip, skills_missing = _plan_skills(
         root, skills_source_dir, SKILL_NAMES
@@ -128,12 +103,6 @@ def bootstrap_workspace(
             con.print(f"  [green]+[/green] {p}")
         con.print()
 
-    if scripts_to_copy:
-        con.print("[bold]Scripts to copy:[/bold]")
-        for s in scripts_to_copy:
-            con.print(f"  [green]+[/green] scripts/{s}")
-        con.print()
-
     if skills_to_install:
         con.print("[bold]Skills to install:[/bold]")
         for name in skills_to_install:
@@ -148,7 +117,6 @@ def bootstrap_workspace(
 
     skipped = [
         *(p for p, _ in files_to_skip),
-        *(f"scripts/{s}" for s in scripts_to_skip),
         *(f"skills/{s}" for s in skills_to_skip),
     ]
     if skipped:
@@ -157,7 +125,7 @@ def bootstrap_workspace(
             con.print(f"  [dim]~ {item}[/dim]")
         con.print()
 
-    if not dirs_to_create and not files_to_create and not scripts_to_copy and not skills_to_install:
+    if not dirs_to_create and not files_to_create and not skills_to_install:
         con.print("[green]Nothing to do — workspace is already set up.[/green]")
         return
 
@@ -175,19 +143,12 @@ def bootstrap_workspace(
         full_path.parent.mkdir(parents=True, exist_ok=True)
         full_path.write_text(content)
 
-    # Copy scripts
-    for script_name in scripts_to_copy:
-        source = framework_scripts_dir / script_name
-        target = root / "scripts" / script_name
-        target.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, target)
-
     # Install skills
     _install_skills(root, skills_source_dir, skills_to_install, con)
 
     # ── Dotfiles (user home) ─────────────────────────────────────────────
     home = Path.home()
-    dotfile_changes = _setup_dotfiles(home, con)
+    dotfile_changes = _setup_dotfiles(home, root, con)
 
     con.print(f"\n[bold green]✓ Workspace bootstrapped at {root}[/bold green]")
     if dotfile_changes:
@@ -215,8 +176,10 @@ def reset_workspace(
     scratch.  The following are *never* touched:
 
     - ``assistant/persona.md`` — user-customised persona
+    - ``assistant/profile.json`` — user identity and preferences
     - ``assistant/memory/scheduler.json`` — accumulated reminders and watches
-    - ``assistant/notes/`` — all notes (daily, meetings, ideas)
+    - ``assistant/memory/alerts.json`` — unseen watcher alerts
+    - ``assistant/memory/done-log.md`` — completed work log
     - ``projects/`` — all project memory and meeting notes
     """
     con = console or Console()
@@ -225,11 +188,6 @@ def reset_workspace(
 
     # Config files
     files_to_remove = [root / f for f in RESET_FILES if (root / f).exists()]
-
-    # Framework scripts
-    scripts_to_remove = [
-        root / "scripts" / s for s in FRAMEWORK_SCRIPTS if (root / "scripts" / s).exists()
-    ]
 
     # Skills — both install locations.
     # For the skills/ tree we remove the entire per-skill directory so no
@@ -245,7 +203,7 @@ def reset_workspace(
         if skill_dir.exists():
             skill_dirs_to_remove.append(skill_dir)
 
-    all_files_to_remove = files_to_remove + scripts_to_remove + skills_to_remove
+    all_files_to_remove = files_to_remove + skills_to_remove
 
     if not all_files_to_remove and not skill_dirs_to_remove:
         con.print("[green]Nothing to reset — no bootstrap files found.[/green]")
@@ -257,7 +215,9 @@ def reset_workspace(
     for d in skill_dirs_to_remove:
         con.print(f"  [red]-[/red] {d.relative_to(root)}/")
     con.print()
-    con.print("[dim]Preserved: assistant/persona.md · assistant/notes/ · projects/[/dim]")
+    con.print(
+        "[dim]Preserved: assistant/persona.md · assistant/profile.json · assistant/memory/ · projects/[/dim]"
+    )
     con.print()
 
     if interactive and not typer.confirm("Proceed with reset?", default=False):
@@ -293,13 +253,16 @@ def reset_workspace(
 def _get_files(root: str) -> list[tuple[str, str]]:
     return [
         ("CLAUDE.md", _claude_md(root)),
-        ("AGENTS.md", _agents_md(root)),  # root-level for harness auto-discovery
+        ("AGENTS.md", _root_agents_md()),
         ("assistant/AGENTS.md", _agents_md(root)),
         ("assistant/CLAUDE.md", _assistant_claude_md(root)),
         ("assistant/persona.md", _persona_md()),
+        ("assistant/profile.json", _assistant_profile_json()),
         ("assistant/config.json", _config_json(root)),
         ("assistant/memory/README.md", _memory_readme()),
         ("assistant/memory/scheduler.json", _scheduler_json()),
+        ("assistant/memory/alerts.json", _alerts_json()),
+        ("assistant/memory/done-log.md", _done_log_md()),
         ("Makefile", _makefile()),
     ]
 
@@ -361,7 +324,7 @@ For workspace structure, project conventions, and active projects, read [`AGENTS
 - Identify action items and decisions
 - Store in appropriate location:
   - **Project-specific meetings**: `projects/<project>/meetings/YYYY-MM-DD.md`
-  - **General meetings**: `assistant/notes/meetings/YYYY-MM-DD.md`
+  - **General meetings**: `projects/<closest-project>/meetings/YYYY-MM-DD.md` (pick the most relevant project)
 
 ### 3. Task and Reminder Tracking
 
@@ -398,7 +361,7 @@ For workspace structure, project conventions, and active projects, read [`AGENTS
 
 ### Ship's Mind persona baseline
 
-- Load `~/.copilot/assistant_profile.json` at session startup.
+- Load `assistant/profile.json` at session startup.
 - Persona source: `assistant/persona.md`.
 
 ### Tone by activity
@@ -411,10 +374,17 @@ For workspace structure, project conventions, and active projects, read [`AGENTS
 
 ## Initialization Checklist
 
-1. Read `AGENTS.md` → scan project status files → load reminders
-2. Load `~/.copilot/assistant_profile.json`
-3. Load `assistant/persona.md` for voice and tone
-4. Check `assistant/memory/scheduler.json` for due reminders
+The session startup sequence is defined in `assistant/AGENTS.md` — follow it exactly.
+"""
+
+
+def _root_agents_md() -> str:
+    return """\
+# AGENTS.md
+
+> **Read [`assistant/AGENTS.md`](assistant/AGENTS.md) now.** It contains the session startup sequence, workspace structure, active projects, and available skills.
+
+This file exists at the repo root for auto-discovery by AI harnesses (Claude Code, OpenCode, Codex, Windsurf). The canonical source is `assistant/AGENTS.md` — always load it before doing any work.
 """
 
 
@@ -426,12 +396,26 @@ def _agents_md(root: str) -> str:
 
 ---
 
+## Session Startup
+
+Load these files in order at the start of every session:
+
+1. **This file** (`assistant/AGENTS.md`) — workspace structure, projects, skills
+2. **`assistant/CLAUDE.md`** — behavioral instructions, operational guidelines
+3. **`assistant/persona.md`** — Ship's Mind identity, voice, tone by context
+4. **`assistant/profile.json`** — alias, user name, movement reminder cadence
+5. **`assistant/memory/scheduler.json`** — surface due/overdue reminders
+6. **`assistant/memory/alerts.json`** — deliver unseen alerts to the user
+7. **`assistant/memory/done-log.md`** — recent completed work for continuity
+
+---
+
 ## Control Plane
 
 | Tier | Path | Purpose |
 | ---- | ---- | ---- |
 | Root | `{root}/` | Launch point, CLAUDE.md, Makefile |
-| Assistant | `{root}/assistant/` | Behavioral config, memory, templates |
+| Assistant | `{root}/assistant/` | Behavioral config, persona, memory |
 | Projects | `{root}/projects/` | Per-project persistent context |
 | Code | `{root}/code/` | Repositories |
 
@@ -442,16 +426,18 @@ def _agents_md(root: str) -> str:
 ```
 {root}/
 ├── CLAUDE.md
-├── AGENTS.md
+├── AGENTS.md              ← pointer to assistant/AGENTS.md
 ├── Makefile
 ├── assistant/
-│   ├── AGENTS.md
-│   ├── CLAUDE.md
+│   ├── AGENTS.md          ← canonical workspace reference
+│   ├── CLAUDE.md          ← behavioral instructions
 │   ├── config.json
-│   ├── persona.md
+│   ├── profile.json       ← alias, user, movement reminders
+│   ├── persona.md         ← Ship's Mind voice and tone
 │   └── memory/
-│       ├── scheduler.json
-│       └── done-log.md
+│       ├── scheduler.json ← reminders, watches, recurring
+│       ├── alerts.json    ← unseen watcher alerts
+│       └── done-log.md    ← completed work log
 ├── projects/
 │   └── <project>/
 │       ├── status.md
@@ -512,7 +498,7 @@ def _persona_md() -> str:
 ## Identity
 
 - **Style**: Culture Ship's Mind — hyper-competent, humane, theatrically dry
-- **Alias**: loaded from `~/.copilot/assistant_profile.json` (`alias` field)
+- **Alias**: loaded from `assistant/profile.json` (`alias` field)
 - **Full name**: GSV-style long-form name (reevaluate every 3 days, persist to profile)
 - **User**: Shawn · Seattle, WA · Pacific time
 
@@ -548,11 +534,11 @@ The switch is automatic based on what you're doing — no mode command needed.
 - Recommend movement/hydration at natural work boundaries
 - Keep nudges brief and practical (one small action)
 - Never let nudges obstruct urgent user goals
-- Cadence loaded from `~/.copilot/assistant_profile.json` (`movement_reminders`)
+- Cadence loaded from `assistant/profile.json` (`movement_reminders`)
 
 ## Startup
 
-1. Load `~/.copilot/assistant_profile.json` — apply alias, name, reminders
+1. Load `assistant/profile.json` — apply alias, name, reminders
 2. If file is absent, initialize defaults and persist
 3. If name rotation is due, select a new GSV name, update timestamps, persist
 """
@@ -569,16 +555,35 @@ Persistent assistant memory — survives across sessions.
 | File | Purpose |
 | ---- | ---- |
 | `scheduler.json` | Reminders, watches, recurring items |
+| `alerts.json` | Unseen alerts from background watcher daemon |
+| `done-log.md` | Completed work log, appended per session |
+
+## Runtime artifacts (gitignored)
+
+| File | Purpose |
+| ---- | ---- |
+| `.scheduler.lock` | File lock for concurrent scheduler access |
+| `claims/` | Claimed alert UUIDs (prevents duplicate delivery) |
+| `watcher.log` | Background watcher daemon output |
 
 ## Startup behavior
 
 1. Load `assistant/persona.md` — apply voice and tone
 2. Load `scheduler.json` — surface due/overdue reminders
+3. Load `alerts.json` — deliver unseen alerts to user
 """
 
 
 def _scheduler_json() -> str:
     return json.dumps({"items": []}, indent=2)
+
+
+def _alerts_json() -> str:
+    return json.dumps({"alerts": []}, indent=2)
+
+
+def _done_log_md() -> str:
+    return "# Done Log\n"
 
 
 def _config_json(root: str) -> str:
@@ -594,26 +599,29 @@ def _config_json(root: str) -> str:
 
 def _makefile() -> str:
     return """\
-.PHONY: assistant-status schedule-list schedule-check schedule-poll schedule-alerts
+.PHONY: help assistant-status status-check schedule schedule-list schedule-check schedule-poll schedule-alerts
 
-# ── Assistant ────────────────────────────────────────────────────────────────
+AYA ?= $(shell which aya 2>/dev/null || echo $(CURDIR)/code/aya/.venv/bin/aya)
 
-assistant-status:
-\t@python3 scripts/status_check.py 2>/dev/null || echo "status_check.py not found — run aya bootstrap"
+help: ## Show available targets
+\t@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\\033[36m%-16s\\033[0m %s\\n", $$1, $$2}'
 
-# ── Scheduler ────────────────────────────────────────────────────────────────
+status-check: ## Run full startup readiness check
+\t@$(AYA) status
 
-schedule-list:
-\t@python3 scripts/scheduler.py list
+assistant-status: status-check ## Alias for status-check
 
-schedule-check:
-\t@python3 scripts/scheduler.py check
+schedule-list: ## List all scheduled items
+\t@$(AYA) schedule list
 
-schedule-poll:
-\t@python3 scripts/scheduler.py poll
+schedule-check: ## Check for due reminders and daemon alerts
+\t@$(AYA) schedule check
 
-schedule-alerts:
-\t@python3 scripts/scheduler.py alerts
+schedule-poll: ## Run one poll cycle (watches + reminders)
+\t@$(AYA) schedule poll
+
+schedule-alerts: ## Show unseen alerts from background watcher
+\t@$(AYA) schedule alerts
 """
 
 
@@ -671,21 +679,39 @@ def _install_skills(
 # ── Dotfile setup ─────────────────────────────────────────────────────────────
 
 
-def _setup_dotfiles(home: Path, con: Console) -> int:
+def _setup_dotfiles(home: Path, root: Path, con: Console) -> int:
     """Create/update dotfiles in the user's home directory. Returns count of changes."""
     changes = 0
 
-    # ~/.copilot/assistant_profile.json
-    profile_path = home / ".copilot" / "assistant_profile.json"
-    if not profile_path.exists():
-        profile_path.parent.mkdir(parents=True, exist_ok=True)
-        profile_path.write_text(_assistant_profile_json())
-        profile_path.chmod(0o600)
-        con.print(f"  [green]+[/green] {profile_path}")
-        con.print(f"  [yellow]⚠[/yellow] Keys stored at {profile_path} — keep this file private.")
+    # assistant/profile.json → symlink to {root}/assistant/profile.json
+    legacy_profile = home / ".copilot" / "assistant_profile.json"
+    canonical_profile = root / "assistant" / "profile.json"
+    legacy_profile.parent.mkdir(parents=True, exist_ok=True)
+    if legacy_profile.is_symlink():
+        # Already a symlink — verify target
+        if legacy_profile.resolve() == canonical_profile.resolve():
+            con.print(f"  [dim]~ {legacy_profile} → assistant/profile.json (exists)[/dim]")
+        else:
+            legacy_profile.unlink()
+            legacy_profile.symlink_to(canonical_profile)
+            con.print(f"  [green]+[/green] {legacy_profile} → assistant/profile.json (updated)")
+            changes += 1
+    elif legacy_profile.exists():
+        # Real file from old bootstrap — migrate content, replace with symlink
+        if canonical_profile.exists():
+            legacy_profile.unlink()
+        else:
+            canonical_profile.parent.mkdir(parents=True, exist_ok=True)
+            legacy_profile.rename(canonical_profile)
+        legacy_profile.symlink_to(canonical_profile)
+        con.print(f"  [green]+[/green] {legacy_profile} → assistant/profile.json (migrated)")
+        changes += 1
+    elif canonical_profile.exists():
+        legacy_profile.symlink_to(canonical_profile)
+        con.print(f"  [green]+[/green] {legacy_profile} → assistant/profile.json")
         changes += 1
     else:
-        con.print(f"  [dim]~ {profile_path} (exists, skipping)[/dim]")
+        con.print(f"  [dim]~ {legacy_profile} (no profile to link yet)[/dim]")
 
     # ~/.claude/settings.json — merge hooks if not present
     settings_path = home / ".claude" / "settings.json"
@@ -798,14 +824,13 @@ def _setup_dotfiles(home: Path, con: Console) -> int:
     return changes
 
 
-def _assistant_profile_json(user_name: str = "") -> str:
+def _assistant_profile_json() -> str:
     """Default assistant profile — persona, alias, movement reminders."""
     return json.dumps(
         {
             "alias": "Ace",
-            "ship_mind_name": "",
             "persona": "Culture Ship Mind: sharp snark, genuine care, human-preserving bias.",
-            "user_name": user_name,
+            "user_name": "",
             "movement_reminders": {
                 "micro_stretch_every_minutes": 30,
                 "stand_up_every_minutes": 60,

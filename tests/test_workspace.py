@@ -51,12 +51,16 @@ class TestBootstrapWorkspace:
 
         expected_files = [
             "CLAUDE.md",
+            "AGENTS.md",
             "assistant/AGENTS.md",
             "assistant/CLAUDE.md",
             "assistant/persona.md",
+            "assistant/profile.json",
             "assistant/config.json",
             "assistant/memory/README.md",
             "assistant/memory/scheduler.json",
+            "assistant/memory/alerts.json",
+            "assistant/memory/done-log.md",
             "Makefile",
         ]
         for f in expected_files:
@@ -213,19 +217,32 @@ class TestSkillsInstallation:
 
 
 class TestDotfileSetup:
-    def test_creates_assistant_profile(self, tmp_path: Path, fake_home: Path) -> None:
+    def test_creates_assistant_profile_in_workspace(self, tmp_path: Path, fake_home: Path) -> None:
         root = tmp_path / "workspace"
         root.mkdir()
 
         with _patch_home(fake_home):
             bootstrap_workspace(root, interactive=False, console=_silent_console())
 
-        profile_path = fake_home / ".copilot" / "assistant_profile.json"
-        assert profile_path.exists()
+        # Canonical profile is in the workspace
+        canonical = root / "assistant" / "profile.json"
+        assert canonical.exists()
 
-        data = json.loads(profile_path.read_text())
+        data = json.loads(canonical.read_text())
         assert "alias" in data
         assert "movement_reminders" in data
+
+    def test_symlinks_profile_to_copilot(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+
+        legacy = fake_home / ".copilot" / "assistant_profile.json"
+        canonical = root / "assistant" / "profile.json"
+        assert legacy.is_symlink()
+        assert legacy.resolve() == canonical.resolve()
 
     def test_creates_claude_settings_with_hooks(self, tmp_path: Path, fake_home: Path) -> None:
         root = tmp_path / "workspace"
@@ -263,17 +280,36 @@ class TestDotfileSetup:
         root = tmp_path / "workspace"
         root.mkdir()
 
-        # Pre-create profile with custom alias
-        profile_path = fake_home / ".copilot" / "assistant_profile.json"
-        profile_path.parent.mkdir(parents=True)
-        profile_path.write_text(json.dumps({"alias": "CustomAlias"}))
+        # Pre-create canonical profile with custom alias
+        canonical = root / "assistant" / "profile.json"
+        canonical.parent.mkdir(parents=True)
+        canonical.write_text(json.dumps({"alias": "CustomAlias"}))
 
         with _patch_home(fake_home):
             bootstrap_workspace(root, interactive=False, console=_silent_console())
 
         # Should not have been overwritten
-        data = json.loads(profile_path.read_text())
+        data = json.loads(canonical.read_text())
         assert data["alias"] == "CustomAlias"
+
+    def test_migrates_legacy_profile_to_workspace(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        # Pre-create legacy profile at ~/.copilot (old location)
+        legacy = fake_home / ".copilot" / "assistant_profile.json"
+        legacy.parent.mkdir(parents=True)
+        legacy.write_text(json.dumps({"alias": "LegacyAlias"}))
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+
+        # Legacy should now be a symlink, content migrated to workspace
+        canonical = root / "assistant" / "profile.json"
+        assert canonical.exists()
+        assert legacy.is_symlink()
+        data = json.loads(canonical.read_text())
+        assert data["alias"] == "LegacyAlias"
 
     def test_merges_hooks_into_existing_settings(self, tmp_path: Path, fake_home: Path) -> None:
         root = tmp_path / "workspace"
@@ -343,23 +379,39 @@ class TestResetWorkspace:
         assert persona_path.exists(), "persona.md must not be removed on reset"
         assert persona_path.read_text() == custom_content
 
-    def test_preserves_notes(self, tmp_path: Path, fake_home: Path) -> None:
+    def test_preserves_done_log(self, tmp_path: Path, fake_home: Path) -> None:
         root = tmp_path / "workspace"
         root.mkdir()
 
         with _patch_home(fake_home):
             bootstrap_workspace(root, interactive=False, console=_silent_console())
 
-        note = root / "assistant" / "notes" / "daily" / "TODAY.md"
-        note.write_text("# Today\n- item")
-        meeting = root / "assistant" / "notes" / "meetings" / "2025-01-01.md"
-        meeting.write_text("# Meeting\n")
+        done_log = root / "assistant" / "memory" / "done-log.md"
+        custom_content = "# Done Log\n\n## 2026-03-23\n\n- Completed something\n"
+        done_log.write_text(custom_content)
 
         with _patch_home(fake_home):
             reset_workspace(root, interactive=False, console=_silent_console())
 
-        assert note.exists(), "daily note must not be removed on reset"
-        assert meeting.exists(), "meeting note must not be removed on reset"
+        assert done_log.exists(), "done-log.md must not be removed on reset"
+        assert done_log.read_text() == custom_content
+
+    def test_preserves_alerts(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+
+        alerts = root / "assistant" / "memory" / "alerts.json"
+        custom_content = '{"alerts": [{"id": "test"}]}'
+        alerts.write_text(custom_content)
+
+        with _patch_home(fake_home):
+            reset_workspace(root, interactive=False, console=_silent_console())
+
+        assert alerts.exists(), "alerts.json must not be removed on reset"
+        assert alerts.read_text() == custom_content
 
     def test_preserves_projects(self, tmp_path: Path, fake_home: Path) -> None:
         root = tmp_path / "workspace"
@@ -407,6 +459,23 @@ class TestResetWorkspace:
             assert not (root / "skills" / name).exists(), (
                 f"Skill directory skills/{name} must be removed on reset"
             )
+
+    def test_preserves_profile(self, tmp_path: Path, fake_home: Path) -> None:
+        root = tmp_path / "workspace"
+        root.mkdir()
+
+        with _patch_home(fake_home):
+            bootstrap_workspace(root, interactive=False, console=_silent_console())
+
+        profile_path = root / "assistant" / "profile.json"
+        custom_content = '{"alias": "CustomAlias"}'
+        profile_path.write_text(custom_content)
+
+        with _patch_home(fake_home):
+            reset_workspace(root, interactive=False, console=_silent_console())
+
+        assert profile_path.exists(), "profile.json must not be removed on reset"
+        assert profile_path.read_text() == custom_content
 
     def test_preserves_scheduler(self, tmp_path: Path, fake_home: Path) -> None:
         root = tmp_path / "workspace"
