@@ -13,6 +13,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from aya import __version__
 from aya.ci import watch_pr_checks
 from aya.identity import Identity, Profile, TrustedKey
 from aya.packet import ConflictStrategy, ContentType, Packet, human_age
@@ -100,6 +101,15 @@ def _load_profile(profile_path: Path) -> Profile:
         )
         raise typer.Exit(1)
     return Profile.load(profile_path)
+
+
+# ── version ──────────────────────────────────────────────────────────────────
+
+
+@app.command()
+def version() -> None:
+    """Show the installed aya version."""
+    console.print(f"aya {__version__}")
 
 
 # ── init ─────────────────────────────────────────────────────────────────────
