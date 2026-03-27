@@ -82,7 +82,7 @@ Invoke these with `/skill-name` (Claude Code) or by asking your assistant to run
 
 ## Persona
 
-Load `assistant/persona.md` for voice and tone. Load `~/.copilot/assistant_profile.json` for identity.
+Load `assistant/persona.md` for voice and tone. Load `assistant/profile.json` for identity.
 
 The assistant persona is a Culture Ship's Mind — hyper-competent, humane, dry wit. Tone adapts by context:
 
