@@ -22,11 +22,12 @@ runner = CliRunner()
 
 class TestVersion:
     def test_outputs_version(self) -> None:
-        import aya
+        from importlib.metadata import version
 
+        expected = version("aya-ai-assist")
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0, result.output
-        assert f"aya {aya.__version__}" in result.output
+        assert f"aya {expected}" in result.output
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
