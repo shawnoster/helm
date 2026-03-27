@@ -80,6 +80,55 @@ Invoke these with `/skill-name` (Claude Code) or by asking your assistant to run
 
 ---
 
+## Background Automation
+
+Two systems handle scheduled and automated work. Knowing which to reach for is important.
+
+### The one question
+
+> *Does this task need me, or just need to be done?*
+
+### aya schedule — you are the actor
+
+Surfaces alerts and reminders **to you** at session start via the `SessionStart` hook. You receive the information, then decide what to do.
+
+Good fit:
+- Reminders and wellness nudges (stand up, EOD prep, drink water)
+- "Watch X and tell me when it changes" (PR approved, ticket moves, CI red)
+- Anything that requires your judgment before action
+
+```bash
+aya schedule remind "review open PRs" --due 2h
+aya schedule watch --type github_pr --target owner/repo#42
+aya schedule recurring "check inbox" --interval 30m --only-during 09:00-18:00
+```
+
+### CCR remote triggers — agent is the actor
+
+Runs a fully autonomous agent in Anthropic's cloud on a cron schedule (minimum 1 hour). No session required — the agent clones the repo, does work, exits. Use the `/schedule` skill to create triggers.
+
+Good fit:
+- PR feedback bot (address review comments, push, reply)
+- Dependency update PRs
+- CI failure → auto-open bug issue
+- Stale PR cleanup
+- Nightly summaries posted to Slack
+- Auto-merge approved PRs
+
+If you want to hear what CCR did, wire the agent to Slack or Gmail via MCP connectors.
+
+### Quick guide
+
+| Signal | Use |
+| ---- | ---- |
+| Needs my attention or judgment | aya schedule |
+| Can be completed without me | CCR trigger |
+| Must run more often than hourly | aya schedule |
+| Needs local files or env vars | aya schedule |
+| Should work while I'm offline | CCR trigger |
+
+---
+
 ## Persona
 
 Load `assistant/persona.md` for voice and tone. Load `assistant/profile.json` for identity.
