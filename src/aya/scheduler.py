@@ -77,11 +77,18 @@ def _config_file() -> Path:
     return globals().get("CONFIG_FILE") or (_get_root() / "assistant" / "config.json")
 
 
+def _activity_file() -> Path:
+    return globals().get("ACTIVITY_FILE") or (
+        _get_root() / "assistant" / "memory" / "activity.json"
+    )
+
+
 _LAZY_ATTRS: dict[str, Any] = {
     "ROOT": _get_root,
     "SCHEDULER_FILE": _scheduler_file,
     "ALERTS_FILE": _alerts_file,
     "CONFIG_FILE": _config_file,
+    "ACTIVITY_FILE": _activity_file,
     "LOCAL_TZ": _get_local_tz,
 }
 
@@ -198,6 +205,113 @@ def parse_due(text: str, now: datetime | None = None) -> datetime:
             return _apply_time(_next_weekday(now, day_num), h, mn)
 
     raise ValueError(f"Cannot parse due time: {text!r}")
+
+
+# ── idle / work-hours helpers ────────────────────────────────────────────────
+
+_DURATION_RE = re.compile(
+    r"^(?:(\d+)\s*h(?:r|ours?)?)?\s*(?:(\d+)\s*m(?:in(?:utes?)?)?)?$",
+    re.IGNORECASE,
+)
+
+_WORK_HOURS_RE = re.compile(r"^(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})$")
+
+
+def parse_duration(text: str) -> timedelta:
+    """Parse a human-readable duration string into a timedelta.
+
+    Supports: "30m", "1h", "2h30m", "90min", "1hr", "2 hours 30 minutes".
+
+    Raises ValueError if the string cannot be parsed or represents zero duration.
+    """
+    text = text.strip()
+    m = _DURATION_RE.match(text)
+    if m and (m.group(1) or m.group(2)):
+        hours = int(m.group(1) or 0)
+        minutes = int(m.group(2) or 0)
+        delta = timedelta(hours=hours, minutes=minutes)
+        if delta.total_seconds() <= 0:
+            raise ValueError(f"Duration must be positive: {text!r}")
+        return delta
+    raise ValueError(f"Cannot parse duration: {text!r}")
+
+
+def parse_work_hours(text: str) -> tuple[tuple[int, int], tuple[int, int]]:
+    """Parse a work-hours window string into ((start_h, start_m), (end_h, end_m)).
+
+    Accepts "HH:MM-HH:MM", e.g. "08:00-18:00" → ((8, 0), (18, 0)).
+
+    Raises ValueError if the string cannot be parsed.
+    """
+    m = _WORK_HOURS_RE.match(text.strip())
+    if not m:
+        raise ValueError(f"Cannot parse work hours: {text!r}  (expected HH:MM-HH:MM)")
+    sh, sm, eh, em = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4))
+    return (sh, sm), (eh, em)
+
+
+def is_within_work_hours(only_during: str, now: datetime | None = None) -> bool:
+    """Return True if *now* falls within the *only_during* window.
+
+    *only_during* must be a string in "HH:MM-HH:MM" format (e.g. "08:00-18:00").
+    Returns True if *only_during* is empty so that callers can unconditionally test.
+    """
+    if not only_during:
+        return True
+    if now is None:
+        now = datetime.now(_get_local_tz())
+    (sh, sm), (eh, em) = parse_work_hours(only_during)
+    start_minutes = sh * 60 + sm
+    end_minutes = eh * 60 + em
+    current_minutes = now.hour * 60 + now.minute
+    return start_minutes <= current_minutes < end_minutes
+
+
+def record_activity(now: datetime | None = None) -> None:
+    """Record the current time as the last-known user activity.
+
+    Writes ``{"last_activity_at": "<ISO timestamp>"}`` to the activity file.
+    Safe to call from any hook or command that indicates user presence.
+    """
+    if now is None:
+        now = datetime.now(_get_local_tz())
+    path = _activity_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with _file_lock():
+        _atomic_write(path, {"last_activity_at": now.isoformat()})
+
+
+def get_last_activity() -> datetime | None:
+    """Return the timestamp of the last recorded user activity, or None."""
+    data = _locked_read(_activity_file())
+    if not data:
+        return None
+    raw = data.get("last_activity_at")
+    if not raw:
+        return None
+    try:
+        return datetime.fromisoformat(raw)
+    except (ValueError, TypeError):
+        return None
+
+
+def is_idle(threshold_str: str, now: datetime | None = None) -> bool:
+    """Return True if the session appears idle.
+
+    A session is idle when the elapsed time since the last recorded activity
+    exceeds *threshold_str* (e.g. "30m", "1h").  If no activity has ever been
+    recorded the session is considered *not* idle so that first-run behaviour is
+    unaffected.
+    """
+    if not threshold_str:
+        return False
+    threshold = parse_duration(threshold_str)
+    last = get_last_activity()
+    if last is None:
+        return False
+    if now is None:
+        now = datetime.now(_get_local_tz())
+    return (now - last) >= threshold
 
 
 # ── file safety (fcntl lock + atomic write) ──────────────────────────────────
@@ -716,10 +830,31 @@ def add_recurring(
     cron: str,
     prompt: str = "",
     tags: str = "",
+    idle_back_off: str = "",
+    only_during: str = "",
 ) -> dict[str, Any]:
-    """Add a persistent recurring session job. Returns the created item."""
+    """Add a persistent recurring session job. Returns the created item.
+
+    Args:
+        message:       Short human-readable label shown in schedule list.
+        cron:          Standard five-field cron expression (e.g. "27 * * * *").
+        prompt:        Instruction delivered to Claude each time the cron fires.
+        tags:          Comma-separated tags for filtering.
+        idle_back_off: Suppress this cron when the session has been idle for
+                       longer than this duration (e.g. "30m", "1h").  Empty
+                       string disables idle suppression.
+        only_during:   Only allow this cron to fire within this time window
+                       (e.g. "08:00-18:00").  Empty string disables the window
+                       check.
+    """
+    # Validate optional fields eagerly so callers get clear errors.
+    if idle_back_off:
+        parse_duration(idle_back_off)  # raises ValueError on bad input
+    if only_during:
+        parse_work_hours(only_during)  # raises ValueError on bad input
+
     now = datetime.now(_get_local_tz())
-    item = {
+    item: dict[str, Any] = {
         "id": _new_id(),
         "type": "recurring",
         "status": "active",
@@ -730,6 +865,10 @@ def add_recurring(
         "cron": cron,
         "prompt": prompt,
     }
+    if idle_back_off:
+        item["idle_back_off"] = idle_back_off
+    if only_during:
+        item["only_during"] = only_during
     with _file_lock():
         items = _load_items_unlocked()
         items.append(item)
@@ -1090,19 +1229,34 @@ def get_pending(instance_id: str | None = None) -> dict[str, Any]:
                     a["delivered_by"] = instance_id
             _atomic_write(_alerts_file(), {"alerts": alerts})
 
-    # Collect session-required recurring items
+    # Collect session-required recurring items, applying idle / work-hours filters.
+    now = datetime.now(_get_local_tz())
     items = load_items()
-    session_crons = [
+    active_crons = [
         i
         for i in items
         if i.get("type") == "recurring"
         and i.get("status", "active") == "active"
         and i.get("session_required")
     ]
+    session_crons = []
+    suppressed_crons = []
+    for item in active_crons:
+        only_during = item.get("only_during", "")
+        idle_back_off_str = item.get("idle_back_off", "")
+        if only_during and not is_within_work_hours(only_during, now):
+            reason = f"outside work hours ({only_during})"
+            suppressed_crons.append({"item": item, "reason": reason})
+        elif idle_back_off_str and is_idle(idle_back_off_str, now):
+            reason = f"session idle (threshold: {idle_back_off_str})"
+            suppressed_crons.append({"item": item, "reason": reason})
+        else:
+            session_crons.append(item)
 
     return {
         "alerts": deliverable,
         "session_crons": session_crons,
+        "suppressed_crons": suppressed_crons,
         "instance_id": instance_id,
     }
 
@@ -1112,6 +1266,7 @@ def format_pending(pending: dict[str, Any]) -> str:
     lines: list[str] = []
     alerts = pending.get("alerts", [])
     crons = pending.get("session_crons", [])
+    suppressed = pending.get("suppressed_crons", [])
 
     if alerts:
         lines.append(f"📋 {len(alerts)} pending alert(s):")
@@ -1133,9 +1288,24 @@ def format_pending(pending: dict[str, Any]) -> str:
             cron_id = c["id"][:12]
             cron_expr = c["cron"]
             cron_msg = c.get("message", c.get("prompt", ""))[:50]
-            lines.append(f'  • {cron_id}: "{cron_expr}" — {cron_msg}')
+            meta_parts = []
+            if c.get("idle_back_off"):
+                meta_parts.append(f"idle-back-off={c['idle_back_off']}")
+            if c.get("only_during"):
+                meta_parts.append(f"only-during={c['only_during']}")
+            meta = f"  [{', '.join(meta_parts)}]" if meta_parts else ""
+            lines.append(f'  • {cron_id}: "{cron_expr}" — {cron_msg}{meta}')
 
-    if not alerts and not crons:
+    if suppressed:
+        lines.append(f"\n🔕 {len(suppressed)} cron(s) suppressed:")
+        for entry in suppressed:
+            c = entry["item"]
+            reason = entry["reason"]
+            cron_id = c["id"][:12]
+            cron_msg = c.get("message", c.get("prompt", ""))[:50]
+            lines.append(f"  • {cron_id}: {cron_msg} ({reason})")
+
+    if not alerts and not crons and not suppressed:
         lines.append("No pending items.")
 
     return "\n".join(lines)

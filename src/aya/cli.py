@@ -42,8 +42,10 @@ from aya.scheduler import (
     format_scheduler_status,
     get_pending,
     get_scheduler_status,
+    is_idle,
     list_items,
     parse_due,
+    record_activity,
     run_poll,
     run_tick,
     show_alerts,
@@ -619,11 +621,62 @@ def schedule_recurring(
     cron: str = typer.Option(..., "--cron", "-c", help="Cron expression, e.g. '13,43 * * * *'"),
     prompt: str = typer.Option("", "--prompt", "-p", help="Prompt delivered to Claude each firing"),
     tag: str = typer.Option("", "--tag", "-t", help="Comma-separated tags"),
+    idle_back_off: str = typer.Option(
+        "",
+        "--idle-back-off",
+        help="Suppress when idle for longer than this (e.g. '30m', '1h')",
+    ),
+    only_during: str = typer.Option(
+        "",
+        "--only-during",
+        help="Only fire within this time window, e.g. '08:00-18:00'",
+    ),
 ) -> None:
     """Add a persistent recurring session job (session_required cron)."""
-    item = add_recurring(message, cron, prompt, tag)
+    try:
+        item = add_recurring(message, cron, prompt, tag, idle_back_off, only_during)
+    except ValueError as exc:
+        err.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from exc
     console.print(f"[green]✓[/green] Recurring {item['id'][:8]} — {cron}")
     console.print(f"  {message}")
+    if idle_back_off:
+        console.print(f"  Idle back-off: {idle_back_off}")
+    if only_during:
+        console.print(f"  Only during: {only_during}")
+
+
+@schedule_app.command("activity")
+def schedule_activity() -> None:
+    """Record user activity — resets the idle back-off timer.
+
+    Call this whenever the user is known to be active (e.g. on each new message
+    or via a SessionStart / PreToolUse hook) so that idle-aware recurring crons
+    are not suppressed unnecessarily.
+    """
+    record_activity()
+    console.print("[green]✓[/green] Activity recorded.")
+
+
+@schedule_app.command("is-idle")
+def schedule_is_idle(
+    threshold: str = typer.Option(
+        "30m", "--threshold", "-t", help="Idle threshold (e.g. '30m', '1h')"
+    ),
+) -> None:
+    """Check whether the session is currently idle.
+
+    Exits with code 0 (active) or 1 (idle) so shell scripts can branch on it.
+    """
+    try:
+        idle = is_idle(threshold)
+    except ValueError as exc:
+        err.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(2) from exc
+    if idle:
+        console.print(f"[yellow]idle[/yellow] (threshold: {threshold})")
+        raise typer.Exit(1)
+    console.print(f"[green]active[/green] (threshold: {threshold})")
 
 
 @schedule_app.command("list")
