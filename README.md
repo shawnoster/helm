@@ -44,6 +44,72 @@ echo "Hello from work" | uv run aya pack --to home --intent "test" | uv run aya 
 uv run aya inbox
 ```
 
+## Scheduling
+
+aya has its own scheduler, but Claude Code also has a separate cloud-based automation system called CCR (Claude Code Remote). They solve different problems — knowing which to reach for saves a lot of friction.
+
+### The one question
+
+> *Does this task need me, or just need to be done?*
+
+If you need to be informed or make a decision → **aya schedule**.
+If it can be completed without you → **CCR remote trigger**.
+
+### aya schedule — human in the loop
+
+aya's scheduler runs on your machine. Alerts are delivered at session start via the `SessionStart` hook — they surface *to you* in your session context. You read them, decide, act.
+
+**Use aya for:**
+
+| What | Example |
+| ---- | ---- |
+| Reminders | `aya schedule remind "review PRs" --due 2h` |
+| Movement / wellness nudges | Recurring micro-prompts injected each session |
+| Watch and tell me | "Watch PR #50 — alert me when it's approved" |
+| Ticket state changes | "Tell me when JIRA-123 moves to In Review" |
+| Anything requiring your judgment | CI is red, inbox has 10 packets, standup in 15min |
+
+aya watches *poll* for state and produce *alerts*. You are the actor.
+
+### CCR — human out of the loop
+
+CCR (Claude Code Remote) runs isolated agents in Anthropic's cloud on a cron schedule. The agent clones your repo, does work, and exits — whether you're online or not. Use the `schedule` skill in Claude Code to create triggers.
+
+**Use CCR for:**
+
+| What | Example |
+| ---- | ---- |
+| PR feedback bot | Address review comments, push, reply to threads |
+| Dependency updates | Weekly: open a PR bumping outdated packages |
+| CI failure → ticket | Open a bug issue when main goes red |
+| Stale PR cleanup | Comment on PRs idle >2 weeks |
+| Nightly health report | Post a repo summary to Slack |
+| Auto-merge | Merge approved PRs with passing checks |
+| Release notes draft | Weekly: summarize merged PRs into a draft |
+| Triage | Label and assign new issues by content |
+
+CCR agents act *autonomously*. If you want to hear about what they did, wire them to Slack or Gmail via MCP connectors in the trigger.
+
+### Choosing between them
+
+```
+Does it need my attention or judgment?
+  Yes → aya schedule (watch / remind)
+
+Can it be completed without me?
+  Yes → CCR trigger
+
+Does it need to run more often than hourly?
+  Yes → aya schedule (any interval via system cron)
+
+Does it need my local files or environment?
+  Yes → aya schedule + SessionStart hook
+```
+
+CCR minimum interval is 1 hour. aya can fire at any cron interval.
+
+---
+
 ## Commands
 
 | Command | What it does |
