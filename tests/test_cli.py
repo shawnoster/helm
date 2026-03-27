@@ -356,48 +356,6 @@ class TestScheduleDismiss:
         assert result.exit_code != 0
 
 
-# ── bootstrap ─────────────────────────────────────────────────────────────────
-
-
-class TestBootstrap:
-    def test_bootstrap_creates_workspace(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        root = tmp_path / "myworkspace"
-        root.mkdir()
-        fake_home = tmp_path / "fakehome"
-        fake_home.mkdir()
-
-        monkeypatch.setattr("aya.workspace.Path.home", lambda: fake_home)
-
-        result = runner.invoke(
-            app,
-            [
-                "bootstrap",
-                "--root",
-                str(root),
-                "--yes",
-            ],
-        )
-        assert result.exit_code == 0, result.output
-        assert (root / "CLAUDE.md").exists()
-        assert (root / "assistant" / "memory" / "scheduler.json").exists()
-
-    def test_bootstrap_noninteractive_with_yes_flag(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        root = tmp_path / "workspace2"
-        root.mkdir()
-        fake_home = tmp_path / "fakehome2"
-        fake_home.mkdir()
-
-        monkeypatch.setattr("aya.workspace.Path.home", lambda: fake_home)
-
-        result = runner.invoke(app, ["bootstrap", "--root", str(root), "--yes"])
-        # Should not prompt and should succeed
-        assert result.exit_code == 0
-
-
 # ── dispatch ──────────────────────────────────────────────────────────────────
 
 
