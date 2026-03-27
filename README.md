@@ -103,6 +103,7 @@ uv run aya inbox
 | `aya bootstrap` | Scaffold a workspace — config, skills, hooks, dotfiles |
 | `aya reset` | Remove bootstrap files, keep persona and user data |
 | `aya init` | Generate identity keypair for this instance |
+| `aya profile` | Initialize or rotate the persistent assistant profile |
 | `aya pair` | Pair two instances via short-lived relay code |
 | `aya trust` | Manually trust a DID |
 | `aya pack` | Create a signed knowledge packet |
@@ -110,11 +111,21 @@ uv run aya inbox
 | `aya dispatch` | Pack + send in one step (no temp file) |
 | `aya inbox` | List pending packets |
 | `aya receive` | Review and ingest packets |
+| `aya status` | Workspace readiness check — systems, schedule, focus |
+| `aya ci` | CI integration — watch checks, report failures |
+| `aya schedule remind` | Add a one-shot reminder |
+| `aya schedule watch` | Add a polling watch (GitHub PR, Jira ticket/query) |
+| `aya schedule recurring` | Add a persistent recurring session job |
+| `aya schedule activity` | Record user activity — resets the idle back-off timer |
+| `aya schedule is-idle` | Check whether the session is currently idle |
+| `aya schedule list` | List scheduled items |
+| `aya schedule check` | Check for due reminders and alerts |
+| `aya schedule dismiss` | Dismiss a scheduled item or alert |
+| `aya schedule snooze` | Snooze a reminder |
+| `aya schedule alerts` | Show alerts from background watcher |
 | `aya schedule tick` | One scheduler cycle — poll watches, expire alerts |
 | `aya schedule pending` | Show unclaimed alerts + session crons (SessionStart hook) |
 | `aya schedule status` | Scheduler overview — watches, reminders, deliveries |
-| `aya schedule remind` | Add a one-shot reminder |
-| `aya schedule watch` | Add a polling watch (GitHub PR, Jira ticket/query) |
 
 ## Bootstrap
 
