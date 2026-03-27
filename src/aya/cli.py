@@ -864,6 +864,7 @@ def status() -> None:
     """Workspace readiness check — systems, schedule, focus."""
     run_status()
 
+
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
