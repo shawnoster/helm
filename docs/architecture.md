@@ -20,14 +20,13 @@ aya is a personal AI assistant toolkit that spans multiple machines. Each machin
 │  │  │   ├── persona.md       │  │     │  │  │   ├── persona.md      │ │
 │  │  │   └── memory/          │  │     │  │  │   └── memory/         │ │
 │  │  ├── projects/            │  │     │  │  ├── projects/           │ │
-│  │  ├── code/                │  │     │  │  ├── code/               │ │
-│  │  └── scripts/             │  │     │  │  └── scripts/            │ │
+│  │  └── code/                │  │     │  │  └── code/               │ │
 │  └───────────────────────────┘  │     │  └───────────────────────────┘ │
 │                                 │     │                                │
 │  ┌───────────────────────────┐  │     │  ┌───────────────────────────┐ │
 │  │ Profile                   │  │     │  │ Profile                   │ │
-│  │ ~/.copilot/               │  │     │  │ ~/.copilot/              │ │
-│  │   assistant_profile.json  │  │     │  │   assistant_profile.json │ │
+│  │ assistant/                │  │     │  │ assistant/               │ │
+│  │   profile.json            │  │     │  │   profile.json           │ │
 │  │   ├── alias: "Ace"        │  │     │  │   ├── alias: "Ace"       │ │
 │  │   ├── did:key (ed25519)   │  │     │  │   ├── did:key (ed25519)  │ │
 │  │   ├── nostr (secp256k1)   │  │     │  │   ├── nostr (secp256k1)  │ │
@@ -181,41 +180,28 @@ The same skill produces different output based on available MCPs:
 └──────────────────────────────────────────────────────┘
 ```
 
-## Bootstrap Flow
+## Setup Flow
+
+aya is a CLI tool — workspace scaffolding is the responsibility of your guild repo, not aya. Set up a new machine by cloning your workspace and then initializing aya identity:
 
 ```
 Fresh machine
      │
      ▼
-git clone github.com/shawnoster/helm
-cd helm && uv sync
-     │
-     ▼
-aya bootstrap --root ~
-     │
-     ├── Create workspace skeleton
-     │   ~/assistant/, ~/projects/, ~/code/, ~/scripts/
-     │
-     ├── Generate framework files
-     │   CLAUDE.md, AGENTS.md, persona.md, config.json, Makefile
-     │
-     ├── Copy scripts
-     │   scheduler.py, status_check.py, assistant_profile.py
-     │
-     └── Create dotfiles
-         ~/.copilot/assistant_profile.json  (alias, persona, reminders)
-         ~/.claude/settings.json            (hooks: health crons + aya receive)
-         ~/.claude/hooks/health_crons.sh    (movement reminder injection)
+git clone github.com/<you>/guild ~/guild
+cd ~/guild && uv sync   # install aya
      │
      ▼
 aya init --label home
      │
      ▼
-aya pair --code <CODE> --label home
+aya pair --code <CODE> --label home   # exchange trust with another instance
      │
      ▼
-Ready. Open Claude, packets auto-surface.
+Ready. Open Claude Code from ~/guild, packets auto-surface.
 ```
+
+Workspace structure (CLAUDE.md, AGENTS.md, skills, hooks) is defined in your guild repo and maintained there — not by aya.
 
 ## Component Map
 
@@ -235,9 +221,6 @@ aya (CLI + Plugin)
 │
 ├── Status
 │   └── status.py        — workspace readiness check, daily notes parsing
-│
-├── Workspace
-│   └── workspace.py     — bootstrap scaffolding, dotfile setup
 │
 └── CLI
     └── cli.py           — typer app wiring all subcommands
