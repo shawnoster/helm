@@ -20,12 +20,8 @@ PROFILE_PATH = AYA_HOME / "profile.json"
 CONFIG_PATH = AYA_HOME / "config.json"
 
 # ── scheduler data ──────────────────────────────────────────────────────────
-MEMORY_DIR = AYA_HOME / "memory"
-SCHEDULER_FILE = MEMORY_DIR / "scheduler.json"
-ALERTS_FILE = MEMORY_DIR / "alerts.json"
-ACTIVITY_FILE = MEMORY_DIR / "activity.json"
-LOCK_FILE = MEMORY_DIR / ".scheduler.lock"
-CLAIMS_DIR = MEMORY_DIR / "claims"
-
-# ── legacy markdown (kept for migration, may be removed) ───────────────────
-CRON_SCHEDULES_PATH = MEMORY_DIR / "cron-schedules.md"
+SCHEDULER_FILE = AYA_HOME / "scheduler.json"
+ALERTS_FILE = AYA_HOME / "alerts.json"
+ACTIVITY_FILE = AYA_HOME / "activity.json"
+LOCK_FILE = AYA_HOME / ".scheduler.lock"
+CLAIMS_DIR = AYA_HOME / "claims"

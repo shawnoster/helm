@@ -123,7 +123,7 @@ def main(console: Console | None = None) -> None:
 
     # System checks — aya data only
     checks: list[CheckResult] = [
-        CheckResult("Assistant profile", profile is not None, str(PROFILE)),
+        CheckResult("profile", profile is not None, str(PROFILE)),
         CheckResult("workflow config", _read_json(CONFIG) is not None, str(CONFIG)),
         CheckResult(
             name="scheduler",
