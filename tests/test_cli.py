@@ -354,7 +354,7 @@ class TestPack:
         assert result.exit_code != 0
         # Error should mention available instance names
         combined = result.stdout + (result.stderr or "")
-        assert "work" in combined or "laptop" in combined
+        assert "work" in combined and "laptop" in combined
 
 
 # ── schedule remind ──────────────────────────────────────────────────────────
