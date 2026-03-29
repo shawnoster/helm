@@ -257,8 +257,11 @@ def _status_to_dict() -> dict[str, Any]:
 
 
 def run_status(format_: str = "text") -> None:
-    """Entry point for aya status subcommand."""
+    """Entry point for aya status subcommand. format_ must be 'text' or 'json'."""
     if format_ == "json":
         sys.stdout.write(json.dumps(_status_to_dict(), indent=2, default=str) + "\n")
-    else:
+    elif format_ == "text":
         main()
+    else:
+        sys.stderr.write(f"aya status: unknown format '{format_}' — expected text or json\n")
+        raise SystemExit(2)

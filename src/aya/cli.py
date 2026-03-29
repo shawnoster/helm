@@ -6,6 +6,7 @@ import asyncio
 import json
 import sys
 from datetime import datetime
+from enum import StrEnum
 from pathlib import Path
 
 import typer
@@ -56,6 +57,12 @@ from aya.scheduler import (
     snooze_item,
 )
 from aya.status import run_status
+
+
+class OutputFormat(StrEnum):
+    TEXT = "text"
+    JSON = "json"
+
 
 app = typer.Typer(
     name="aya",
@@ -150,10 +157,12 @@ def _resolve_instance(p: Profile, instance: str, *, quiet: bool = False) -> Iden
 
 @app.command()
 def version(
-    format_: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+    ),
 ) -> None:
     """Show the installed aya version."""
-    if format_ == "json":
+    if format_ == OutputFormat.JSON:
         console.out(json.dumps({"version": __version__}))
     else:
         console.print(f"aya {__version__}")
@@ -513,7 +522,9 @@ def receive(
 def inbox(
     relay: str = typer.Option(None),
     instance: str = typer.Option("default", help="Local instance name (identity to act as)"),
-    format_: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+    ),
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """List pending packets without ingesting."""
@@ -526,7 +537,7 @@ def inbox(
         client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
 
         packets = [pkt async for pkt in client.fetch_pending()]
-        if format_ == "json":
+        if format_ == OutputFormat.JSON:
             console.out(
                 json.dumps(
                     [_packet_to_dict(pkt, p) for pkt in packets],
@@ -732,11 +743,13 @@ def schedule_is_idle(
 def schedule_list(
     all_items: bool = typer.Option(False, "--all", "-a", help="Include dismissed/delivered"),
     item_type: str = typer.Option(None, "--type", help="Filter: reminder, watch, recurring, event"),
-    format_: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+    ),
 ) -> None:
     """List scheduled items."""
     items = list_items(show_all=all_items, item_type=item_type)
-    if format_ == "json":
+    if format_ == OutputFormat.JSON:
         console.out(json.dumps(items, indent=2, default=str))
     else:
         _display_items(items)
@@ -744,12 +757,14 @@ def schedule_list(
 
 @schedule_app.command("check")
 def schedule_check(
-    format_: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+    ),
 ) -> None:
     """Check for due reminders and alerts."""
     due_items, unseen = check_due()
 
-    if format_ == "json":
+    if format_ == OutputFormat.JSON:
         console.out(json.dumps({"due": due_items, "alerts": unseen}, indent=2, default=str))
         return
 
@@ -829,7 +844,9 @@ def schedule_tick(
 
 @schedule_app.command("pending")
 def schedule_pending(
-    format_: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+    ),
 ) -> None:
     """Show pending items for this session — alerts to deliver + session crons.
 
@@ -837,7 +854,7 @@ def schedule_pending(
         aya scheduler pending --format text
     """
     pending = get_pending()
-    if format_ == "json":
+    if format_ == OutputFormat.JSON:
         console.out(json.dumps(pending, indent=2, default=str))
     else:
         console.print(format_pending(pending))
@@ -845,11 +862,13 @@ def schedule_pending(
 
 @schedule_app.command("status")
 def schedule_status(
-    format_: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+    ),
 ) -> None:
     """Show scheduler overview — watches, reminders, crons, deliveries."""
     status = get_scheduler_status()
-    if format_ == "json":
+    if format_ == OutputFormat.JSON:
         console.out(json.dumps(status, indent=2, default=str))
     else:
         console.print(format_scheduler_status(status))
@@ -857,13 +876,15 @@ def schedule_status(
 
 @schedule_app.command("alerts")
 def schedule_alerts(
-    format_: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+    ),
     mark_seen: bool = typer.Option(False, "--mark-seen", help="Mark all alerts as seen"),
 ) -> None:
     """Show alerts from background watcher."""
     unseen = show_alerts(mark_seen=mark_seen)
 
-    if format_ == "json":
+    if format_ == OutputFormat.JSON:
         console.out(json.dumps(unseen, indent=2, default=str))
         return
 
@@ -1028,7 +1049,9 @@ def profile(
 
 @app.command()
 def status(
-    format_: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+    ),
 ) -> None:
     """Workspace readiness check — systems, schedule, focus."""
     run_status(format_=format_)
