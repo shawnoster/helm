@@ -561,6 +561,43 @@ class TestScheduleStatusCLI:
         assert "alerts" in data
         assert "session_crons" in data
 
+    def test_pending_json_long_prompt_no_wrapping(self, tmp_path, monkeypatch):
+        """Regression: Rich console.print() wraps at 80 cols, injecting literal
+        newlines inside JSON string values.  console.out() must be used instead.
+        See https://github.com/shawnoster/aya/issues/66"""
+        scheduler_file = tmp_path / "sched" / "scheduler.json"
+        alerts_file = tmp_path / "sched" / "alerts.json"
+        scheduler_file.parent.mkdir(parents=True)
+        long_prompt = "A" * 200  # well past any terminal width
+        scheduler_file.write_text(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "test-long",
+                            "type": "recurring",
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "test",
+                            "session_required": True,
+                            "cron": "*/20 * * * *",
+                            "prompt": long_prompt,
+                        }
+                    ]
+                }
+            )
+        )
+        alerts_file.write_text(json.dumps({"alerts": []}))
+        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+
+        result = runner.invoke(app, ["schedule", "pending", "--format", "json"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)  # must not raise
+        crons = data["session_crons"]
+        assert len(crons) == 1
+        assert crons[0]["prompt"] == long_prompt
+
     def test_tick_exits_zero(self):
         result = runner.invoke(app, ["schedule", "tick", "--quiet"])
         assert result.exit_code == 0
