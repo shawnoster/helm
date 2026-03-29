@@ -84,11 +84,11 @@ max_event_bytes = 131072     # 128 KB — packets are small
 max_ws_message_bytes = 131072
 
 [authorization]
-# Set to true to require NIP-42 auth — see "Lock down to your keys" below
+# Populate pubkey_whitelist to require NIP-42 auth — see "Lock down to your keys" below
 pubkey_whitelist = []        # empty = open relay; add hex pubkeys to restrict
 
 [retention]
-# Keep all events — personal relay, low volume
+# Keep events for 90 days — personal relay, low volume
 max_age_days = 90
 ```
 
@@ -203,8 +203,10 @@ Edit `~/.aya/profile.json` and update `default_relays`:
 }
 ```
 
-Put your relay first — aya uses the first relay that responds. Keep `nos.lol`
-as a fallback for when you're away from home and the NAS isn't reachable.
+Put your relay first — aya publishes to all configured relays and queries each
+one in order with deduplication, so the first entry is simply tried first. Keep
+`nos.lol` second as a fallback for when you're away from home and the NAS isn't
+reachable.
 
 Both instances (work and home) need the same update.
 
