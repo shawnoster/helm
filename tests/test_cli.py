@@ -563,7 +563,21 @@ class TestDispatch:
         )
         assert result.exit_code != 0
 
-    def test_dispatch_missing_instance_fails(self, profile_with_trusted: Path) -> None:
+    def test_dispatch_missing_instance_fails(
+        self, profile_with_multiple_instances: Path
+    ) -> None:
+        """When multiple instances exist and requested one is absent, dispatch must fail.
+
+        Uses a multi-instance profile so the smart single-instance fallback doesn't
+        silently succeed — the non-existent name must produce a non-zero exit.
+        """
+        p = Profile.load(profile_with_multiple_instances)
+        home = Identity.generate("home")
+        p.trusted_keys["home"] = TrustedKey(
+            did=home.did, label="home", nostr_pubkey=home.nostr_public_hex
+        )
+        p.save(profile_with_multiple_instances)
+
         result = runner.invoke(
             app,
             [
@@ -575,7 +589,7 @@ class TestDispatch:
                 "--instance",
                 "nonexistent",
                 "--profile",
-                str(profile_with_trusted),
+                str(profile_with_multiple_instances),
             ],
             input="data\n",
         )
