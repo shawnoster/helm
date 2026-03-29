@@ -3,7 +3,7 @@ name = "aya-ai-assist"
 version = "0.2.0"
 description = "Personal AI assistant toolkit — sync, schedule, identity"
 readme = "README.md"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.13"
 dependencies = [
     "typer>=0.24",
     "cryptography>=46",

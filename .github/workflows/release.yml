@@ -1,6 +1,8 @@
 name: Release
 
 on:
+  push:
+    branches: [main]
   schedule:
     - cron: "0 10 * * 1"  # Every Monday at 10:00 UTC
   workflow_dispatch:
@@ -15,8 +17,9 @@ concurrency:
   group: ${{ github.workflow }}
 
 permissions:
-  contents: write   # tag + GitHub Release creation
-  id-token: write   # OIDC token for PyPI trusted publishing
+  contents: write        # tag + GitHub Release creation, push version bump commit
+  id-token: write        # OIDC token for PyPI trusted publishing
+  pull-requests: write   # required by python-semantic-release to update PRs
 
 jobs:
   release:
