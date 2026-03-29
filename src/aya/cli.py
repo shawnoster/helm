@@ -55,11 +55,17 @@ from aya.scheduler import (
 )
 from aya.status import run_status
 
+
+def _startup() -> None:
+    """Run once per CLI invocation: migrate legacy data."""
+    migrate_if_needed()
+
+
 app = typer.Typer(
     name="aya",
     help="Personal AI assistant toolkit — sync, schedule, identity.",
     no_args_is_help=True,
-    callback=migrate_if_needed,
+    callback=_startup,
 )
 
 # ── Schedule sub-app ─────────────────────────────────────────────────────────

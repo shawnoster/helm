@@ -90,4 +90,41 @@ def migrate_if_needed() -> list[str]:
             old_path.rename(new_path)
             migrated.append(f"{old_rel} → {new_path}")
 
+    if migrated:
+        seeded = seed_defaults()
+        migrated.extend(seeded)
+
     return migrated
+
+
+def seed_defaults() -> list[str]:
+    """Seed default recurring schedules if scheduler is empty.
+
+    Called after migration or on fresh install. Returns descriptions
+    of created items.
+    """
+    from aya.scheduler import add_recurring, load_items  # noqa: PLC0415
+
+    items = load_items()
+    # Skip if any recurring items already exist
+    if any(i.get("type") == "recurring" for i in items):
+        return []
+
+    ensure_home()
+    seeded = []
+
+    item = add_recurring(
+        message="health-break",
+        cron="*/20 * * * *",
+        prompt=(
+            "Deliver a health break reminder to Shawn. Suggest standing up, "
+            "stretching (neck rolls, wrist stretches, or eye rest — 20/20/20 "
+            "rule), getting water, and walking for at least 2 minutes. Keep it "
+            "warm, brief, and varied — two sentences max."
+        ),
+        tags="health,wellness",
+        idle_back_off="10m",
+    )
+    seeded.append(f"health-break (every 20m, idle-aware): {item['id'][:8]}")
+
+    return seeded

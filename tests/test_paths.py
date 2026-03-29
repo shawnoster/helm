@@ -30,6 +30,47 @@ def aya_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return home
 
 
+@pytest.fixture
+def aya_scheduler(aya_home: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Set up scheduler isolation alongside aya_home."""
+    mem = aya_home / "memory"
+    mem.mkdir(parents=True, exist_ok=True)
+    scheduler_file = mem / "scheduler.json"
+    alerts_file = mem / "alerts.json"
+    scheduler_file.write_text(json.dumps({"items": []}))
+    alerts_file.write_text(json.dumps({"alerts": []}))
+
+    monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+    monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+    return aya_home
+
+
+class TestSeedDefaults:
+    def test_seeds_health_break(self, aya_scheduler: Path) -> None:
+        from aya.paths import seed_defaults
+        from aya.scheduler import load_items
+
+        seeded = seed_defaults()
+        assert len(seeded) == 1
+        assert "health-break" in seeded[0]
+
+        items = load_items()
+        recurring = [i for i in items if i.get("type") == "recurring"]
+        assert len(recurring) == 1
+        assert recurring[0]["message"] == "health-break"
+        assert recurring[0]["cron"] == "*/20 * * * *"
+        assert recurring[0]["idle_back_off"] == "10m"
+
+    def test_skips_when_recurring_exists(self, aya_scheduler: Path) -> None:
+        from aya.paths import seed_defaults
+
+        # First call seeds
+        seed_defaults()
+        # Second call should skip
+        seeded = seed_defaults()
+        assert seeded == []
+
+
 class TestEnsureHome:
     def test_creates_memory_dir(self, aya_home: Path) -> None:
         from aya.paths import ensure_home
