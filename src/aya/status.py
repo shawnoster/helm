@@ -12,9 +12,9 @@ from typing import Any
 from rich.console import Console
 from rich.rule import Rule
 
+from aya import paths as _paths
 from aya.scheduler import (
     LOCAL_TZ,
-    _find_workspace_root,
     get_active_watches,
     get_due_reminders,
     get_unseen_alerts,
@@ -22,11 +22,24 @@ from aya.scheduler import (
     load_items,
 )
 
+# ── aya data paths (from ~/.aya) ────────────────────────────────────────────
+PROFILE = _paths.PROFILE_PATH
+CONFIG = _paths.CONFIG_PATH
+MEMORY = _paths.MEMORY_DIR
+
+
+def _find_workspace_root() -> Path:
+    """Walk up from cwd looking for assistant/ directory (notebook repo)."""
+    cwd = Path.cwd()
+    for parent in [cwd, *cwd.parents]:
+        if (parent / "assistant").is_dir():
+            return parent
+    return cwd
+
+
+# ── workspace paths (cwd-relative, for health checks) ───────────────────────
 ROOT = _find_workspace_root()
 ASSISTANT = ROOT / "assistant"
-MEMORY = ASSISTANT / "memory"
-PROFILE = ASSISTANT / "profile.json"
-CONFIG = ASSISTANT / "config.json"
 
 
 # ── data ──────────────────────────────────────────────────────────────────────

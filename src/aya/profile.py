@@ -1,7 +1,7 @@
 """Initialize or rotate the persistent assistant profile.
 
-Canonical location: {workspace}/assistant/profile.json
-Legacy location:    ~/.copilot/assistant_profile.json (symlinked by bootstrap)
+Canonical location: ~/.aya/profile.json
+Legacy location:    ~/.copilot/assistant_profile.json (migrated on first run)
 """
 
 from __future__ import annotations
@@ -11,19 +11,8 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from aya.paths import ACTIVITY_TRACKER_PATH, PROFILE_PATH
 
-def _find_workspace_root() -> Path:
-    """Walk up from cwd looking for assistant/memory/scheduler.json."""
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        if (parent / "assistant" / "memory" / "scheduler.json").exists():
-            return parent
-    return cwd  # fallback
-
-
-ROOT = _find_workspace_root()
-ACTIVITY_TRACKER_PATH = ROOT / "assistant" / "memory" / "activity-tracker.md"
-PROFILE_PATH = ROOT / "assistant" / "profile.json"
 LEGACY_COPILOT_PATH = Path.home() / ".copilot" / "assistant_profile.json"
 LEGACY_ACE_PATH = Path.home() / ".copilot" / "ace_profile.json"
 REEVALUATION_DAYS = 3

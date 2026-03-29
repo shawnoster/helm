@@ -34,27 +34,28 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from aya import paths as _paths
 
-def _find_workspace_root() -> Path:
-    """Walk up from cwd looking for assistant/memory/scheduler.json."""
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        if (parent / "assistant" / "memory" / "scheduler.json").exists():
-            return parent
-    return cwd  # fallback
+# ── Module-level path accessors ─────────────────────────────────────────────
+# These functions check module globals first so monkeypatch still works in
+# tests (e.g. monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", ...)).
+# Otherwise they delegate to the canonical paths in aya.paths.
 
 
-# ── Lazy module globals ──────────────────────────────────────────────────────
-# ROOT, SCHEDULER_FILE, ALERTS_FILE, CONFIG_FILE, and LOCAL_TZ are resolved on
-# first access (not at import time) via module-level __getattr__.  This avoids
-# filesystem walks and ZoneInfo construction when the module is imported but
-# these names aren't yet needed (e.g. cli.py importing scheduler functions).
-# Internal code uses the _get_*() / _*_file() helpers directly.
+def _scheduler_file() -> Path:
+    return globals().get("SCHEDULER_FILE") or _paths.SCHEDULER_FILE
 
 
-@functools.lru_cache(maxsize=1)
-def _get_root() -> Path:
-    return _find_workspace_root()
+def _alerts_file() -> Path:
+    return globals().get("ALERTS_FILE") or _paths.ALERTS_FILE
+
+
+def _config_file() -> Path:
+    return globals().get("CONFIG_FILE") or _paths.CONFIG_PATH
+
+
+def _activity_file() -> Path:
+    return globals().get("ACTIVITY_FILE") or _paths.ACTIVITY_FILE
 
 
 @functools.lru_cache(maxsize=1)
@@ -62,33 +63,14 @@ def _get_local_tz() -> ZoneInfo:
     return ZoneInfo("America/Denver")
 
 
-def _scheduler_file() -> Path:
-    # Check globals first so monkeypatch("aya.scheduler.SCHEDULER_FILE", ...) works
-    return globals().get("SCHEDULER_FILE") or (
-        _get_root() / "assistant" / "memory" / "scheduler.json"
-    )
-
-
-def _alerts_file() -> Path:
-    return globals().get("ALERTS_FILE") or (_get_root() / "assistant" / "memory" / "alerts.json")
-
-
-def _config_file() -> Path:
-    return globals().get("CONFIG_FILE") or (_get_root() / "assistant" / "config.json")
-
-
-def _activity_file() -> Path:
-    return globals().get("ACTIVITY_FILE") or (
-        _get_root() / "assistant" / "memory" / "activity.json"
-    )
-
-
+# Lazy module attrs — lets tests monkeypatch these names via setattr.
 _LAZY_ATTRS: dict[str, Any] = {
-    "ROOT": _get_root,
-    "SCHEDULER_FILE": _scheduler_file,
-    "ALERTS_FILE": _alerts_file,
-    "CONFIG_FILE": _config_file,
-    "ACTIVITY_FILE": _activity_file,
+    "SCHEDULER_FILE": lambda: _paths.SCHEDULER_FILE,
+    "ALERTS_FILE": lambda: _paths.ALERTS_FILE,
+    "CONFIG_FILE": lambda: _paths.CONFIG_PATH,
+    "ACTIVITY_FILE": lambda: _paths.ACTIVITY_FILE,
+    "LOCK_FILE": lambda: _paths.LOCK_FILE,
+    "CLAIMS_DIR": lambda: _paths.CLAIMS_DIR,
     "LOCAL_TZ": _get_local_tz,
 }
 
@@ -96,7 +78,7 @@ _LAZY_ATTRS: dict[str, Any] = {
 def __getattr__(name: str) -> Any:
     if name in _LAZY_ATTRS:
         value = _LAZY_ATTRS[name]()
-        globals()[name] = value  # cache in module dict for subsequent access
+        globals()[name] = value
         return value
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
@@ -334,7 +316,12 @@ def is_idle(threshold_str: str, now: datetime | None = None) -> bool:
 
 def _lock_file() -> Path:
     """Return the advisory lock file path, co-located with scheduler.json."""
-    return _scheduler_file().parent / ".scheduler.lock"
+    if "LOCK_FILE" in globals():
+        return globals()["LOCK_FILE"]
+    # Derive from scheduler file parent so test isolation via SCHEDULER_FILE works.
+    if "SCHEDULER_FILE" in globals():
+        return globals()["SCHEDULER_FILE"].parent / ".scheduler.lock"
+    return _paths.LOCK_FILE
 
 
 @contextmanager
@@ -429,7 +416,12 @@ _CLAIM_TTL_SECONDS = 300  # 5 minutes — if a session crashes, claim expires
 
 def _claims_dir() -> Path:
     """Return the claims directory, co-located with scheduler.json."""
-    return _scheduler_file().parent / "claims"
+    if "CLAIMS_DIR" in globals():
+        return globals()["CLAIMS_DIR"]
+    # Derive from scheduler file parent so test isolation via SCHEDULER_FILE works.
+    if "SCHEDULER_FILE" in globals():
+        return globals()["SCHEDULER_FILE"].parent / "claims"
+    return _paths.CLAIMS_DIR
 
 
 def claim_alert(alert_id: str, instance_id: str | None = None) -> bool:

@@ -25,7 +25,8 @@ from aya.pair import (
     poll_for_pair_response,
     publish_pair_request,
 )
-from aya.profile import PROFILE_PATH, ensure_profile
+from aya.paths import PROFILE_PATH
+from aya.profile import ensure_profile
 from aya.relay import RelayClient
 
 # Subcommand modules — imported at top-level; each is only invoked when its
@@ -82,16 +83,7 @@ console = Console()
 err = Console(stderr=True)
 
 
-def _find_workspace_root() -> Path:
-    """Walk up from cwd looking for assistant/memory/scheduler.json."""
-    cwd = Path.cwd()
-    for parent in [cwd, *cwd.parents]:
-        if (parent / "assistant" / "memory" / "scheduler.json").exists():
-            return parent
-    return cwd
-
-
-DEFAULT_PROFILE = _find_workspace_root() / "assistant" / "profile.json"
+DEFAULT_PROFILE = PROFILE_PATH
 
 
 def _load_profile(profile_path: Path) -> Profile:
