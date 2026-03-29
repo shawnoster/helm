@@ -22,6 +22,13 @@ logger = logging.getLogger(__name__)
 AYA_KIND = 5999
 AYA_RESULT_KIND = 6999  # read receipts / replies
 
+# Pairing event type tags — same kind as packets but not Packet-shaped.
+# Defined here (not in pair.py) so relay.py can filter them without a
+# circular import (pair.py already imports relay.py).
+_PAIR_TAG_REQ = "aya-pair-req"
+_PAIR_TAG_RESP = "aya-pair-resp"
+_PAIR_TAGS: frozenset[str] = frozenset({_PAIR_TAG_REQ, _PAIR_TAG_RESP})
+
 # Retry / backoff configuration
 _BACKOFF_BASE = 1.0  # seconds for first retry
 _BACKOFF_CAP = 60.0  # maximum sleep between retries
@@ -203,6 +210,21 @@ class RelayClient:
                     try:
                         async for raw in _read_until_eose(ws, sub_id):
                             try:
+                                # Skip pairing events — same kind (5999) but not
+                                # Packet-shaped. Constants live in relay.py to avoid
+                                # a circular import with pair.py.
+                                event_tags = raw.get("tags", [])
+                                pairing_tag = next(
+                                    (
+                                        t
+                                        for t in event_tags
+                                        if len(t) >= 2 and t[0] == "t" and t[1] in _PAIR_TAGS
+                                    ),
+                                    None,
+                                )
+                                if pairing_tag is not None:
+                                    logger.debug("Skipping pairing event (tag=%s)", pairing_tag[1])
+                                    continue
                                 packet = Packet.from_json(raw["content"])
                                 if not packet.is_expired():
                                     yield packet

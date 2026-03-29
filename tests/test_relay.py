@@ -396,6 +396,28 @@ class TestFetchPending:
 
         assert packets == []
 
+    @pytest.mark.parametrize("pair_tag", ["aya-pair-req", "aya-pair-resp"])
+    async def test_skips_pairing_events(self, client: RelayClient, pair_tag: str) -> None:
+        """Pairing events (tagged aya-pair-req/resp) must not be parsed as Packets."""
+        pairing_event = {
+            "id": "pair-evt",
+            "tags": [["t", pair_tag], ["p", client.public_key_hex]],
+            "content": '{"code": "WORD-WORD-1234"}',
+        }
+
+        async def fake_read_until_eose(ws, sub_id):
+            yield pairing_event
+
+        with patch("aya.relay._read_until_eose", side_effect=fake_read_until_eose):
+            mock_ws = AsyncMock()
+            mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+            mock_ws.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("aya.relay.websockets.connect", return_value=mock_ws):
+                packets = [pkt async for pkt in client.fetch_pending()]
+
+        assert packets == []
+
     async def test_handles_eose_timeout_gracefully(
         self, client: RelayClient, sender: Identity, recipient: Identity
     ) -> None:

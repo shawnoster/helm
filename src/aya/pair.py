@@ -13,6 +13,8 @@ import websockets
 
 from aya.identity import Identity, TrustedKey
 from aya.relay import (
+    _PAIR_TAG_REQ,
+    _PAIR_TAG_RESP,
     AYA_KIND,
     _backoff_delay,
     _compute_event_id,
@@ -288,8 +290,8 @@ WORD_LIST: tuple[str, ...] = (
     "GARNET",
 )
 
-_TAG_PAIR_REQ = "aya-pair-req"
-_TAG_PAIR_RESP = "aya-pair-resp"
+_TAG_PAIR_REQ = _PAIR_TAG_REQ
+_TAG_PAIR_RESP = _PAIR_TAG_RESP
 
 
 def generate_code() -> str:
