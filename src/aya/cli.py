@@ -110,7 +110,7 @@ def version() -> None:
 @app.command()
 def init(
     label: str = typer.Option("default", help="Label for this instance (work, home, laptop…)"),
-    profile: Path = typer.Option(DEFAULT_PROFILE, help="Path to assistant_profile.json"),
+    profile: Path = typer.Option(DEFAULT_PROFILE, help="Path to profile.json"),
     relay: str | None = typer.Option(
         None, help="Override the default relay URL (omit to use the built-in two-relay default)"
     ),
@@ -846,7 +846,7 @@ def ci_watch() -> None:
 @app.command()
 def profile(
     profile_path: Path = typer.Option(
-        DEFAULT_PROFILE, "--profile", help="Path to assistant_profile.json"
+        DEFAULT_PROFILE, "--profile", help="Path to profile.json (default: ~/.aya/profile.json)"
     ),
 ) -> None:
     """Initialize or rotate the persistent assistant profile."""

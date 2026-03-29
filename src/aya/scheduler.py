@@ -69,8 +69,8 @@ _LAZY_ATTRS: dict[str, Any] = {
     "ALERTS_FILE": lambda: _paths.ALERTS_FILE,
     "CONFIG_FILE": lambda: _paths.CONFIG_PATH,
     "ACTIVITY_FILE": lambda: _paths.ACTIVITY_FILE,
-    "LOCK_FILE": lambda: _paths.LOCK_FILE,
-    "CLAIMS_DIR": lambda: _paths.CLAIMS_DIR,
+    "LOCK_FILE": lambda: _lock_file(),  # noqa: PLW0108
+    "CLAIMS_DIR": lambda: _claims_dir(),  # noqa: PLW0108
     "LOCAL_TZ": _get_local_tz,
 }
 

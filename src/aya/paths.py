@@ -12,7 +12,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-AYA_HOME = Path(os.environ.get("AYA_HOME", Path.home() / ".aya"))
+_aya_home_env = os.environ.get("AYA_HOME")
+AYA_HOME = Path(_aya_home_env).expanduser() if _aya_home_env else Path.home() / ".aya"
 
 # ── identity ────────────────────────────────────────────────────────────────
 PROFILE_PATH = AYA_HOME / "profile.json"
@@ -27,6 +28,4 @@ LOCK_FILE = MEMORY_DIR / ".scheduler.lock"
 CLAIMS_DIR = MEMORY_DIR / "claims"
 
 # ── markdown data ───────────────────────────────────────────────────────────
-ACTIVITY_TRACKER_PATH = MEMORY_DIR / "activity-tracker.md"
-DONE_LOG_PATH = MEMORY_DIR / "done-log.md"
 CRON_SCHEDULES_PATH = MEMORY_DIR / "cron-schedules.md"

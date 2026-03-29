@@ -330,8 +330,6 @@ def main(console: Console | None = None) -> None:
             ok=(MEMORY / "cron-schedules.md").exists() or bool(_active_scheduler_items()),
             detail=str(MEMORY / "cron-schedules.md"),
         ),
-        _exists(MEMORY / "activity-tracker.md", "memory::activity-tracker.md"),
-        _exists(MEMORY / "done-log.md", "memory::done-log.md"),
         CheckResult("Assistant profile", profile is not None, str(PROFILE)),
         CheckResult("workflow config", _read_json(CONFIG) is not None, str(CONFIG)),
     ]
