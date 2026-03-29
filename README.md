@@ -114,6 +114,7 @@ CCR minimum interval is 1 hour. aya can fire at any cron interval.
 
 | Command | What it does |
 | ---- | ---- |
+| `aya version` | Show the installed aya version |
 | `aya init` | Generate identity keypair for this instance |
 | `aya profile` | Initialize or rotate the persistent assistant profile |
 | `aya pair` | Pair two instances via short-lived relay code |
