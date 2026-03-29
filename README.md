@@ -116,13 +116,13 @@ aya is designed to surface alerts and reminders *into* your agent session, not j
 
 ### SessionStart hooks
 
-Add these three hooks to `~/.claude/settings.json` under `"hooks": { "SessionStart": [...] }`:
+Add these hooks to `~/.claude/settings.json` under `"hooks": { "SessionStart": [...] }`:
 
 ```json
 [
   {
-    "command": "bash ~/.claude/hooks/health_crons.sh",
-    "statusMessage": "Initializing health reminders..."
+    "command": "aya hook crons",
+    "statusMessage": "Registering session crons..."
   },
   {
     "command": "aya receive --quiet --auto-ingest 2>/dev/null || true",
@@ -136,16 +136,16 @@ Add these three hooks to `~/.claude/settings.json` under `"hooks": { "SessionSta
 
 | Hook | What it does |
 | ---- | ---- |
-| `health_crons.sh` | Reads pending session crons, injects `CronCreate` instructions into session context |
+| `aya hook crons` | Reads pending session crons, injects `CronCreate` instructions into session context |
 | `aya receive --quiet --auto-ingest` | Ingests packets from trusted senders in the background. Packets from unknown senders are skipped silently in non-interactive contexts. |
 | `aya schedule pending --format text` | Prints due reminders and alerts directly into the session |
 
-### The session cron mechanism
+### How session crons work
 
-`health_crons.sh` is the glue between aya's scheduler and Claude Code's in-session cron system. On each session start it:
+`aya hook crons` is the bridge between aya's persistent scheduler and Claude Code's in-session cron system. On each session start it:
 
-1. Calls `aya schedule pending --format json` to fetch due alerts and registered session crons
-2. Extracts the `session_crons[]` array
+1. Fetches active session-required recurring items (without claiming alerts)
+2. Filters by idle back-off and work-hours constraints
 3. Outputs a `hookSpecificOutput.additionalContext` block with explicit `CronCreate` instructions
 
 The agent reads those instructions and **must call `CronCreate` for each cron before responding**. This registers recurring jobs for the session — so a `*/15 * * * *` PR watch fires automatically every 15 minutes without the user having to ask.
@@ -160,7 +160,7 @@ aya schedule recurring \
   --prompt "Check PR #123. If merged, watch staging deploy and notify."
 ```
 
-The cron is persisted in aya's scheduler store. On the next session start, `health_crons.sh` picks it up and injects the `CronCreate` call automatically.
+The cron is persisted in aya's scheduler store. On the next session start, `aya hook crons` picks it up and injects the `CronCreate` call automatically.
 
 ### PostToolUse: CI watch
 

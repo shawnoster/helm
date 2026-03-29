@@ -532,6 +532,82 @@ def _isolate_scheduler(tmp_path, monkeypatch):
 
 
 @pytest.mark.usefixtures("_isolate_scheduler")
+class TestHookCrons:
+    def test_no_crons_exits_silently(self):
+        result = runner.invoke(app, ["hook", "crons"])
+        assert result.exit_code == 0
+        assert result.output.strip() == ""
+
+    def test_outputs_valid_json_with_crons(self, tmp_path, monkeypatch):
+        scheduler_file = tmp_path / "sched" / "scheduler.json"
+        alerts_file = tmp_path / "sched" / "alerts.json"
+        scheduler_file.parent.mkdir(parents=True)
+        scheduler_file.write_text(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "test-cron",
+                            "type": "recurring",
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "test",
+                            "session_required": True,
+                            "cron": "*/20 * * * *",
+                            "prompt": "Do the thing.",
+                        }
+                    ]
+                }
+            )
+        )
+        alerts_file.write_text(json.dumps({"alerts": []}))
+        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+
+        result = runner.invoke(app, ["hook", "crons"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        assert "hookSpecificOutput" in data
+        ctx = data["hookSpecificOutput"]["additionalContext"]
+        assert "CronCreate" in ctx
+        assert "test-cron" in ctx
+
+    def test_does_not_claim_alerts(self, tmp_path, monkeypatch):
+        """hook crons must not consume alerts — they belong to schedule pending."""
+        scheduler_file = tmp_path / "sched" / "scheduler.json"
+        alerts_file = tmp_path / "sched" / "alerts.json"
+        scheduler_file.parent.mkdir(parents=True)
+        scheduler_file.write_text(json.dumps({"items": []}))
+        alerts_file.write_text(
+            json.dumps(
+                {
+                    "alerts": [
+                        {
+                            "id": "alert-1",
+                            "source_item_id": "watch-1",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "PR merged",
+                            "details": {},
+                            "seen": False,
+                        }
+                    ]
+                }
+            )
+        )
+        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+
+        # Run hook crons
+        runner.invoke(app, ["hook", "crons"])
+
+        # Alerts must still be unseen
+        alerts = json.loads(alerts_file.read_text())["alerts"]
+        assert len(alerts) == 1
+        assert alerts[0]["seen"] is False
+        assert "delivered_at" not in alerts[0]
+
+
+@pytest.mark.usefixtures("_isolate_scheduler")
 class TestScheduleStatusCLI:
     def test_status_exits_zero(self):
         result = runner.invoke(app, ["schedule", "status"])

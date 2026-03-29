@@ -1238,10 +1238,25 @@ def get_pending(instance_id: str | None = None) -> dict[str, Any]:
                     a["delivered_by"] = instance_id
             _atomic_write(_alerts_file(), {"alerts": alerts})
 
-    # Collect session-required recurring items, applying idle / work-hours filters.
+    session_crons, suppressed_crons = get_session_crons()
+
+    return {
+        "alerts": deliverable,
+        "session_crons": session_crons,
+        "suppressed_crons": suppressed_crons,
+        "instance_id": instance_id,
+    }
+
+
+def get_session_crons() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Return active session crons, filtered by idle back-off and work hours.
+
+    Returns (active_crons, suppressed_crons) without any alert side effects.
+    Use this when you only need crons — get_pending() also claims alerts.
+    """
     now = datetime.now(_get_local_tz())
     items = load_items()
-    active_crons = [
+    active = [
         i
         for i in items
         if i.get("type") == "recurring"
@@ -1250,7 +1265,7 @@ def get_pending(instance_id: str | None = None) -> dict[str, Any]:
     ]
     session_crons = []
     suppressed_crons = []
-    for item in active_crons:
+    for item in active:
         only_during = item.get("only_during", "")
         idle_back_off_str = item.get("idle_back_off", "")
         if only_during and not is_within_work_hours(only_during, now):
@@ -1261,13 +1276,7 @@ def get_pending(instance_id: str | None = None) -> dict[str, Any]:
             suppressed_crons.append({"item": item, "reason": reason})
         else:
             session_crons.append(item)
-
-    return {
-        "alerts": deliverable,
-        "session_crons": session_crons,
-        "suppressed_crons": suppressed_crons,
-        "instance_id": instance_id,
-    }
+    return session_crons, suppressed_crons
 
 
 def format_pending(pending: dict[str, Any]) -> str:
