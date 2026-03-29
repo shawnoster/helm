@@ -81,6 +81,32 @@ aya status
 > - `--instance` is your **local identity** (which keypair to act as). It matches the label you used with `aya init --label <name>`. If you only have one instance it is selected automatically — even if the name you pass doesn't match — so you can omit `--instance` entirely after a fresh `aya init`.
 > - `--label` is a **name you assign to a remote peer** — either the name you broadcast when pairing (`aya pair` initiator) or the name you give to the peer you're pairing with (`aya pair` joiner).
 
+## Plugin & Slash Commands
+
+aya ships as a Claude Code plugin. Load it with:
+
+```bash
+claude --plugin-dir /path/to/aya
+```
+
+Or add a permanent alias to your shell profile:
+
+```bash
+alias claude='claude --plugin-dir /path/to/aya'
+```
+
+Available slash commands (work in any project):
+
+| Command | What it does |
+|---------|--------------|
+| `/aya-send` | Pack and dispatch a packet to another machine |
+| `/aya-triage-packets` | Receive and route incoming packets |
+| `/aya-pair` | Guided pairing between two instances |
+| `/aya-setup` | First-run bootstrap (identity, hooks, polling) |
+| `/aya-watch` | Watch a GitHub PR with smart defaults |
+
+After editing skill files, run `/reload-plugins` to pick up changes live.
+
 ## How Session Crons Work
 
 aya persists recurring schedules. Claude Code fires them during sessions. The bridge:

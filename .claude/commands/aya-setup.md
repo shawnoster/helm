@@ -52,9 +52,17 @@ Full first-run bootstrap: identity, hooks, relay polling, and optional pairing.
      --idle-back-off 10m
    ```
 
-6. **Offer pairing.** Ask: "Do you want to pair with another machine now?" If yes, hand off to the `/pair` flow.
+6. **Wire up the plugin.** Check if the user's shell profile already has a claude alias with `--plugin-dir`. If not, suggest adding:
 
-7. **Summary.** Report what was set up:
+   ```bash
+   alias claude='claude --plugin-dir /path/to/aya'
+   ```
+
+   Adjust the path to wherever aya is cloned. This makes `/aya-send`, `/aya-watch`, and other slash commands available globally.
+
+7. **Offer pairing.** Ask: "Do you want to pair with another machine now?" If yes, hand off to the `/aya-pair` flow.
+
+8. **Summary.** Report what was set up:
 
    ```
    aya setup complete:
@@ -63,6 +71,7 @@ Full first-run bootstrap: identity, hooks, relay polling, and optional pairing.
    - Crontab: */5 scheduler tick
    - Relay poll: every 10 minutes
    - Health break: every 20 minutes (with idle back-off)
+   - Plugin: claude alias configured
    - Pairing: {paired with X | skipped}
    ```
 

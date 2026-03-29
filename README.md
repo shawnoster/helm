@@ -31,17 +31,17 @@ uv sync
 
 ```bash
 # Set up identity
-uv run aya init --label work
+aya init --label work
 
 # Pair with another machine
-uv run aya pair --label work        # shows a code
-uv run aya pair --code WORD-WORD-0000 --label home  # on the other machine
+aya pair --label work        # shows a code
+aya pair --code WORD-WORD-0000 --label home  # on the other machine
 
 # Send a packet
-echo "Hello from work" | uv run aya pack --to home --intent "test" | uv run aya send /dev/stdin
+aya dispatch --to home --intent "test" --files notes.md
 
 # Check inbox
-uv run aya inbox
+aya inbox
 ```
 
 ## Scheduling
@@ -63,7 +63,7 @@ aya's scheduler runs on your machine. Alerts are delivered at session start via 
 
 | What | Example |
 | ---- | ---- |
-| Reminders | `aya schedule remind "review PRs" --due 2h` |
+| Reminders | `aya schedule remind -m "review PRs" --due "in 2 hours"` |
 | Movement / wellness nudges | Recurring micro-prompts injected each session |
 | Watch and tell me | "Watch PR #50 — alert me when it's approved" |
 | Ticket state changes | "Tell me when JIRA-123 moves to In Review" |
@@ -114,7 +114,7 @@ CCR minimum interval is 1 hour. aya can fire at any cron interval.
 
 Already have aya installed on another machine? Give Claude Code this prompt on the new machine and it will handle everything:
 
-> Install aya (`uv tool install aya-ai-assist`), initialize identity with `aya init --label <LABEL>` (use "home" or "work"), then pair with my other instance. If I have a pairing code from the other machine, run `aya pair --code <CODE> --label <OTHER_LABEL> --instance <LABEL>` and we're done. If not, run `aya pair --label <OTHER_LABEL> --instance <LABEL>` — this will block waiting for the other machine to join (up to 10 minutes), so give me the short code it displays and immediately run `aya pair --code <CODE>` on the other machine before the window expires. After pairing, set up Claude Code hooks by adding the aya SessionStart and PostToolUse hooks to `~/.claude/settings.json` (see [AGENTS.md](./AGENTS.md) for a full example). Finally, register a relay poll cron: `aya schedule recurring -m "relay-poll" -c "*/10 * * * *" -p "Run: aya receive --instance <LABEL> --auto-ingest --quiet. If any packets were ingested, surface their content to the user."`. Verify everything works with `aya status`.
+> Install aya (`uv tool install aya-ai-assist`), initialize identity with `aya init --label <LABEL>` (use "home" or "work"), then pair with my other instance. If I have a pairing code from the other machine, run `aya pair --code <CODE> --label <OTHER_LABEL> --instance <LABEL>` and we're done. If not, run `aya pair --label <OTHER_LABEL> --instance <LABEL>` — this will block waiting for the other machine to join (up to 10 minutes), so give me the short code it displays and immediately run `aya pair --code <CODE>` on the other machine before the window expires. After pairing, install hooks and crontab with `aya schedule install`. Register a relay poll cron: `aya schedule recurring -m "relay-poll" -c "*/10 * * * *" -p "Run: aya receive --instance <LABEL> --auto-ingest --quiet. If any packets were ingested, surface their content to the user."`. Finally, add the aya plugin to your shell profile: `alias claude='claude --plugin-dir /path/to/aya'` and verify everything with `aya status`.
 
 Replace `<LABEL>` with this machine's role (`home` or `work`), `<OTHER_LABEL>` with the other machine's role, and `<CODE>` with the pairing code.
 
@@ -123,8 +123,9 @@ Replace `<LABEL>` with this machine's role (`home` or `work`), `<OTHER_LABEL>` w
 1. **Installs aya** globally via uv
 2. **Creates identity** — generates ed25519 + secp256k1 keypairs
 3. **Pairs instances** — exchanges trust via short-lived relay code
-4. **Wires Claude Code hooks** — session start receives packets, registers crons, surfaces alerts; post-tool-use watches CI
+4. **Installs hooks** — `aya schedule install` wires Claude Code hooks and system crontab automatically
 5. **Registers relay polling** — checks for incoming packets every 10 minutes during active sessions
+6. **Loads the plugin** — makes `/aya-send`, `/aya-watch`, and other slash commands available globally
 
 ---
 
@@ -198,6 +199,28 @@ aya schedule pending --format text
 ```
 
 This prints all due reminders, alerts, and session cron prompts as plain text. Copy any session cron prompts into your context to pick them up.
+
+---
+
+## Claude Code plugin
+
+aya ships as a Claude Code plugin with slash commands that work in any project. Load it in dev mode by adding an alias to your shell profile:
+
+```bash
+alias claude='claude --plugin-dir /path/to/aya'
+```
+
+This makes the following commands available globally:
+
+| Command | What it does |
+| ---- | ---- |
+| `/aya-send` | Pack and dispatch a packet to another machine |
+| `/aya-triage-packets` | Receive and route incoming packets |
+| `/aya-pair` | Guided pairing between two instances |
+| `/aya-setup` | First-run bootstrap (identity, hooks, polling) |
+| `/aya-watch` | Watch a GitHub PR with smart defaults |
+
+After editing any skill file in the aya repo, run `/reload-plugins` in your session to pick up changes — no reinstall needed.
 
 ---
 
