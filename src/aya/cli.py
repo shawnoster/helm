@@ -70,6 +70,15 @@ schedule_app = typer.Typer(
 )
 app.add_typer(schedule_app, name="schedule")
 
+# ── Hook sub-app ─────────────────────────────────────────────────────────────
+
+hook_app = typer.Typer(
+    name="hook",
+    help="Claude Code hook integrations.",
+    no_args_is_help=True,
+)
+app.add_typer(hook_app, name="hook")
+
 # ── CI sub-app ────────────────────────────────────────────────────────────────
 
 ci_app = typer.Typer(
@@ -824,6 +833,52 @@ def schedule_alerts(
 
     if mark_seen:
         console.print(f"\n  Marked {len(unseen)} alert(s) as seen.")
+
+
+# ��─ hook ──────────────────────────────────────────────────────────────────────
+
+
+@hook_app.command("crons")
+def hook_crons() -> None:
+    """Output CronCreate instructions for Claude Code SessionStart hooks.
+
+    Reads active session crons from the scheduler and emits a JSON
+    hookSpecificOutput block that tells Claude Code to register them
+    via CronCreate.  Exits silently when there are no crons to register.
+
+    Usage in ~/.claude/settings.json:
+        {"command": "aya hook crons", "statusMessage": "Registering crons..."}
+    """
+    pending = get_pending()
+    crons = pending.get("session_crons", [])
+    if not crons:
+        return
+
+    lines = [
+        (
+            "REQUIRED ACTION \u2014 Call CronCreate for each session cron "
+            "below before responding to the user. Do not skip this step."
+        ),
+        "",
+    ]
+    for c in crons:
+        cid = c.get("id", "")
+        schedule = c.get("cron", "")
+        prompt = c.get("prompt") or c.get("message") or c.get("description") or ""
+        prompt = prompt.replace("\n", " ").strip()
+        lines.append(f'REGISTER via CronCreate: id="{cid}" schedule="{schedule}" prompt="{prompt}"')
+
+    context = "\n".join(lines)
+    console.out(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "SessionStart",
+                    "additionalContext": context,
+                }
+            }
+        )
+    )
 
 
 # ── ci ────────────────────────────────────────────────────────────────────────
