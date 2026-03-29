@@ -110,10 +110,89 @@ CCR minimum interval is 1 hour. aya can fire at any cron interval.
 
 ---
 
+## Agent integration (Claude Code)
+
+aya is designed to surface alerts and reminders *into* your agent session, not just on the terminal. Here's how to wire it up.
+
+### SessionStart hooks
+
+Add these three hooks to `~/.claude/settings.json` under `"hooks": { "SessionStart": [...] }`:
+
+```json
+[
+  {
+    "command": "bash ~/.claude/hooks/health_crons.sh",
+    "statusMessage": "Initializing health reminders..."
+  },
+  {
+    "command": "aya receive --quiet --auto-ingest 2>/dev/null || true",
+    "async": true
+  },
+  {
+    "command": "aya schedule pending --format text 2>/dev/null || true"
+  }
+]
+```
+
+| Hook | What it does |
+| ---- | ---- |
+| `health_crons.sh` | Reads pending session crons, injects `CronCreate` instructions into session context |
+| `aya receive --quiet --auto-ingest` | Ingests packets from trusted senders in the background. Packets from unknown senders are skipped silently in non-interactive contexts. |
+| `aya schedule pending --format text` | Prints due reminders and alerts directly into the session |
+
+### The session cron mechanism
+
+`health_crons.sh` is the glue between aya's scheduler and Claude Code's in-session cron system. On each session start it:
+
+1. Calls `aya schedule pending --format json` to fetch due alerts and registered session crons
+2. Extracts the `session_crons[]` array
+3. Outputs a `hookSpecificOutput.additionalContext` block with explicit `CronCreate` instructions
+
+The agent reads those instructions and **must call `CronCreate` for each cron before responding**. This registers recurring jobs for the session — so a `*/15 * * * *` PR watch fires automatically every 15 minutes without the user having to ask.
+
+### Registering a session cron
+
+```bash
+# Watch a PR — fires every 15 min, Mon–Fri
+aya schedule recurring \
+  --message "pr123-merge-watch" \
+  --cron "*/15 * * * 1-5" \
+  --prompt "Check PR #123. If merged, watch staging deploy and notify."
+```
+
+The cron is persisted in aya's scheduler store. On the next session start, `health_crons.sh` picks it up and injects the `CronCreate` call automatically.
+
+### PostToolUse: CI watch
+
+After every shell command, aya can watch any triggered CI workflows to completion:
+
+```json
+{
+  "matcher": "Bash",
+  "command": "aya ci watch 2>/dev/null || true",
+  "asyncRewake": true
+}
+```
+
+After a `git push`, aya monitors triggered GitHub Actions workflows and wakes the agent if a check fails.
+
+### Non-Claude-Code agents
+
+If your host doesn't support hooks, run this manually at the top of each session:
+
+```bash
+aya schedule pending --format text
+```
+
+This prints all due reminders, alerts, and session cron prompts as plain text. Copy any session cron prompts into your context to pick them up.
+
+---
+
 ## Commands
 
 | Command | What it does |
 | ---- | ---- |
+| `aya version` | Show the installed aya version |
 | `aya init` | Generate identity keypair for this instance |
 | `aya profile` | Initialize or rotate the persistent assistant profile |
 | `aya pair` | Pair two instances via short-lived relay code |
