@@ -203,6 +203,23 @@ class RelayClient:
                     try:
                         async for raw in _read_until_eose(ws, sub_id):
                             try:
+                                # Skip pairing events — same kind (5999) but not
+                                # Packet-shaped. Check tags to avoid circular import
+                                # from pair.py (which already imports relay.py).
+                                event_tags = raw.get("tags", [])
+                                if any(
+                                    len(t) >= 2
+                                    and t[0] == "t"
+                                    and t[1] in ("aya-pair-req", "aya-pair-resp")
+                                    for t in event_tags
+                                ):
+                                    logger.debug(
+                                        "Skipping pairing event (tag=%s)",
+                                        next(
+                                            t[1] for t in event_tags if len(t) >= 2 and t[0] == "t"
+                                        ),
+                                    )
+                                    continue
                                 packet = Packet.from_json(raw["content"])
                                 if not packet.is_expired():
                                     yield packet
