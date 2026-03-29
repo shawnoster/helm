@@ -1,0 +1,107 @@
+"""Tests for aya.paths — centralized path resolution and migration."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+import pytest
+
+
+@pytest.fixture
+def aya_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point AYA_HOME at a temp directory and reload paths module."""
+    home = tmp_path / ".aya"
+    monkeypatch.setenv("AYA_HOME", str(home))
+
+    # Reload paths so it picks up the env var
+    import aya.paths
+
+    monkeypatch.setattr(aya.paths, "AYA_HOME", home)
+    monkeypatch.setattr(aya.paths, "PROFILE_PATH", home / "profile.json")
+    monkeypatch.setattr(aya.paths, "CONFIG_PATH", home / "config.json")
+    monkeypatch.setattr(aya.paths, "MEMORY_DIR", home / "memory")
+    monkeypatch.setattr(aya.paths, "SCHEDULER_FILE", home / "memory" / "scheduler.json")
+    monkeypatch.setattr(aya.paths, "ALERTS_FILE", home / "memory" / "alerts.json")
+    monkeypatch.setattr(aya.paths, "ACTIVITY_FILE", home / "memory" / "activity.json")
+    monkeypatch.setattr(aya.paths, "LOCK_FILE", home / "memory" / ".scheduler.lock")
+    monkeypatch.setattr(aya.paths, "CLAIMS_DIR", home / "memory" / "claims")
+    monkeypatch.setattr(aya.paths, "CRON_SCHEDULES_PATH", home / "memory" / "cron-schedules.md")
+    return home
+
+
+class TestEnsureHome:
+    def test_creates_memory_dir(self, aya_home: Path) -> None:
+        from aya.paths import ensure_home
+
+        ensure_home()
+        assert (aya_home / "memory").is_dir()
+
+    def test_idempotent(self, aya_home: Path) -> None:
+        from aya.paths import ensure_home
+
+        ensure_home()
+        ensure_home()  # second call should not raise
+        assert (aya_home / "memory").is_dir()
+
+
+class TestMigration:
+    def _setup_legacy_workspace(self, tmp_path: Path) -> Path:
+        """Create old workspace-relative layout with sample data."""
+        ws = tmp_path / "workspace"
+        mem = ws / "assistant" / "memory"
+        mem.mkdir(parents=True)
+
+        (ws / "assistant" / "profile.json").write_text('{"alias": "Ace"}')
+        (ws / "assistant" / "config.json").write_text('{"key": "val"}')
+        (mem / "scheduler.json").write_text(json.dumps({"items": []}))
+        (mem / "alerts.json").write_text(json.dumps({"alerts": []}))
+        (mem / "activity.json").write_text('{"last_activity_at": "2026-03-28T10:00:00"}')
+        (mem / "activity-tracker.md").write_text("## 2026-03-28\n- did stuff")
+        return ws
+
+    def test_migrates_files(
+        self, tmp_path: Path, aya_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws = self._setup_legacy_workspace(tmp_path)
+        monkeypatch.chdir(ws)
+
+        from aya.paths import migrate_if_needed
+
+        migrated = migrate_if_needed()
+        assert len(migrated) > 0
+        assert (aya_home / "profile.json").exists()
+        assert (aya_home / "memory" / "scheduler.json").exists()
+        assert (aya_home / "memory" / "alerts.json").exists()
+        assert (aya_home / "memory" / "activity.json").exists()
+
+        # Old files should be gone (moved, not copied)
+        assert not (ws / "assistant" / "profile.json").exists()
+        assert not (ws / "assistant" / "memory" / "scheduler.json").exists()
+
+    def test_skips_when_already_migrated(
+        self, tmp_path: Path, aya_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws = self._setup_legacy_workspace(tmp_path)
+        monkeypatch.chdir(ws)
+
+        # Pre-create aya home with scheduler.json
+        (aya_home / "memory").mkdir(parents=True)
+        (aya_home / "memory" / "scheduler.json").write_text(json.dumps({"items": []}))
+
+        from aya.paths import migrate_if_needed
+
+        migrated = migrate_if_needed()
+        assert migrated == []
+        # Old files should still exist (not touched)
+        assert (ws / "assistant" / "profile.json").exists()
+
+    def test_skips_when_no_legacy_workspace(
+        self, aya_home: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+
+        from aya.paths import migrate_if_needed
+
+        migrated = migrate_if_needed()
+        assert migrated == []

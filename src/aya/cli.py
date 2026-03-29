@@ -25,7 +25,7 @@ from aya.pair import (
     poll_for_pair_response,
     publish_pair_request,
 )
-from aya.paths import PROFILE_PATH
+from aya.paths import PROFILE_PATH, migrate_if_needed
 from aya.profile import ensure_profile
 from aya.relay import RelayClient
 
@@ -59,6 +59,7 @@ app = typer.Typer(
     name="aya",
     help="Personal AI assistant toolkit — sync, schedule, identity.",
     no_args_is_help=True,
+    callback=migrate_if_needed,
 )
 
 # ── Schedule sub-app ─────────────────────────────────────────────────────────
