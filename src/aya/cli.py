@@ -16,6 +16,7 @@ from rich.table import Table
 from aya import __version__
 from aya.ci import watch_pr_checks
 from aya.identity import Identity, Profile, TrustedKey
+from aya.install import install_scheduler, uninstall_scheduler
 from aya.packet import ConflictStrategy, ContentType, Packet, human_age
 from aya.pair import (
     PairingError,
@@ -857,6 +858,71 @@ def schedule_alerts(
 
     if mark_seen:
         console.print(f"\n  Marked {len(unseen)} alert(s) as seen.")
+
+
+# ── install / uninstall ───────────────────────────────────────────────────────
+
+
+@schedule_app.command("install")
+def schedule_install(
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview changes without applying"),
+) -> None:
+    """Install scheduler integrations — system crontab + Claude Code hooks."""
+    result = install_scheduler(dry_run=dry_run)
+
+    if result.errors:
+        for e in result.errors:
+            err.print(f"[red]Error:[/red] {e}")
+
+    prefix = "[dim](dry run)[/dim] " if dry_run else ""
+
+    if result.cron_already_present:
+        console.print(f"  {prefix}[dim]Crontab:[/dim] already installed")
+    elif result.cron_installed:
+        console.print(f"  {prefix}[green]Crontab:[/green] installed")
+        console.print(f"    [dim]{result.cron_line}[/dim]")
+
+    for event in result.hooks_already_present:
+        console.print(f"  {prefix}[dim]{event}:[/dim] already installed")
+    for event in result.hooks_installed:
+        console.print(f"  {prefix}[green]{event}:[/green] installed")
+    for event in result.hooks_updated:
+        console.print(f"  {prefix}[yellow]{event}:[/yellow] updated")
+
+    if not dry_run and not result.errors:
+        console.print("\n[green]✓[/green] Scheduler integrations installed.")
+    elif result.errors:
+        raise typer.Exit(1)
+
+
+@schedule_app.command("uninstall")
+def schedule_uninstall(
+    dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview changes without applying"),
+) -> None:
+    """Remove scheduler integrations — system crontab + Claude Code hooks."""
+    result = uninstall_scheduler(dry_run=dry_run)
+
+    if result.errors:
+        for e in result.errors:
+            err.print(f"[red]Error:[/red] {e}")
+
+    prefix = "[dim](dry run)[/dim] " if dry_run else ""
+
+    if result.cron_removed:
+        console.print(f"  {prefix}[yellow]Crontab:[/yellow] removed")
+    else:
+        console.print(f"  {prefix}[dim]Crontab:[/dim] not present")
+
+    for event in result.hooks_removed:
+        console.print(f"  {prefix}[yellow]{event}:[/yellow] removed")
+
+    if not result.hooks_removed:
+        console.print(f"  {prefix}[dim]Hooks:[/dim] not present")
+
+    if not dry_run and not result.errors:
+        console.print("\n[green]✓[/green] Scheduler integrations removed.")
+    elif result.errors:
+        raise typer.Exit(1)
 
 
 # ── hook ──────────────────────────────────────────────────────────────────────
