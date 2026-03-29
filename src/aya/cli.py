@@ -508,6 +508,7 @@ def receive(
 def inbox(
     relay: str = typer.Option(None),
     instance: str = typer.Option("default", help="Local instance name (identity to act as)"),
+    format_: str = typer.Option("text", "--format", "-f", help="Output format: text or json"),
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """List pending packets without ingesting."""
@@ -520,7 +521,15 @@ def inbox(
         client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
 
         packets = [pkt async for pkt in client.fetch_pending()]
-        if not packets:
+        if format_ == "json":
+            console.out(
+                json.dumps(
+                    [_packet_to_dict(pkt, p) for pkt in packets],
+                    indent=2,
+                    default=str,
+                )
+            )
+        elif not packets:
             console.print("[dim]Inbox empty.[/dim]")
         else:
             _show_inbox(packets, p)
@@ -1027,6 +1036,19 @@ def _resolve_did(to: str, profile: Profile) -> str:
         )
         raise typer.Exit(1)
     return key.did
+
+
+def _packet_to_dict(pkt: Packet, profile: Profile) -> dict[str, object]:
+    return {
+        "id": pkt.id,
+        "intent": pkt.intent,
+        "from_did": pkt.from_did,
+        "from_label": _label_for_did(pkt.from_did, profile),
+        "sent_at": pkt.sent_at,
+        "age": human_age(pkt.sent_at),
+        "content_type": pkt.content_type,
+        "trusted": profile.is_trusted(pkt.from_did),
+    }
 
 
 def _show_inbox(packets: list[Packet], profile: Profile) -> None:
