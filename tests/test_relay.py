@@ -401,7 +401,7 @@ class TestFetchPending:
         """Pairing events (tagged aya-pair-req/resp) must not be parsed as Packets."""
         pairing_event = {
             "id": "pair-evt",
-            "tags": [["t", pair_tag], ["p", "somepubkey"]],
+            "tags": [["t", pair_tag], ["p", client.public_key_hex]],
             "content": '{"code": "WORD-WORD-1234"}',
         }
 
