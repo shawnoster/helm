@@ -786,3 +786,53 @@ class TestReceive:
             )
 
         assert "Could not reach relay" in result.output
+
+    def test_yes_flag_ingests_untrusted_packet_without_prompt(
+        self, profile_with_instance: Path
+    ) -> None:
+        """--yes must ingest packets from untrusted senders without prompting."""
+        unknown_sender = Identity.generate("unknown")
+        p = Profile.load(profile_with_instance)
+        packet = self._signed_packet(unknown_sender, p.instances["default"].did, intent="Untrusted")
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            mock_cls.return_value.send_receipt = AsyncMock()
+            result = runner.invoke(
+                app,
+                ["receive", "--yes", "--profile", str(profile_with_instance)],
+            )
+
+        assert result.exit_code == 0, result.output
+        saved = Profile.load(profile_with_instance)
+        assert packet.id in saved.ingested_ids
+
+    def test_yes_short_flag_works(self, profile_with_instance: Path) -> None:
+        """-y must behave identically to --yes for untrusted senders and skip prompts."""
+        unknown_sender = Identity.generate("unknown")
+        p = Profile.load(profile_with_instance)
+        packet = self._signed_packet(
+            unknown_sender, p.instances["default"].did, intent="Short flag"
+        )
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("typer.confirm") as mock_confirm:
+            mock_confirm.side_effect = AssertionError(
+                "typer.confirm should not be called when -y is used"
+            )
+            with patch("aya.cli.RelayClient") as mock_cls:
+                mock_cls.return_value.fetch_pending = mock_fetch
+                mock_cls.return_value.send_receipt = AsyncMock()
+                result = runner.invoke(
+                    app,
+                    ["receive", "-y", "--profile", str(profile_with_instance)],
+                )
+
+        assert result.exit_code == 0, result.output
+        saved = Profile.load(profile_with_instance)
+        assert packet.id in saved.ingested_ids

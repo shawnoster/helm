@@ -388,6 +388,9 @@ def receive(
     relay: str = typer.Option(None),
     instance: str = typer.Option("default"),
     auto_ingest: bool = typer.Option(False, help="Ingest all trusted packets without prompting"),
+    yes: bool = typer.Option(
+        False, "--yes", "-y", help="Auto-confirm all prompts (non-interactive mode)"
+    ),
     quiet: bool = typer.Option(
         False, "--quiet", "-q", help="Suppress output when inbox is empty (for startup hooks)"
     ),
@@ -454,7 +457,7 @@ def receive(
                 p.ingested_ids.append(packet.id)
                 continue
 
-            ingest = typer.confirm(
+            ingest = yes or typer.confirm(
                 f"\nIngest '{packet.intent}' ({trust_label})?",
                 default=trusted,
             )
