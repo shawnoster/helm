@@ -1,0 +1,8 @@
+{
+  "name": "aya",
+  "version": "1.0.0",
+  "description": "Personal assistant toolkit — schedule reminders, sync context between machines, and manage assistant identity via the aya CLI.",
+  "author": {
+    "name": "Shawn Oster"
+  }
+}
