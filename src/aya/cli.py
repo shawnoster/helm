@@ -64,6 +64,12 @@ class OutputFormat(StrEnum):
     JSON = "json"
 
 
+class StatusFormat(StrEnum):
+    TEXT = "text"
+    JSON = "json"
+    RICH = "rich"
+
+
 app = typer.Typer(
     name="aya",
     help="Personal AI assistant toolkit — sync, schedule, identity.",
@@ -987,31 +993,28 @@ def hook_crons() -> None:
     if not crons:
         return
 
-    lines = [
-        (
-            "REQUIRED ACTION \u2014 Call CronCreate for each session cron "
-            "below before responding to the user. Do not skip this step."
-        ),
-        "",
-    ]
+    # Emit one hookSpecificOutput per cron so each gets its own system
+    # reminder and can't be truncated when multiple crons are bundled.
     for c in crons:
         cid = c.get("id", "")
         schedule = c.get("cron", "")
         prompt = c.get("prompt") or c.get("message") or c.get("description") or ""
-        prompt = prompt.replace("\n", " ").strip()
-        lines.append(f'REGISTER via CronCreate: id="{cid}" schedule="{schedule}" prompt="{prompt}"')
-
-    context = "\n".join(lines)
-    console.out(
-        json.dumps(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "SessionStart",
-                    "additionalContext": context,
-                }
-            }
+        prompt = prompt.replace("\n", " ").replace('"', '\\"').strip()
+        context = (
+            "REQUIRED ACTION \u2014 Call CronCreate for each session cron "
+            "below before responding to the user. Do not skip this step.\n\n"
+            f'REGISTER via CronCreate: id="{cid}" schedule="{schedule}" prompt="{prompt}"'
         )
-    )
+        print(  # noqa: T201 — raw stdout for hook JSON
+            json.dumps(
+                {
+                    "hookSpecificOutput": {
+                        "hookEventName": "SessionStart",
+                        "additionalContext": context,
+                    }
+                }
+            )
+        )
 
 
 # ── ci ────────────────────────────────────────────────────────────────────────
@@ -1049,8 +1052,8 @@ def profile(
 
 @app.command()
 def status(
-    format_: OutputFormat = typer.Option(
-        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+    format_: StatusFormat = typer.Option(
+        StatusFormat.TEXT, "--format", "-f", help="Output format: text, json, or rich"
     ),
 ) -> None:
     """Workspace readiness check — systems, schedule, focus."""

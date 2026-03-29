@@ -50,10 +50,6 @@ def _alerts_file() -> Path:
     return globals().get("ALERTS_FILE") or _paths.ALERTS_FILE
 
 
-def _config_file() -> Path:
-    return globals().get("CONFIG_FILE") or _paths.CONFIG_PATH
-
-
 def _activity_file() -> Path:
     return globals().get("ACTIVITY_FILE") or _paths.ACTIVITY_FILE
 
@@ -67,7 +63,6 @@ def _get_local_tz() -> ZoneInfo:
 _LAZY_ATTRS: dict[str, Any] = {
     "SCHEDULER_FILE": _scheduler_file,
     "ALERTS_FILE": _alerts_file,
-    "CONFIG_FILE": _config_file,
     "ACTIVITY_FILE": _activity_file,
     "LOCK_FILE": lambda: _lock_file(),  # noqa: PLW0108 — forward ref
     "CLAIMS_DIR": lambda: _claims_dir(),  # noqa: PLW0108 — forward ref

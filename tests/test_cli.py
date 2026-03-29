@@ -693,6 +693,101 @@ class TestHookCrons:
         assert "CronCreate" in ctx
         assert "test-cron" in ctx
 
+    def test_multiple_crons_emit_separate_lines(self, tmp_path, monkeypatch):
+        """Each session cron must produce its own JSON line so Claude Code
+        creates a separate system reminder per cron — prevents truncation
+        when multiple crons are bundled into a single hookSpecificOutput."""
+        scheduler_file = tmp_path / "sched" / "scheduler.json"
+        alerts_file = tmp_path / "sched" / "alerts.json"
+        scheduler_file.parent.mkdir(parents=True)
+        scheduler_file.write_text(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "cron-health",
+                            "type": "recurring",
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "health-break",
+                            "session_required": True,
+                            "cron": "*/20 * * * *",
+                            "prompt": "Take a break.",
+                        },
+                        {
+                            "id": "cron-relay",
+                            "type": "recurring",
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "relay-poll",
+                            "session_required": True,
+                            "cron": "*/10 * * * *",
+                            "prompt": "Poll the relay.",
+                        },
+                    ]
+                }
+            )
+        )
+        alerts_file.write_text(json.dumps({"alerts": []}))
+        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+
+        result = runner.invoke(app, ["hook", "crons"])
+        assert result.exit_code == 0
+
+        lines = [ln for ln in result.output.strip().splitlines() if ln.strip()]
+        assert len(lines) == 2, f"Expected 2 JSON lines, got {len(lines)}: {lines}"
+
+        parsed = [json.loads(ln) for ln in lines]
+        ids = set()
+        for obj in parsed:
+            assert "hookSpecificOutput" in obj
+            ctx = obj["hookSpecificOutput"]["additionalContext"]
+            assert "REQUIRED ACTION" in ctx
+            assert "CronCreate" in ctx
+            # Extract the cron id from the context
+            for cron_id in ("cron-health", "cron-relay"):
+                if cron_id in ctx:
+                    ids.add(cron_id)
+
+        assert ids == {"cron-health", "cron-relay"}, f"Missing cron IDs: {ids}"
+
+    def test_escapes_double_quotes_in_prompt(self, tmp_path, monkeypatch):
+        """Prompts with double quotes must be escaped to avoid malformed output."""
+        scheduler_file = tmp_path / "sched" / "scheduler.json"
+        alerts_file = tmp_path / "sched" / "alerts.json"
+        scheduler_file.parent.mkdir(parents=True)
+        scheduler_file.write_text(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "cron-quotes",
+                            "type": "recurring",
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "test",
+                            "session_required": True,
+                            "cron": "*/5 * * * *",
+                            "prompt": 'Say "hello" to the user.',
+                        }
+                    ]
+                }
+            )
+        )
+        alerts_file.write_text(json.dumps({"alerts": []}))
+        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+
+        result = runner.invoke(app, ["hook", "crons"])
+        assert result.exit_code == 0
+        data = json.loads(result.output)
+        ctx = data["hookSpecificOutput"]["additionalContext"]
+        # Quotes in the prompt must be escaped
+        assert r"\"hello\"" in ctx
+        # Must not contain unescaped quotes that would break parsing
+        assert 'prompt="Say \\"hello\\" to the user."' in ctx
+
     def test_does_not_claim_alerts(self, tmp_path, monkeypatch):
         """hook crons must not consume alerts — they belong to schedule pending."""
         scheduler_file = tmp_path / "sched" / "scheduler.json"

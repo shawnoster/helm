@@ -17,7 +17,6 @@ AYA_HOME = Path(_aya_home_env).expanduser() if _aya_home_env else Path.home() / 
 
 # ── identity ────────────────────────────────────────────────────────────────
 PROFILE_PATH = AYA_HOME / "profile.json"
-CONFIG_PATH = AYA_HOME / "config.json"
 
 # ── scheduler data ──────────────────────────────────────────────────────────
 SCHEDULER_FILE = AYA_HOME / "scheduler.json"
