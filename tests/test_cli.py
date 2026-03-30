@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -950,7 +951,13 @@ class TestReceive:
         """Packets whose IDs are already in ingested_ids must be silently skipped."""
         p = Profile.load(profile_with_sender)
         packet = self._signed_packet(sender, p.instances["default"].did, intent="Already seen")
-        p.ingested_ids.append({"id": packet.id, "ingested_at": "2026-03-30T00:00:00Z"})
+        recent_ts = (
+            (datetime.now(UTC) - timedelta(days=1))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        p.ingested_ids.append({"id": packet.id, "ingested_at": recent_ts})
         p.save(profile_with_sender)
 
         async def mock_fetch(*args, **kwargs):

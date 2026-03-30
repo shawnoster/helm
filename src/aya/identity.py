@@ -92,7 +92,7 @@ class TrustedKey:
 _DEFAULT_RELAYS = ["wss://relay.damus.io", "wss://nos.lol"]
 
 
-def _normalize_ingested_ids(raw: list) -> list[dict[str, str]]:
+def _normalize_ingested_ids(raw: object) -> list[dict[str, str]]:
     """Coerce legacy string entries to the ``{id, ingested_at}`` dict format.
 
     Older profiles stored bare packet-ID strings in ``ingested_ids``.  On
@@ -100,6 +100,8 @@ def _normalize_ingested_ids(raw: list) -> list[dict[str, str]]:
     ``ingested_at`` set to the current time so they survive the next TTL prune
     and don't cause an immediate false-re-ingestion.
     """
+    if not isinstance(raw, list):
+        return []
     now_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     result: list[dict[str, str]] = []
     for entry in raw:
@@ -211,11 +213,19 @@ class Profile:
         data["aya"].pop("default_relay", None)
         data["aya"]["default_relays"] = self.default_relays
         data["aya"]["last_checked"] = self.last_checked
-        cutoff = (datetime.now(UTC) - timedelta(days=7)).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-        data["aya"]["ingested_ids"] = [
-            entry for entry in self.ingested_ids
-            if entry.get("ingested_at", "") >= cutoff
-        ]
+        cutoff = datetime.now(UTC) - timedelta(days=7)
+        pruned: list[dict[str, str]] = []
+        for entry in self.ingested_ids:
+            raw_ts = entry.get("ingested_at", "")
+            try:
+                ts = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=UTC)
+                if ts >= cutoff:
+                    pruned.append(entry)
+            except (ValueError, AttributeError):
+                pass  # unparseable timestamp — treat as expired
+        data["aya"]["ingested_ids"] = pruned
         path.write_text(json.dumps(data, indent=2))
         path.chmod(0o600)  # private keys live here — owner-read only
 

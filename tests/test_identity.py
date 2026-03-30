@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from aya.identity import Identity, Profile, TrustedKey
@@ -186,7 +187,13 @@ class TestIngestedIdsTTL:
         profile_path.write_text("{}")
 
         p = Profile.load(profile_path)
-        p.ingested_ids.append({"id": "abc123", "ingested_at": "2026-03-29T00:00:00Z"})
+        recent_ts = (
+            (datetime.now(UTC) - timedelta(days=1))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        p.ingested_ids.append({"id": "abc123", "ingested_at": recent_ts})
         p.save(profile_path)
 
         restored = Profile.load(profile_path)
@@ -208,9 +215,7 @@ class TestIngestedIdsTTL:
     def test_legacy_string_entries_are_migrated(self, tmp_path: Path) -> None:
         """Old bare-string ingested_ids must be normalised to dicts on load."""
         profile_path = tmp_path / "profile.json"
-        profile_path.write_text(
-            json.dumps({"aya": {"ingested_ids": ["legacy_packet_id"]}})
-        )
+        profile_path.write_text(json.dumps({"aya": {"ingested_ids": ["legacy_packet_id"]}}))
 
         p = Profile.load(profile_path)
         assert len(p.ingested_ids) == 1
@@ -224,11 +229,17 @@ class TestIngestedIdsTTL:
         profile_path.write_text("{}")
 
         p = Profile.load(profile_path)
-        p.ingested_ids.append({"id": "pkt1", "ingested_at": "2026-03-29T12:00:00Z"})
+        recent_ts = (
+            (datetime.now(UTC) - timedelta(days=1))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        p.ingested_ids.append({"id": "pkt1", "ingested_at": recent_ts})
         p.save(profile_path)
 
         raw = json.loads(profile_path.read_text())
         ids = raw["aya"]["ingested_ids"]
         assert len(ids) == 1
         assert ids[0]["id"] == "pkt1"
-        assert ids[0]["ingested_at"] == "2026-03-29T12:00:00Z"
+        assert ids[0]["ingested_at"] == recent_ts
