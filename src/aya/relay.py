@@ -217,8 +217,8 @@ class RelayClient:
         to override this lower bound.
         """
         now = datetime.now(UTC)
-        effective_since = since if since is not None else (
-            now - timedelta(days=_DEFAULT_FETCH_WINDOW_DAYS)
+        effective_since = (
+            since if since is not None else (now - timedelta(days=_DEFAULT_FETCH_WINDOW_DAYS))
         )
         until: int | None = None
         seen_event_ids: set[str] = set()  # intra-relay dedup for inclusive cursor
