@@ -36,6 +36,10 @@ _BACKOFF_JITTER = 0.25  # ±25% random jitter
 _MAX_RETRIES_PUBLISH = 5
 _MAX_RETRIES_FETCH = 3
 
+# Fetch pagination — events per REQ batch.  Pagination continues with an
+# `until` cursor until the relay returns fewer events than this size.
+_FETCH_PAGE_SIZE = 200
+
 
 def _backoff_delay(attempt: int) -> float:
     """Return exponential-backoff delay with ±25% jitter.
@@ -170,18 +174,18 @@ class RelayClient:
     async def fetch_pending(
         self,
         since: datetime | None = None,
-        limit: int = 50,
     ) -> AsyncIterator[Packet]:
         """
         Yield packets addressed to this instance's pubkey, querying all relays.
 
         Results are deduplicated by packet ID across relays.  Callers that want
-        a time-bounded fetch can pass *since*; omitting it fetches the most
-        recent matching events up to *limit* from each relay.
+        a time-bounded fetch can pass *since*; omitting it paginates through all
+        matching events (in batches of *_FETCH_PAGE_SIZE*) until the relay
+        signals exhaustion.
         """
         seen_ids: set[str] = set()
         for relay_url in self._relay_urls:
-            async for packet in self._fetch_from_relay(relay_url, since, limit):
+            async for packet in self._fetch_from_relay(relay_url, since):
                 if packet.id not in seen_ids:
                     seen_ids.add(packet.id)
                     yield packet
@@ -190,68 +194,112 @@ class RelayClient:
         self,
         relay_url: str,
         since: datetime | None,
-        limit: int,
     ) -> AsyncIterator[Packet]:
-        """Fetch packets from a single relay with retries."""
-        filter_: dict = {
-            "kinds": [AYA_KIND],
-            "#p": [self.public_key_hex],
-            "limit": limit,
-        }
-        if since:
-            filter_["since"] = int(since.timestamp())
+        """Fetch all matching packets from a single relay, paginating via `until`.
 
-        sub_id = f"aya-{datetime.now(UTC).timestamp():.0f}"
+        Sends REQ filters with ``limit=_FETCH_PAGE_SIZE``.  After each page,
+        if the relay returned a full page the cursor advances to
+        ``oldest_seen_ts - 1`` and another REQ is issued.  Iteration stops
+        when a page is smaller than _FETCH_PAGE_SIZE (signals end of matching
+        events) or when no ``created_at`` timestamp is available to advance
+        the cursor.
+        """
+        until: int | None = None
 
-        for attempt in range(_MAX_RETRIES_FETCH):
-            try:
-                async with websockets.connect(relay_url) as ws:
-                    await ws.send(json.dumps(["REQ", sub_id, filter_]))
-                    try:
-                        async for raw in _read_until_eose(ws, sub_id):
-                            try:
-                                # Skip pairing events — same kind (5999) but not
-                                # Packet-shaped. Constants live in relay.py to avoid
-                                # a circular import with pair.py.
-                                event_tags = raw.get("tags", [])
-                                pairing_tag = next(
-                                    (
-                                        t
-                                        for t in event_tags
-                                        if len(t) >= 2 and t[0] == "t" and t[1] in _PAIR_TAGS
-                                    ),
-                                    None,
-                                )
-                                if pairing_tag is not None:
-                                    logger.debug("Skipping pairing event (tag=%s)", pairing_tag[1])
-                                    continue
-                                packet = Packet.from_json(raw["content"])
-                                if not packet.is_expired():
-                                    yield packet
-                            except Exception as exc:
-                                logger.warning("Skipping malformed event: %s", exc)
-                    except TimeoutError:
+        while True:
+            filter_: dict = {
+                "kinds": [AYA_KIND],
+                "#p": [self.public_key_hex],
+                "limit": _FETCH_PAGE_SIZE,
+            }
+            if since:
+                filter_["since"] = int(since.timestamp())
+            if until is not None:
+                filter_["until"] = until
+
+            sub_id = f"aya-{datetime.now(UTC).timestamp():.0f}"
+
+            # Collect the raw events for this page so we can count them and
+            # determine the oldest timestamp before deciding whether to paginate.
+            page_events: list[dict] = []
+            fetch_ok = False
+
+            for attempt in range(_MAX_RETRIES_FETCH):
+                page_events = []
+                try:
+                    async with websockets.connect(relay_url) as ws:
+                        await ws.send(json.dumps(["REQ", sub_id, filter_]))
+                        try:
+                            async for raw in _read_until_eose(ws, sub_id):
+                                page_events.append(raw)
+                        except TimeoutError:
+                            logger.warning(
+                                "Relay %s did not send EOSE within timeout; closing subscription",
+                                relay_url,
+                            )
+                        await ws.send(json.dumps(["CLOSE", sub_id]))
+                    fetch_ok = True
+                    break  # page fetched successfully
+                except Exception as exc:
+                    if _is_transient_error(exc) and attempt < _MAX_RETRIES_FETCH - 1:
+                        delay = _backoff_delay(attempt)
                         logger.warning(
-                            "Relay %s did not send EOSE within timeout; closing subscription",
+                            "Transient error fetching from %s (attempt %d/%d): %s — retry in %.1fs",
                             relay_url,
+                            attempt + 1,
+                            _MAX_RETRIES_FETCH,
+                            exc,
+                            delay,
                         )
-                    await ws.send(json.dumps(["CLOSE", sub_id]))
-                return  # success — stop retrying
-            except Exception as exc:
-                if _is_transient_error(exc) and attempt < _MAX_RETRIES_FETCH - 1:
-                    delay = _backoff_delay(attempt)
-                    logger.warning(
-                        "Transient error fetching from %s (attempt %d/%d): %s — retry in %.1fs",
-                        relay_url,
-                        attempt + 1,
-                        _MAX_RETRIES_FETCH,
-                        exc,
-                        delay,
+                        await asyncio.sleep(delay)
+                    else:
+                        logger.warning("Failed to fetch from %s: %s", relay_url, exc)
+
+            if not fetch_ok:
+                return
+
+            # Process events and track the oldest timestamp for cursor advancement.
+            oldest_ts: int | None = None
+            for raw in page_events:
+                raw_ts = raw.get("created_at")
+                if isinstance(raw_ts, int):
+                    if oldest_ts is None or raw_ts < oldest_ts:
+                        oldest_ts = raw_ts
+                try:
+                    # Skip pairing events — same kind (5999) but not
+                    # Packet-shaped. Constants live in relay.py to avoid
+                    # a circular import with pair.py.
+                    event_tags = raw.get("tags", [])
+                    pairing_tag = next(
+                        (
+                            t
+                            for t in event_tags
+                            if len(t) >= 2 and t[0] == "t" and t[1] in _PAIR_TAGS
+                        ),
+                        None,
                     )
-                    await asyncio.sleep(delay)
-                else:
-                    logger.warning("Failed to fetch from %s: %s", relay_url, exc)
-                    return
+                    if pairing_tag is not None:
+                        logger.debug("Skipping pairing event (tag=%s)", pairing_tag[1])
+                        continue
+                    packet = Packet.from_json(raw["content"])
+                    if not packet.is_expired():
+                        yield packet
+                except Exception as exc:
+                    logger.warning("Skipping malformed event: %s", exc)
+
+            # Stop paginating if this page was smaller than the batch size
+            # (relay has no more matching events) or if we have no timestamp
+            # cursor to advance.
+            if len(page_events) < _FETCH_PAGE_SIZE or oldest_ts is None:
+                break
+
+            until = oldest_ts - 1
+            logger.debug(
+                "Relay %s: fetched %d events, advancing cursor to until=%d",
+                relay_url,
+                len(page_events),
+                until,
+            )
 
     async def send_receipt(self, packet: Packet, sender_nostr_pubkey: str) -> None:
         """Publish a read receipt for the given packet to all configured relays."""

@@ -17,6 +17,7 @@ from aya.relay import (
     AYA_RESULT_KIND,
     RelayClient,
     RelayError,
+    _FETCH_PAGE_SIZE,
     _compute_event_id,
     _read_until_eose,
     _sign_hex,
@@ -443,6 +444,135 @@ class TestFetchPending:
 
         assert len(packets) == 1
         assert packets[0].id == p.id
+
+
+# ── pagination ────────────────────────────────────────────────────────────────
+
+
+class TestFetchPagination:
+    """fetch_pending paginates via `until` when a full page is returned."""
+
+    async def test_paginates_when_full_page_returned(
+        self, client: RelayClient, sender: Identity, recipient: Identity
+    ) -> None:
+        """A full first page triggers a second REQ with an `until` cursor."""
+        base_ts = 1_700_000_000
+
+        # Build _FETCH_PAGE_SIZE events for page 1, then 1 event for page 2.
+        def _make_event(idx: int) -> dict:
+            p = Packet(
+                **{"from": sender.did, "to": recipient.did},
+                intent=f"Packet {idx}",
+                content="data",
+            )
+            return {"id": f"evt-{idx}", "content": p.to_json(), "created_at": base_ts - idx}
+
+        page1_events = [_make_event(i) for i in range(_FETCH_PAGE_SIZE)]
+        page2_events = [_make_event(_FETCH_PAGE_SIZE)]
+
+        call_count = 0
+        sent_filters: list[dict] = []
+
+        async def fake_read_until_eose(ws, sub_id):
+            nonlocal call_count
+            events = page1_events if call_count == 0 else page2_events
+            call_count += 1
+            for evt in events:
+                yield evt
+
+        async def fake_ws_send(data):
+            msg = json.loads(data)
+            if msg[0] == "REQ":
+                sent_filters.append(msg[2])
+
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+        mock_ws.send = AsyncMock(side_effect=fake_ws_send)
+
+        with (
+            patch("aya.relay._read_until_eose", side_effect=fake_read_until_eose),
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+        ):
+            packets = [pkt async for pkt in client.fetch_pending()]
+
+        # All packets from both pages should be yielded.
+        assert len(packets) == _FETCH_PAGE_SIZE + 1
+
+        # Two REQ filters should have been sent.
+        assert len(sent_filters) == 2
+
+        # Second REQ must carry an `until` cursor set to oldest_ts_of_page1 - 1.
+        oldest_page1_ts = base_ts - (_FETCH_PAGE_SIZE - 1)
+        assert sent_filters[1].get("until") == oldest_page1_ts - 1
+
+    async def test_stops_after_partial_page(
+        self, client: RelayClient, sender: Identity, recipient: Identity
+    ) -> None:
+        """A partial page (< _FETCH_PAGE_SIZE events) stops pagination."""
+        p = Packet(
+            **{"from": sender.did, "to": recipient.did},
+            intent="Single packet",
+            content="data",
+        )
+        raw_event = {"id": "evt-only", "content": p.to_json(), "created_at": 1_700_000_000}
+
+        req_count = 0
+
+        async def fake_read_until_eose(ws, sub_id):
+            nonlocal req_count
+            req_count += 1
+            yield raw_event
+
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("aya.relay._read_until_eose", side_effect=fake_read_until_eose),
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+        ):
+            packets = [pkt async for pkt in client.fetch_pending()]
+
+        assert len(packets) == 1
+        # Only one REQ should have been issued (no pagination needed).
+        assert req_count == 1
+
+    async def test_stops_when_no_created_at_in_full_page(
+        self, client: RelayClient, sender: Identity, recipient: Identity
+    ) -> None:
+        """A full page with no `created_at` fields stops pagination gracefully."""
+
+        def _make_event_no_ts(idx: int) -> dict:
+            p = Packet(
+                **{"from": sender.did, "to": recipient.did},
+                intent=f"Packet {idx}",
+                content="data",
+            )
+            return {"id": f"evt-{idx}", "content": p.to_json()}
+
+        full_page = [_make_event_no_ts(i) for i in range(_FETCH_PAGE_SIZE)]
+        req_count = 0
+
+        async def fake_read_until_eose(ws, sub_id):
+            nonlocal req_count
+            req_count += 1
+            for evt in full_page:
+                yield evt
+
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("aya.relay._read_until_eose", side_effect=fake_read_until_eose),
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+        ):
+            packets = [pkt async for pkt in client.fetch_pending()]
+
+        assert len(packets) == _FETCH_PAGE_SIZE
+        # Only one REQ: no cursor to advance when created_at is absent.
+        assert req_count == 1
 
 
 # ── publish ───────────────────────────────────────────────────────────────────
