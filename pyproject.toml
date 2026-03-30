@@ -12,7 +12,7 @@ dependencies = [
     "pydantic>=2",
     "rich>=14",
     "base58>=2",
-    "coincurve>=20.0.0,<21",
+    "coincurve>=20.0.0,<22",
 ]
 
 [project.scripts]
