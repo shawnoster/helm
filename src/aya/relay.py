@@ -36,9 +36,10 @@ _BACKOFF_JITTER = 0.25  # ±25% random jitter
 _MAX_RETRIES_PUBLISH = 5
 _MAX_RETRIES_FETCH = 3
 
-# Fetch pagination — events per REQ batch.  Pagination continues with an
-# `until` cursor until the relay returns fewer events than this size.
-_FETCH_PAGE_SIZE = 200
+# Fetch pagination — events per REQ batch.  Many Nostr relays enforce a cap
+# of 100 events per REQ; asking for more silently returns the cap and would
+# look like a partial page (stopping pagination too early).  100 is safe.
+_FETCH_PAGE_SIZE = 100
 # Default look-back window used when no `since` is specified.  Matches the
 # default packet TTL (7 days) so no live packet can fall outside the window.
 _DEFAULT_FETCH_WINDOW_DAYS = 7
@@ -288,7 +289,6 @@ class RelayClient:
                     if event_id in seen_event_ids:
                         continue  # already yielded via inclusive cursor overlap
                     seen_event_ids.add(event_id)
-                new_event_count += 1
                 try:
                     # Skip pairing events — same kind (5999) but not
                     # Packet-shaped. Constants live in relay.py to avoid
@@ -307,13 +307,14 @@ class RelayClient:
                         continue
                     packet = Packet.from_json(raw["content"])
                     if not packet.is_expired():
+                        new_event_count += 1
                         yield packet
                 except Exception as exc:
                     logger.warning("Skipping malformed event: %s", exc)
 
             # Stop paginating if the relay is exhausted (partial page), if we
-            # have no timestamp cursor to advance, or if no new events were seen
-            # (inclusive cursor already covered the remaining events at oldest_ts).
+            # have no timestamp cursor to advance, or if no new packets were
+            # yielded (pairing/malformed/expired events don't count as progress).
             if len(page_events) < _FETCH_PAGE_SIZE or oldest_ts is None or new_event_count == 0:
                 break
 
