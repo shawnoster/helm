@@ -181,10 +181,11 @@ class RelayClient:
         """
         Yield packets addressed to this instance's pubkey, querying all relays.
 
-        Results are deduplicated by packet ID across relays.  Callers that want
-        a time-bounded fetch can pass *since*; omitting it paginates through all
-        matching events (in batches of *_FETCH_PAGE_SIZE*) until the relay
-        signals exhaustion.
+        Results are deduplicated by packet ID across relays.  When *since* is
+        omitted a default look-back window of ``_DEFAULT_FETCH_WINDOW_DAYS``
+        (matching the packet TTL) is applied so the scan is bounded to the
+        live-packet window.  Pass an explicit *since* to override that lower
+        bound.
         """
         seen_ids: set[str] = set()
         for relay_url in self._relay_urls:
