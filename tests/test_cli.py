@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -25,7 +26,7 @@ class TestVersion:
         from importlib.metadata import version
 
         expected = version("aya-ai-assist")
-        result = runner.invoke(app, ["version"])
+        result = runner.invoke(app, ["version", "--format", "text"])
         assert result.exit_code == 0, result.output
         assert f"aya {expected}" in result.output
 
@@ -86,6 +87,22 @@ def profile_with_no_instances(profile_path: Path) -> Path:
     profile = Profile(alias="Ace", ship_mind_name="", user_name="Shawn")
     profile.save(profile_path)
     return profile_path
+
+
+@pytest.fixture
+def profile_with_multiple_trusted(profile_with_instance: Path) -> Path:
+    """Profile with two trusted keys — for testing ambiguous recipient errors."""
+    p = Profile.load(profile_with_instance)
+    home = Identity.generate("home")
+    laptop = Identity.generate("laptop")
+    p.trusted_keys["home"] = TrustedKey(
+        did=home.did, label="home", nostr_pubkey=home.nostr_public_hex
+    )
+    p.trusted_keys["laptop"] = TrustedKey(
+        did=laptop.did, label="laptop", nostr_pubkey=laptop.nostr_public_hex
+    )
+    p.save(profile_with_instance)
+    return profile_with_instance
 
 
 # ── init ─────────────────────────────────────────────────────────────────────
@@ -563,6 +580,51 @@ class TestDispatch:
         )
         assert result.exit_code != 0
 
+    def test_dispatch_default_resolves_to_single_trusted_key(
+        self, profile_with_trusted: Path
+    ) -> None:
+        """'--to default' should succeed when exactly one trusted key exists."""
+        mock_publish = AsyncMock(return_value="b" * 64)
+        with patch("aya.cli.RelayClient") as mock_client_cls:
+            mock_client_cls.return_value.publish = mock_publish
+            result = runner.invoke(
+                app,
+                [
+                    "dispatch",
+                    "--to",
+                    "default",
+                    "--intent",
+                    "test",
+                    "--profile",
+                    str(profile_with_trusted),
+                ],
+                input="hello\n",
+            )
+        assert result.exit_code == 0, result.output
+        assert "Unknown recipient" not in (result.output or "")
+        mock_publish.assert_awaited_once()
+
+    def test_dispatch_unknown_recipient_lists_available(
+        self, profile_with_multiple_trusted: Path
+    ) -> None:
+        """Error for unknown --to should list available recipient labels."""
+        result = runner.invoke(
+            app,
+            [
+                "dispatch",
+                "--to",
+                "nobody",
+                "--intent",
+                "fail",
+                "--profile",
+                str(profile_with_multiple_trusted),
+            ],
+            input="data\n",
+        )
+        assert result.exit_code != 0
+        assert "home" in result.output
+        assert "laptop" in result.output
+
     def test_dispatch_missing_instance_fails(self, profile_with_multiple_instances: Path) -> None:
         """When multiple instances exist and requested one is absent, dispatch must fail.
 
@@ -950,7 +1012,13 @@ class TestReceive:
         """Packets whose IDs are already in ingested_ids must be silently skipped."""
         p = Profile.load(profile_with_sender)
         packet = self._signed_packet(sender, p.instances["default"].did, intent="Already seen")
-        p.ingested_ids.append(packet.id)
+        recent_ts = (
+            (datetime.now(UTC) - timedelta(days=1))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        p.ingested_ids.append({"id": packet.id, "ingested_at": recent_ts})
         p.save(profile_with_sender)
 
         async def mock_fetch(*args, **kwargs):
@@ -984,7 +1052,7 @@ class TestReceive:
 
         assert result.exit_code == 0, result.output
         saved = Profile.load(profile_with_sender)
-        assert packet.id in saved.ingested_ids
+        assert any(e["id"] == packet.id for e in saved.ingested_ids)
 
     def test_relay_error_shows_friendly_message(self, profile_with_sender: Path) -> None:
         """A relay connection failure must print a friendly message, not raise."""
@@ -1024,7 +1092,7 @@ class TestReceive:
 
         assert result.exit_code == 0, result.output
         saved = Profile.load(profile_with_instance)
-        assert packet.id in saved.ingested_ids
+        assert any(e["id"] == packet.id for e in saved.ingested_ids)
 
     def test_yes_short_flag_works(self, profile_with_instance: Path) -> None:
         """-y must behave identically to --yes for untrusted senders and skip prompts."""
@@ -1051,4 +1119,68 @@ class TestReceive:
 
         assert result.exit_code == 0, result.output
         saved = Profile.load(profile_with_instance)
-        assert packet.id in saved.ingested_ids
+        assert any(e["id"] == packet.id for e in saved.ingested_ids)
+
+
+# ── AUTO format resolution ──────────────────────────────────────────────────
+
+
+class TestAutoFormat:
+    def test_auto_resolves_to_text_in_tty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When stdout is a TTY, AUTO should produce text output."""
+        from aya.cli import OutputFormat, resolve_format
+
+        monkeypatch.delenv("AYA_FORMAT", raising=False)
+        with patch("aya.cli.sys") as mock_sys:
+            mock_sys.stdout.isatty.return_value = True
+            assert resolve_format(OutputFormat.AUTO) == OutputFormat.TEXT
+
+        # And verify via CLI with explicit --format text
+        result = runner.invoke(app, ["version", "--format", "text"])
+        assert result.exit_code == 0, result.output
+        assert result.output.startswith("aya ")
+
+    def test_auto_resolves_to_json_when_not_tty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """When stdout.isatty() returns False, AUTO should resolve to JSON.
+        CliRunner provides a non-TTY stdout, so the default should be JSON."""
+        monkeypatch.delenv("AYA_FORMAT", raising=False)
+        result = runner.invoke(app, ["version"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert "version" in data
+
+    def test_aya_format_env_overrides_tty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AYA_FORMAT=json should force JSON even in a TTY context."""
+        monkeypatch.setenv("AYA_FORMAT", "json")
+        result = runner.invoke(app, ["version"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert "version" in data
+
+    def test_aya_format_env_text_overrides_non_tty(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """AYA_FORMAT=text should force text even in a non-TTY context."""
+        monkeypatch.setenv("AYA_FORMAT", "text")
+        result = runner.invoke(app, ["version"])
+        assert result.exit_code == 0, result.output
+        assert result.output.startswith("aya ")
+
+    def test_explicit_format_text_overrides_auto(self) -> None:
+        """--format text must always produce text, regardless of TTY."""
+        result = runner.invoke(app, ["version", "--format", "text"])
+        assert result.exit_code == 0, result.output
+        assert result.output.startswith("aya ")
+
+    def test_explicit_format_json_overrides_auto(self) -> None:
+        """--format json must always produce JSON, regardless of TTY."""
+        result = runner.invoke(app, ["version", "--format", "json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert "version" in data
+
+    def test_auto_can_be_passed_explicitly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--format auto should be accepted and resolve to JSON under non-TTY."""
+        monkeypatch.delenv("AYA_FORMAT", raising=False)
+        result = runner.invoke(app, ["version", "--format", "auto"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert "version" in data

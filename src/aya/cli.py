@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
@@ -60,14 +61,36 @@ from aya.status import run_status
 
 
 class OutputFormat(StrEnum):
+    AUTO = "auto"
     TEXT = "text"
     JSON = "json"
 
 
 class StatusFormat(StrEnum):
+    AUTO = "auto"
     TEXT = "text"
     JSON = "json"
     RICH = "rich"
+
+
+def resolve_format(fmt: OutputFormat) -> OutputFormat:
+    """Resolve AUTO to a concrete format based on env var or TTY detection."""
+    if fmt is not OutputFormat.AUTO:
+        return fmt
+    env = os.environ.get("AYA_FORMAT", "").strip().lower()
+    if env in ("text", "json"):
+        return OutputFormat(env)
+    return OutputFormat.TEXT if sys.stdout.isatty() else OutputFormat.JSON
+
+
+def resolve_status_format(fmt: StatusFormat) -> StatusFormat:
+    """Resolve AUTO to a concrete format based on env var or TTY detection."""
+    if fmt is not StatusFormat.AUTO:
+        return fmt
+    env = os.environ.get("AYA_FORMAT", "").strip().lower()
+    if env in ("text", "json", "rich"):
+        return StatusFormat(env)
+    return StatusFormat.TEXT if sys.stdout.isatty() else StatusFormat.JSON
 
 
 app = typer.Typer(
@@ -164,10 +187,11 @@ def _resolve_instance(p: Profile, instance: str, *, quiet: bool = False) -> Iden
 @app.command()
 def version(
     format_: OutputFormat = typer.Option(
-        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
 ) -> None:
     """Show the installed aya version."""
+    format_ = resolve_format(format_)
     if format_ == OutputFormat.JSON:
         console.out(json.dumps({"version": __version__}))
     else:
@@ -268,7 +292,7 @@ def pack(
     local = _resolve_instance(p, as_)
 
     # Resolve recipient DID
-    to_did = _resolve_did(to, p)
+    to_did, _to_label = _resolve_did(to, p)
 
     if seed:
         if not opener:
@@ -332,7 +356,7 @@ def send(
 
     # Resolve recipient's Nostr pubkey
     recipient_nostr_pub = _resolve_nostr_pubkey(packet.to_did, p)
-    event_id = asyncio.run(client.publish(packet, recipient_nostr_pub))
+    event_id = asyncio.run(client.publish(packet, recipient_nostr_pub, encrypt=packet.encrypted))
     relay_count = len(relay_urls)
     relay_display = relay_urls[0] if relay_count == 1 else f"{relay_urls[0]} (+{relay_count - 1})"
     console.print(
@@ -361,6 +385,9 @@ def dispatch(
     conflict: ConflictStrategy = typer.Option(
         ConflictStrategy.LAST_WRITE_WINS, help="Conflict resolution strategy"
     ),
+    no_encrypt: bool = typer.Option(
+        False, "--no-encrypt", help="Send plaintext (debug or private-relay mode)"
+    ),
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Pack and send in one step — the natural 'pack for home' flow."""
@@ -369,7 +396,7 @@ def dispatch(
         p = _load_profile(profile)
         local = _resolve_instance(p, as_)
 
-        to_did = _resolve_did(to, p)
+        to_did, to_label = _resolve_did(to, p)
 
         if seed:
             if not opener:
@@ -401,6 +428,10 @@ def dispatch(
                 conflict_strategy=conflict,
             )
 
+        # Mark the packet encrypted before signing so the flag is covered by the signature.
+        if not no_encrypt:
+            packet.encrypted = True
+
         signed = packet.sign(local)
 
         relay_urls = [relay] if relay else p.default_relays
@@ -415,7 +446,7 @@ def dispatch(
 
         client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
         try:
-            event_id = await client.publish(signed, recipient_nostr_pub)
+            event_id = await client.publish(signed, recipient_nostr_pub, encrypt=not no_encrypt)
         except Exception:
             err.print("[yellow]Could not reach relay — dispatch failed.[/yellow]")
             raise typer.Exit(1) from None
@@ -431,7 +462,7 @@ def dispatch(
                 f"Packet:  [dim]{signed.id[:8]}[/dim]\n"
                 f"Event:   [dim]{event_id[:8]}[/dim]\n"
                 f"Relay:   [dim]{relay_display}[/dim]\n"
-                f"To:      [dim]{to}[/dim]",
+                f"To:      [dim]{to_label}[/dim]",
                 title="aya — dispatch",
             )
         )
@@ -485,7 +516,7 @@ def receive(
 
         # Verify signatures — reject tampered or unsigned packets
         verified: list[Packet] = []
-        ingested_set = set(p.ingested_ids)
+        ingested_set = {entry["id"] for entry in p.ingested_ids}
         for packet in packets:
             if packet.id in ingested_set:
                 continue  # already ingested — skip silently
@@ -509,9 +540,10 @@ def receive(
             trusted = p.is_trusted(packet.from_did)
             trust_label = "[green]trusted[/green]" if trusted else "[yellow]unknown sender[/yellow]"
 
+            now_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             if auto_ingest and trusted:
                 _ingest(packet)
-                p.ingested_ids.append(packet.id)
+                p.ingested_ids.append({"id": packet.id, "ingested_at": now_iso})
                 continue
 
             ingest = yes or typer.confirm(
@@ -520,7 +552,7 @@ def receive(
             )
             if ingest:
                 _ingest(packet)
-                p.ingested_ids.append(packet.id)
+                p.ingested_ids.append({"id": packet.id, "ingested_at": now_iso})
                 sender_nostr_pub = _resolve_nostr_pubkey(packet.from_did, p)
                 if sender_nostr_pub:
                     await client.send_receipt(packet, sender_nostr_pub)
@@ -541,11 +573,12 @@ def inbox(
         "default", "--as", "--instance", help="Local identity to act as (legacy alias: --instance)"
     ),
     format_: OutputFormat = typer.Option(
-        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """List pending packets without ingesting."""
+    format_ = resolve_format(format_)
 
     async def _run() -> None:
         p = _load_profile(profile)
@@ -767,10 +800,11 @@ def schedule_list(
     all_items: bool = typer.Option(False, "--all", "-a", help="Include dismissed/delivered"),
     item_type: str = typer.Option(None, "--type", help="Filter: reminder, watch, recurring, event"),
     format_: OutputFormat = typer.Option(
-        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
 ) -> None:
     """List scheduled items."""
+    format_ = resolve_format(format_)
     items = list_items(show_all=all_items, item_type=item_type)
     if format_ == OutputFormat.JSON:
         console.out(json.dumps(items, indent=2, default=str))
@@ -781,10 +815,11 @@ def schedule_list(
 @schedule_app.command("check")
 def schedule_check(
     format_: OutputFormat = typer.Option(
-        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
 ) -> None:
     """Check for due reminders and alerts."""
+    format_ = resolve_format(format_)
     due_items, unseen = check_due()
 
     if format_ == OutputFormat.JSON:
@@ -868,7 +903,7 @@ def schedule_tick(
 @schedule_app.command("pending")
 def schedule_pending(
     format_: OutputFormat = typer.Option(
-        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
 ) -> None:
     """Show pending items for this session — alerts to deliver + session crons.
@@ -876,6 +911,7 @@ def schedule_pending(
     SessionStart hook entry point:
         aya scheduler pending --format text
     """
+    format_ = resolve_format(format_)
     pending = get_pending()
     if format_ == OutputFormat.JSON:
         console.out(json.dumps(pending, indent=2, default=str))
@@ -886,10 +922,11 @@ def schedule_pending(
 @schedule_app.command("status")
 def schedule_status(
     format_: OutputFormat = typer.Option(
-        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
 ) -> None:
     """Show scheduler overview — watches, reminders, crons, deliveries."""
+    format_ = resolve_format(format_)
     status = get_scheduler_status()
     if format_ == OutputFormat.JSON:
         console.out(json.dumps(status, indent=2, default=str))
@@ -900,11 +937,12 @@ def schedule_status(
 @schedule_app.command("alerts")
 def schedule_alerts(
     format_: OutputFormat = typer.Option(
-        OutputFormat.TEXT, "--format", "-f", help="Output format: text or json"
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
     mark_seen: bool = typer.Option(False, "--mark-seen", help="Mark all alerts as seen"),
 ) -> None:
     """Show alerts from background watcher."""
+    format_ = resolve_format(format_)
     unseen = show_alerts(mark_seen=mark_seen)
 
     if format_ == OutputFormat.JSON:
@@ -1070,28 +1108,56 @@ def profile(
 @app.command()
 def status(
     format_: StatusFormat = typer.Option(
-        StatusFormat.TEXT, "--format", "-f", help="Output format: text, json, or rich"
+        StatusFormat.AUTO,
+        "--format",
+        "-f",
+        help="Output format: auto (default), text, json, or rich",
     ),
 ) -> None:
     """Workspace readiness check — systems, schedule, focus."""
+    format_ = resolve_status_format(format_)
     run_status(format_=format_)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 
-def _resolve_did(to: str, profile: Profile) -> str:
-    """Resolve a label ('home') or raw DID to a DID string."""
+def _resolve_did(to: str, profile: Profile) -> tuple[str, str]:
+    """Resolve a label ('home') or raw DID to ``(did, resolved_label)``.
+
+    Resolution order:
+    1. Raw DID (starts with "did:") — returned immediately.
+    2. Exact match on label in trusted_keys.
+    3. Smart single-recipient fallback: if exactly one trusted key exists, use it
+       regardless of the requested label (mirrors ``_resolve_instance`` behaviour).
+    4. Otherwise print a descriptive error that lists available labels.
+    """
     if to.startswith("did:"):
-        return to
+        return to, to
     key = profile.trusted_keys.get(to)
-    if not key:
+    if key:
+        return key.did, to
+
+    available = list(profile.trusted_keys.keys())
+
+    # Smart default: exactly one trusted key — use it without fuss.
+    if len(available) == 1:
+        label = available[0]
+        return next(iter(profile.trusted_keys.values())).did, label
+
+    if available:
+        names = ", ".join(available)
+        err.print(
+            f"[red]Unknown recipient '{to}'.[/red] "
+            f"Available recipients: [cyan]{names}[/cyan].\n"
+            "Use a full DID or one of the labels above."
+        )
+    else:
         err.print(
             f"[red]Unknown recipient '{to}'.[/red]\n"
             "Use a full DID or add with [bold]aya trust[/bold]."
         )
-        raise typer.Exit(1)
-    return key.did
+    raise typer.Exit(1)
 
 
 def _packet_to_dict(pkt: Packet, profile: Profile) -> dict[str, object]:

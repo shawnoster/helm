@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import secrets
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import base58
@@ -91,6 +92,26 @@ class TrustedKey:
 _DEFAULT_RELAYS = ["wss://relay.damus.io", "wss://nos.lol"]
 
 
+def _normalize_ingested_ids(raw: object) -> list[dict[str, str]]:
+    """Coerce legacy string entries to the ``{id, ingested_at}`` dict format.
+
+    Older profiles stored bare packet-ID strings in ``ingested_ids``.  On
+    first load after the migration, those strings are converted to dicts with
+    ``ingested_at`` set to the current time so they survive the next TTL prune
+    and don't cause an immediate false-re-ingestion.
+    """
+    if not isinstance(raw, list):
+        return []
+    now_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    result: list[dict[str, str]] = []
+    for entry in raw:
+        if isinstance(entry, str):
+            result.append({"id": entry, "ingested_at": now_iso})
+        elif isinstance(entry, dict) and "id" in entry:
+            result.append(entry)
+    return result
+
+
 @dataclass
 class Profile:
     """
@@ -105,7 +126,7 @@ class Profile:
     trusted_keys: dict[str, TrustedKey] = field(default_factory=dict)
     default_relays: list[str] = field(default_factory=lambda: list(_DEFAULT_RELAYS))
     last_checked: dict[str, str] = field(default_factory=dict)  # relay → ISO timestamp
-    ingested_ids: list[str] = field(default_factory=list)  # packet IDs already ingested (dedup)
+    ingested_ids: list[dict[str, str]] = field(default_factory=list)  # {id, ingested_at} — dedup
 
     @property
     def default_relay(self) -> str:
@@ -163,7 +184,7 @@ class Profile:
             trusted_keys=trusted,
             default_relays=relays,
             last_checked=aya_data.get("last_checked", {}),
-            ingested_ids=aya_data.get("ingested_ids", []),
+            ingested_ids=_normalize_ingested_ids(aya_data.get("ingested_ids", [])),
         )
 
     def save(self, path: Path) -> None:
@@ -192,7 +213,19 @@ class Profile:
         data["aya"].pop("default_relay", None)
         data["aya"]["default_relays"] = self.default_relays
         data["aya"]["last_checked"] = self.last_checked
-        data["aya"]["ingested_ids"] = self.ingested_ids[-100:]  # keep last 100
+        cutoff = datetime.now(UTC) - timedelta(days=7)
+        pruned: list[dict[str, str]] = []
+        for entry in self.ingested_ids:
+            raw_ts = entry.get("ingested_at", "")
+            try:
+                ts = datetime.fromisoformat(raw_ts.replace("Z", "+00:00"))
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=UTC)
+                if ts >= cutoff:
+                    pruned.append(entry)
+            except (ValueError, AttributeError):
+                pass  # unparseable timestamp — treat as expired
+        data["aya"]["ingested_ids"] = pruned
         path.write_text(json.dumps(data, indent=2))
         path.chmod(0o600)  # private keys live here — owner-read only
 

@@ -13,6 +13,7 @@ import pytest
 from aya.identity import Identity
 from aya.packet import Packet
 from aya.relay import (
+    _FETCH_PAGE_SIZE,
     AYA_KIND,
     AYA_RESULT_KIND,
     RelayClient,
@@ -128,11 +129,35 @@ class TestBuildEvent:
         event = client._build_event(packet, recipient.nostr_public_hex)
         assert event["pubkey"] == sender.nostr_public_hex
 
-    def test_content_is_packet_json(
+    def test_content_is_packet_json_plaintext(
         self, client: RelayClient, packet: Packet, recipient: Identity
     ) -> None:
-        event = client._build_event(packet, recipient.nostr_public_hex)
+        event = client._build_event(packet, recipient.nostr_public_hex, encrypt=False)
         restored = Packet.from_json(event["content"])
+        assert restored.id == packet.id
+        assert restored.intent == packet.intent
+
+    def test_content_is_encrypted_by_default(
+        self, client: RelayClient, packet: Packet, recipient: Identity
+    ) -> None:
+        import base64
+
+        event = client._build_event(packet, recipient.nostr_public_hex)
+        # Encrypted content is base64-encoded NIP-44 — not raw JSON
+        raw = base64.b64decode(event["content"], validate=True)
+        assert raw[0] == 2  # NIP-44 v2 version byte
+        assert not event["content"].startswith("{")  # definitely not JSON
+
+    def test_encrypted_content_decrypts_correctly(
+        self, client: RelayClient, packet: Packet, sender: Identity, recipient: Identity
+    ) -> None:
+        from aya.encryption import nip44_decrypt
+
+        event = client._build_event(packet, recipient.nostr_public_hex)
+        plaintext = nip44_decrypt(
+            event["content"], recipient.nostr_private_hex, sender.nostr_public_hex
+        )
+        restored = Packet.from_json(plaintext)
         assert restored.id == packet.id
         assert restored.intent == packet.intent
 
@@ -443,6 +468,270 @@ class TestFetchPending:
 
         assert len(packets) == 1
         assert packets[0].id == p.id
+
+    async def test_yields_nip44_encrypted_packets(
+        self, client: RelayClient, sender: Identity, recipient: Identity
+    ) -> None:
+        """fetch_pending must transparently decrypt NIP-44-encrypted Nostr events."""
+        from aya.encryption import nip44_encrypt
+
+        p = Packet(
+            **{"from": sender.did, "to": recipient.did},
+            intent="Encrypted handoff",
+            content="This is secret.",
+            encrypted=True,
+        )
+        # Encrypt from sender → recipient; client holds recipient keys.
+        encrypted_content = nip44_encrypt(
+            p.to_json(), sender.nostr_private_hex, recipient.nostr_public_hex
+        )
+        # The Nostr event carries the sender's pubkey in the envelope.
+        raw_event = {
+            "id": "evt-enc",
+            "pubkey": sender.nostr_public_hex,
+            "content": encrypted_content,
+        }
+
+        async def fake_read_until_eose(ws, sub_id):
+            yield raw_event
+
+        # client was built with sender keys (see fixture); for this test we need a client
+        # built with recipient keys so it can decrypt.
+        recipient_client = RelayClient(
+            relay_urls="wss://relay.example.com",
+            nostr_private_hex=recipient.nostr_private_hex,
+            nostr_public_hex=recipient.nostr_public_hex,
+        )
+
+        with patch("aya.relay._read_until_eose", side_effect=fake_read_until_eose):
+            mock_ws = AsyncMock()
+            mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+            mock_ws.__aexit__ = AsyncMock(return_value=False)
+
+            with patch("aya.relay.websockets.connect", return_value=mock_ws):
+                packets = [pkt async for pkt in recipient_client.fetch_pending()]
+
+        assert len(packets) == 1
+        assert packets[0].id == p.id
+        assert packets[0].intent == p.intent
+        assert packets[0].encrypted is True
+
+
+# ── pagination ────────────────────────────────────────────────────────────────
+
+
+class TestFetchPagination:
+    """fetch_pending paginates via `until` when a full page is returned."""
+
+    async def test_paginates_when_full_page_returned(
+        self, client: RelayClient, sender: Identity, recipient: Identity
+    ) -> None:
+        """A full first page triggers a second REQ with an `until` cursor."""
+        base_ts = 1_700_000_000
+
+        # Build _FETCH_PAGE_SIZE events for page 1, then 1 event for page 2.
+        def _make_event(idx: int) -> dict:
+            p = Packet(
+                **{"from": sender.did, "to": recipient.did},
+                intent=f"Packet {idx}",
+                content="data",
+            )
+            return {"id": f"evt-{idx}", "content": p.to_json(), "created_at": base_ts - idx}
+
+        page1_events = [_make_event(i) for i in range(_FETCH_PAGE_SIZE)]
+        page2_events = [_make_event(_FETCH_PAGE_SIZE)]
+
+        call_count = 0
+        sent_filters: list[dict] = []
+
+        async def fake_read_until_eose(ws, sub_id):
+            nonlocal call_count
+            events = page1_events if call_count == 0 else page2_events
+            call_count += 1
+            for evt in events:
+                yield evt
+
+        async def fake_ws_send(data):
+            msg = json.loads(data)
+            if msg[0] == "REQ":
+                sent_filters.append(msg[2])
+
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+        mock_ws.send = AsyncMock(side_effect=fake_ws_send)
+
+        with (
+            patch("aya.relay._read_until_eose", side_effect=fake_read_until_eose),
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+        ):
+            packets = [pkt async for pkt in client.fetch_pending()]
+
+        # All packets from both pages should be yielded.
+        assert len(packets) == _FETCH_PAGE_SIZE + 1
+
+        # Two REQ filters should have been sent.
+        assert len(sent_filters) == 2
+
+        # Second REQ must carry an inclusive `until` cursor (oldest_ts of page 1).
+        oldest_page1_ts = base_ts - (_FETCH_PAGE_SIZE - 1)
+        assert sent_filters[1].get("until") == oldest_page1_ts
+
+    async def test_stops_after_partial_page(
+        self, client: RelayClient, sender: Identity, recipient: Identity
+    ) -> None:
+        """A partial page (< _FETCH_PAGE_SIZE events) stops pagination."""
+        p = Packet(
+            **{"from": sender.did, "to": recipient.did},
+            intent="Single packet",
+            content="data",
+        )
+        raw_event = {"id": "evt-only", "content": p.to_json(), "created_at": 1_700_000_000}
+
+        req_count = 0
+
+        async def fake_read_until_eose(ws, sub_id):
+            nonlocal req_count
+            req_count += 1
+            yield raw_event
+
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("aya.relay._read_until_eose", side_effect=fake_read_until_eose),
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+        ):
+            packets = [pkt async for pkt in client.fetch_pending()]
+
+        assert len(packets) == 1
+        # Only one REQ should have been issued (no pagination needed).
+        assert req_count == 1
+
+    async def test_stops_when_no_created_at_in_full_page(
+        self, client: RelayClient, sender: Identity, recipient: Identity
+    ) -> None:
+        """A full page with no `created_at` fields stops pagination gracefully."""
+
+        def _make_event_no_ts(idx: int) -> dict:
+            p = Packet(
+                **{"from": sender.did, "to": recipient.did},
+                intent=f"Packet {idx}",
+                content="data",
+            )
+            return {"id": f"evt-{idx}", "content": p.to_json()}
+
+        full_page = [_make_event_no_ts(i) for i in range(_FETCH_PAGE_SIZE)]
+        req_count = 0
+
+        async def fake_read_until_eose(ws, sub_id):
+            nonlocal req_count
+            req_count += 1
+            for evt in full_page:
+                yield evt
+
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("aya.relay._read_until_eose", side_effect=fake_read_until_eose),
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+        ):
+            packets = [pkt async for pkt in client.fetch_pending()]
+
+        assert len(packets) == _FETCH_PAGE_SIZE
+        # Only one REQ: no cursor to advance when created_at is absent.
+        assert req_count == 1
+
+    async def test_no_progress_guard_stops_pagination(
+        self, client: RelayClient, sender: Identity, recipient: Identity
+    ) -> None:
+        """Pagination stops when a full page contains only already-seen event IDs."""
+        base_ts = 1_700_000_000
+
+        def _make_event(idx: int) -> dict:
+            p = Packet(
+                **{"from": sender.did, "to": recipient.did},
+                intent=f"Packet {idx}",
+                content="data",
+            )
+            return {"id": f"evt-{idx}", "content": p.to_json(), "created_at": base_ts}
+
+        # Both pages return the *same* set of events (identical IDs).
+        same_events = [_make_event(i) for i in range(_FETCH_PAGE_SIZE)]
+        req_count = 0
+
+        async def fake_read_until_eose(ws, sub_id):
+            nonlocal req_count
+            req_count += 1
+            for evt in same_events:
+                yield evt
+
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("aya.relay._read_until_eose", side_effect=fake_read_until_eose),
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+        ):
+            packets = [pkt async for pkt in client.fetch_pending()]
+
+        # Only the first page's packets should be yielded (no duplicates).
+        assert len(packets) == _FETCH_PAGE_SIZE
+        # After seeing no-progress on page 2, pagination must stop (2 REQs total).
+        assert req_count == 2
+
+    async def test_dedup_boundary_event_across_pages(
+        self, client: RelayClient, sender: Identity, recipient: Identity
+    ) -> None:
+        """Boundary event in both pages is deduped by the inclusive cursor."""
+        base_ts = 1_700_000_000
+
+        def _make_event(idx: int, ts: int) -> dict:
+            p = Packet(
+                **{"from": sender.did, "to": recipient.did},
+                intent=f"Packet {idx}",
+                content="data",
+            )
+            return {"id": f"evt-{idx}", "content": p.to_json(), "created_at": ts}
+
+        # Page 1: _FETCH_PAGE_SIZE events.  The last event has the oldest ts.
+        page1_events = [_make_event(i, base_ts - i) for i in range(_FETCH_PAGE_SIZE)]
+        boundary_event = page1_events[-1]  # oldest event on page 1
+
+        # Page 2: starts with the *same* boundary event (inclusive cursor overlap),
+        # then one genuinely new event.
+        new_event = _make_event(_FETCH_PAGE_SIZE, base_ts - _FETCH_PAGE_SIZE)
+        page2_events = [boundary_event, new_event]
+
+        call_count = 0
+
+        async def fake_read_until_eose(ws, sub_id):
+            nonlocal call_count
+            events = page1_events if call_count == 0 else page2_events
+            call_count += 1
+            for evt in events:
+                yield evt
+
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+        mock_ws.send = AsyncMock()
+
+        with (
+            patch("aya.relay._read_until_eose", side_effect=fake_read_until_eose),
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+        ):
+            packets = [pkt async for pkt in client.fetch_pending()]
+
+        # Total unique events: _FETCH_PAGE_SIZE (page 1) + 1 new (page 2).
+        # The boundary event must NOT be yielded twice.
+        assert len(packets) == _FETCH_PAGE_SIZE + 1
+        # Two REQs issued (page 1 full -> paginate, page 2 partial -> stop).
+        assert call_count == 2
 
 
 # ── publish ───────────────────────────────────────────────────────────────────
