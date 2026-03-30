@@ -25,6 +25,8 @@ uvx --from git+https://github.com/shawnoster/aya aya
 git clone https://github.com/shawnoster/aya.git
 cd aya
 uv sync
+# After sync, run commands with `uv run aya`, or install globally:
+# uv tool install .
 ```
 
 ## Quick start
@@ -34,8 +36,8 @@ uv sync
 aya init --label work
 
 # Pair with another machine
-aya pair --label work        # shows a code
-aya pair --code WORD-WORD-0000 --label home  # on the other machine
+aya pair --peer home         # shows a code
+aya pair --code WORD-WORD-0000 --peer work   # on the other machine
 
 # Send a packet
 aya dispatch --to home --intent "test" --files notes.md
@@ -114,7 +116,7 @@ CCR minimum interval is 1 hour. aya can fire at any cron interval.
 
 Already have aya installed on another machine? Give Claude Code this prompt on the new machine and it will handle everything:
 
-> Install aya (`uv tool install aya-ai-assist`), initialize identity with `aya init --label <LABEL>` (use "home" or "work"), then pair with my other instance. If I have a pairing code from the other machine, run `aya pair --code <CODE> --label <OTHER_LABEL> --instance <LABEL>` and we're done. If not, run `aya pair --label <OTHER_LABEL> --instance <LABEL>` — this will block waiting for the other machine to join (up to 10 minutes), so give me the short code it displays and immediately run `aya pair --code <CODE>` on the other machine before the window expires. After pairing, install hooks and crontab with `aya schedule install`. Register a relay poll cron: `aya schedule recurring -m "relay-poll" -c "*/10 * * * *" -p "Run: aya receive --instance <LABEL> --auto-ingest --quiet. If any packets were ingested, surface their content to the user."`. Finally, add the aya plugin to your shell profile: `alias claude='claude --plugin-dir /path/to/aya'` and verify everything with `aya status`.
+> Install aya (`uv tool install aya-ai-assist`), initialize identity with `aya init --label <LABEL>` (use "home" or "work"), then pair with my other instance. If I have a pairing code from the other machine, run `aya pair --code <CODE> --peer <OTHER_LABEL> --as <LABEL>` and we're done. If not, run `aya pair --peer <OTHER_LABEL> --as <LABEL>` — this will block waiting for the other machine to join (up to 10 minutes), so give me the short code it displays and immediately run `aya pair --code <CODE>` on the other machine before the window expires. After pairing, install hooks and crontab with `aya schedule install`. Register a relay poll cron: `aya schedule recurring -m "relay-poll" -c "*/10 * * * *" -p "Run: aya receive --as <LABEL> --auto-ingest --quiet. If any packets were ingested, surface their content to the user."`. Finally, add the aya plugin to your shell profile: `alias claude='claude --plugin-dir /path/to/aya'` and verify everything with `aya status`.
 
 Replace `<LABEL>` with this machine's role (`home` or `work`), `<OTHER_LABEL>` with the other machine's role, and `<CODE>` with the pairing code.
 

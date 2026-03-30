@@ -28,7 +28,7 @@ Pack and dispatch a packet to another aya instance in one guided step.
    - If the user described content inline, write it to a temp file and include it.
    - If the user said "send this conversation" or similar, summarize the relevant context into a temp markdown file.
 
-5. **Determine the local instance.** Use `--instance home` unless the user specifies otherwise or context suggests a different instance.
+5. **Determine the local identity.** Run `aya status` and read the identity name. Use that as the `--as` value.
 
 6. **Confirm before sending.** Show the user what will be dispatched:
 
@@ -45,11 +45,11 @@ Pack and dispatch a packet to another aya instance in one guided step.
 
    ```bash
    # Content packet
-   aya dispatch --instance {instance} --to {recipient} \
+   aya dispatch --as {identity} --to {recipient} \
      --intent "{intent}" --files {files}
 
    # Seed packet
-   aya dispatch --instance {instance} --to {recipient} --seed \
+   aya dispatch --as {identity} --to {recipient} --seed \
      --intent "{intent}" --opener "{question}"
    ```
 

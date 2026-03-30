@@ -14,10 +14,12 @@ Receive packets from the relay, then interpret and route each one.
 
 ## Steps
 
+0. **Resolve local identity.** Run `aya status` and read the identity name. Use that as `{identity}` in subsequent commands.
+
 1. **Receive packets.** Run:
 
    ```bash
-   aya receive --instance home --auto-ingest --quiet
+   aya receive --as {identity} --auto-ingest --quiet
    ```
 
    If nothing was received, report "No new packets" and stop.
@@ -25,7 +27,7 @@ Receive packets from the relay, then interpret and route each one.
 2. **Check the inbox.** Run:
 
    ```bash
-   aya inbox --instance home
+   aya inbox --as {identity}
    ```
 
    If the inbox is empty after receive, report "Inbox clear" and stop.

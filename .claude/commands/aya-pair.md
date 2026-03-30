@@ -25,26 +25,26 @@ Walk through pairing this aya instance with another machine.
 3. **Initiator flow.**
 
    ```bash
-   aya pair --label {remote_label} --instance {local_instance}
+   aya pair --peer {remote_label} --as {local_instance}
    ```
 
    This prints a pairing code (e.g., `ANCHOR-NORTH-0045`). Tell the user:
 
    > **Pairing code: `{CODE}`**
    > Enter this code on your other machine within 10 minutes.
-   > Run: `aya pair --code {CODE} --label {this_machine_label} --instance {other_instance}`
+   > Run: `aya pair --code {CODE} --peer {this_machine_label} --as {other_instance}`
 
    Then wait. The command will poll the relay for the response and complete automatically.
 
 4. **Joiner flow.** The user has a code from the other machine.
 
    ```bash
-   aya pair --code {CODE} --label {remote_label} --instance {local_instance}
+   aya pair --code {CODE} --peer {remote_label} --as {local_instance}
    ```
 
    - `--code`: the pairing code from the other machine.
-   - `--label`: what to call the remote peer (e.g., "home" if pairing from work).
-   - `--instance`: this machine's local identity.
+   - `--peer`: what to call the remote peer (e.g., "home" if pairing from work).
+   - `--as`: this machine's local identity.
 
 5. **Verify.** After pairing completes, run `aya status` to confirm the trusted key was added. Report success:
 
@@ -59,6 +59,6 @@ Walk through pairing this aya instance with another machine.
 
 - Pairing codes expire after 10 minutes.
 - Both machines must have `aya init` completed before pairing.
-- The `--label` flag names the *remote* peer, not the local machine.
+- The `--peer` flag names the *remote* peer, not the local machine.
 - If pairing fails with a timeout, suggest trying again — relay propagation can be slow.
 - After pairing, suggest running `aya schedule install` if hooks aren't set up yet.
