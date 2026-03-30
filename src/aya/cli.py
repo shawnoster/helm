@@ -633,12 +633,13 @@ def pair(
             err.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
 
-        p.trusted_keys[trusted.label] = trusted
+        trusted.label = peer
+        p.trusted_keys[peer] = trusted
         p.save(profile)
         console.print(
             Panel.fit(
                 f"[bold green]✓ Paired![/bold green]\n\n"
-                f"Trusted: [cyan]{trusted.label}[/cyan]\n"
+                f"Trusted: [cyan]{peer}[/cyan]\n"
                 f"DID:     [dim]{trusted.did}[/dim]",
                 title="aya — pair (joined)",
             )
@@ -649,9 +650,9 @@ def pair(
         pairing_code = generate_code()
         code_h = hash_code(pairing_code)
 
-        # Publish the request
+        # Publish the request — embed our own label so the joiner knows what to call us
         console.print("[dim]Publishing pairing request…[/dim]")
-        request_event_id = asyncio.run(publish_pair_request(local, peer, code_h, relay_urls))
+        request_event_id = asyncio.run(publish_pair_request(local, local.label, code_h, relay_urls))
 
         # Show the code — user reads this aloud or types it on the other machine
         console.print(
@@ -678,12 +679,13 @@ def pair(
             )
             raise typer.Exit(1)
 
-        p.trusted_keys[trusted.label] = trusted
+        trusted.label = peer
+        p.trusted_keys[peer] = trusted
         p.save(profile)
         console.print(
             Panel.fit(
                 f"[bold green]✓ Paired![/bold green]\n\n"
-                f"Trusted: [cyan]{trusted.label}[/cyan]\n"
+                f"Trusted: [cyan]{peer}[/cyan]\n"
                 f"DID:     [dim]{trusted.did}[/dim]",
                 title="aya — pair (complete)",
             )
