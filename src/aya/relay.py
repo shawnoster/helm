@@ -313,15 +313,19 @@ class RelayClient:
                         logger.debug("Skipping pairing event (tag=%s)", pairing_tag[1])
                         continue
                     content = raw["content"]
-                    try:
+                    # Route on content shape: JSON → parse directly; anything else
+                    # (base64 NIP-44 payload) → decrypt first.  Checking the leading
+                    # character avoids masking parse/validation errors in malformed
+                    # JSON packets by misattributing them as decryption failures.
+                    if content.lstrip().startswith("{"):
                         packet = Packet.from_json(content)
-                    except Exception:
-                        # Content may be NIP-44 encrypted — attempt decryption using
-                        # the sender's Nostr pubkey from the Nostr event envelope.
+                    else:
+                        # Attempt NIP-44 decryption using the sender's Nostr pubkey
+                        # from the Nostr event envelope.
                         sender_pub = raw.get("pubkey", "")
                         if not sender_pub:
                             logger.warning(
-                                "Skipping event %s: content is not plaintext JSON and "
+                                "Skipping event %s: content is not JSON and "
                                 "no sender pubkey in envelope for decryption",
                                 raw.get("id", "?")[:8],
                             )

@@ -144,7 +144,7 @@ class TestBuildEvent:
 
         event = client._build_event(packet, recipient.nostr_public_hex)
         # Encrypted content is base64-encoded NIP-44 — not raw JSON
-        raw = base64.b64decode(event["content"])
+        raw = base64.b64decode(event["content"], validate=True)
         assert raw[0] == 2  # NIP-44 v2 version byte
         assert not event["content"].startswith("{")  # definitely not JSON
 

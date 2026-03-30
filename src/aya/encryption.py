@@ -63,6 +63,8 @@ def _calc_padded_len(unpadded_len: int) -> int:
 def _pad(plaintext: bytes) -> bytes:
     """Prepend 2-byte BE message length, then zero-pad to the next NIP-44 boundary."""
     unpadded_len = len(plaintext)
+    if unpadded_len > 0xFFFF:
+        raise ValueError(f"NIP-44 plaintext too long: {unpadded_len} bytes (max 65535)")
     padded_len = _calc_padded_len(unpadded_len)
     return unpadded_len.to_bytes(2, "big") + plaintext + b"\x00" * (padded_len - unpadded_len)
 
@@ -112,7 +114,7 @@ def nip44_decrypt(payload: str, recipient_priv_hex: str, sender_pub_xonly_hex: s
     Raises *ValueError* on version mismatch, MAC failure, or malformed payload.
     """
     try:
-        raw = base64.b64decode(payload)
+        raw = base64.b64decode(payload, validate=True)
     except Exception as exc:
         raise ValueError(f"Invalid NIP-44 payload (base64 decode failed): {exc}") from exc
 

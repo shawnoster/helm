@@ -356,7 +356,7 @@ def send(
 
     # Resolve recipient's Nostr pubkey
     recipient_nostr_pub = _resolve_nostr_pubkey(packet.to_did, p)
-    event_id = asyncio.run(client.publish(packet, recipient_nostr_pub))
+    event_id = asyncio.run(client.publish(packet, recipient_nostr_pub, encrypt=packet.encrypted))
     relay_count = len(relay_urls)
     relay_display = relay_urls[0] if relay_count == 1 else f"{relay_urls[0]} (+{relay_count - 1})"
     console.print(
