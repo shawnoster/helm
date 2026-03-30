@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
@@ -485,7 +485,7 @@ def receive(
 
         # Verify signatures — reject tampered or unsigned packets
         verified: list[Packet] = []
-        ingested_set = set(p.ingested_ids)
+        ingested_set = {entry["id"] for entry in p.ingested_ids}
         for packet in packets:
             if packet.id in ingested_set:
                 continue  # already ingested — skip silently
@@ -509,9 +509,10 @@ def receive(
             trusted = p.is_trusted(packet.from_did)
             trust_label = "[green]trusted[/green]" if trusted else "[yellow]unknown sender[/yellow]"
 
+            now_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             if auto_ingest and trusted:
                 _ingest(packet)
-                p.ingested_ids.append(packet.id)
+                p.ingested_ids.append({"id": packet.id, "ingested_at": now_iso})
                 continue
 
             ingest = yes or typer.confirm(
@@ -520,7 +521,7 @@ def receive(
             )
             if ingest:
                 _ingest(packet)
-                p.ingested_ids.append(packet.id)
+                p.ingested_ids.append({"id": packet.id, "ingested_at": now_iso})
                 sender_nostr_pub = _resolve_nostr_pubkey(packet.from_did, p)
                 if sender_nostr_pub:
                     await client.send_receipt(packet, sender_nostr_pub)
