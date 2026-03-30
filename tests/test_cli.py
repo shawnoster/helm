@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -1059,13 +1058,13 @@ class TestReceive:
 
 
 class TestAutoFormat:
-    def test_auto_resolves_to_text_in_tty(self) -> None:
+    def test_auto_resolves_to_text_in_tty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When stdout is a TTY, AUTO should produce text output."""
         from aya.cli import OutputFormat, resolve_format
 
+        monkeypatch.delenv("AYA_FORMAT", raising=False)
         with patch("aya.cli.sys") as mock_sys:
             mock_sys.stdout.isatty.return_value = True
-            mock_sys.environ = os.environ
             assert resolve_format(OutputFormat.AUTO) == OutputFormat.TEXT
 
         # And verify via CLI with explicit --format text
@@ -1073,9 +1072,10 @@ class TestAutoFormat:
         assert result.exit_code == 0, result.output
         assert result.output.startswith("aya ")
 
-    def test_auto_resolves_to_json_when_not_tty(self) -> None:
+    def test_auto_resolves_to_json_when_not_tty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """When stdout.isatty() returns False, AUTO should resolve to JSON.
         CliRunner provides a non-TTY stdout, so the default should be JSON."""
+        monkeypatch.delenv("AYA_FORMAT", raising=False)
         result = runner.invoke(app, ["version"])
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
@@ -1109,7 +1109,10 @@ class TestAutoFormat:
         data = json.loads(result.output)
         assert "version" in data
 
-    def test_auto_can_be_passed_explicitly(self) -> None:
-        """--format auto should be accepted and behave like the default."""
+    def test_auto_can_be_passed_explicitly(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--format auto should be accepted and resolve to JSON under non-TTY."""
+        monkeypatch.delenv("AYA_FORMAT", raising=False)
         result = runner.invoke(app, ["version", "--format", "auto"])
         assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert "version" in data

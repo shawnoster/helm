@@ -37,8 +37,14 @@ def _isolate(tmp_path, monkeypatch):
     monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
     monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
 
-    # Status module reads its own copies of scheduler helpers — stub them
-    # so _gather_status doesn't touch real disk.
+    # Status module reads its own PROFILE and checks _paths.SCHEDULER_FILE —
+    # patch both so contract tests never touch real ~/.aya files.
+    fake_profile = tmp_path / "profile.json"
+    fake_profile.write_text(json.dumps({"aya": {"instances": {}, "trusted_keys": {}}}))
+    monkeypatch.setattr("aya.status.PROFILE", fake_profile)
+    monkeypatch.setattr("aya.paths.SCHEDULER_FILE", scheduler_file)
+
+    # Stub scheduler helpers so _gather_status doesn't touch real disk.
     monkeypatch.setattr("aya.status.get_unseen_alerts", list)
     monkeypatch.setattr("aya.status.get_due_reminders", lambda *a, **kw: [])
     monkeypatch.setattr("aya.status.get_upcoming_reminders", lambda *a, **kw: [])
