@@ -1,7 +1,7 @@
 # Architectural Review: aya as an AI-First Tool with Human Oversight
 
 **Date:** 2026-03-30  
-**Status:** Research — no implementation expected  
+**Status:** Living research document — updated to incorporate person-to-person exchange framing (rev 2)  
 **Scope:** Broad architectural review covering landscape, current design assessment, and directional options
 
 ---
@@ -9,9 +9,10 @@
 ## Table of Contents
 
 1. [Landscape Summary](#1-landscape-summary)
-2. [Current Architecture: Strengths and Weaknesses](#2-current-architecture-strengths-and-weaknesses)
-3. [Directional Options](#3-directional-options)
-4. [Recommended Direction](#4-recommended-direction)
+2. [Framing: One Person Two Machines vs. Two People Two Assistants](#2-framing-one-person-two-machines-vs-two-people-two-assistants)
+3. [Current Architecture: Strengths and Weaknesses](#3-current-architecture-strengths-and-weaknesses)
+4. [Directional Options](#4-directional-options)
+5. [Recommended Direction](#5-recommended-direction)
 
 ---
 
@@ -72,13 +73,58 @@ Research into well-designed AI-consumed CLIs (based on tooling used by LLM agent
 - **Predictable side effects:** Avoid commands that implicitly mutate state without declaring it (e.g., `--auto-ingest` should always be explicit).
 - **Version-stable schemas:** Output schemas should be versioned or at least additive. Agents break when field names change silently.
 
+### 1.6 Person-to-Person AI-Mediated Exchange: Landscape Gap
+
+This category — structured, signed context exchange *between two people via their respective AI assistants* — is genuinely unclaimed territory. To confirm this, here is how the nearest landscape candidates fail to address it:
+
+| Protocol / Tool | What it handles | Why it doesn't cover person-to-person AI exchange |
+|-----------------|----------------|--------------------------------------------------|
+| **ACP (Anthropic)** | Async messages between agents identified by URI, with structured `parts` | No identity layer — "agents" are identified by HTTP URIs, not stable cryptographic identities. No trust model between parties who don't share a platform. Doesn't address human approval gates. |
+| **A2A (Google)** | HTTP RPC between agents that advertise Agent Cards | Designed for agent-to-agent task delegation *within* a cloud deployment, not cross-person async sync. Requires addressable HTTP endpoints — doesn't work for intermittent laptop sessions. No decentralized identity. |
+| **ActivityPub** | Federated actor model (Mastodon, etc.) | Designed for social content, not structured AI context. No AI-native semantics (no intent, TTL, conflict strategy). Actor `inbox` / `outbox` model is the closest structural analogue to aya's packet lifecycle, but the payload semantics are absent. |
+| **mem0 / Letta** | Single-user AI memory | Explicitly single-trust-boundary. No `from_did` / `to_did` concept. Sharing memory across users requires giving both access to the same store — which is centralized and credential-shared. |
+| **Matrix** | Federated E2E encrypted messaging | Closest to what aya needs for the transport layer, but no AI-native payload semantics, no structured intent routing, and the room/membership model doesn't map cleanly to async single-packet exchange. |
+| **Nostr DMs (NIP-04/NIP-44)** | Encrypted private messages between Nostr pubkeys | Transport-level only. No structured envelope, no conflict strategy, no TTL, no intent taxonomy. NIP-44 provides the encryption primitive aya needs (tracked in #93) but not the application-level semantics. |
+
+**Conclusion:** The person-to-person AI-mediated exchange use case is not addressed by any existing tool or protocol in the landscape. The combination of (a) stable `did:key` identities for each party, (b) signed structured packets with intent/TTL/conflict semantics, (c) decentralized relay transport with no shared authority, and (d) a human approval gate before AI ingest is unique to aya's model. This is a genuine differentiation opportunity, not a feature overlap.
+
 ---
 
-## 2. Current Architecture: Strengths and Weaknesses
+## 2. Framing: One Person Two Machines vs. Two People Two Assistants
 
-### 2.1 Strengths
+The original review framed aya's audience as "one person, two machines." That accurately describes the *current deployment* but understates what the packet model was built to support.
 
-**Dual-keypair identity is a genuine asset.** The separation of `did:key` (ed25519, for packet signing and W3C interop) from Nostr's secp256k1 keypair (for relay transport) is architecturally sound. It lets aya stay transport-agnostic at the application level while using Nostr today. This is not something any of the comparable memory tools have considered.
+aya's `from_did` + `to_did` + ed25519 signature model is already the foundation for cross-person, cross-AI data exchange. The payload envelope — intent, TTL, conflict strategy, content type — encodes enough metadata for any receiving AI to handle a packet autonomously, regardless of whether the sender is the same person on another machine or a different person entirely.
+
+**The two-person scenario in concrete terms:** Shawn's Claude and a colleague's Claude exchange structured context — not freeform chat, but signed packets with intent, TTL, and conflict resolution semantics. Each party's AI can ingest, validate, act, and surface results with human approval. Neither party has to trust a shared cloud service. Neither party has to share credentials. The relay is the only intermediary, and it never sees decrypted content (once NIP-44 is implemented — see issue #93).
+
+### 2.1 Concrete Person-to-Person Scenarios
+
+**1. Shared project context:** Two engineers working on the same service. Each has their own AI assistant. One dispatches a packet with `intent: "architecture decision"` and `conflict_strategy: surface_to_user`. The other's AI ingests it, surfaces it for review, and the human decides whether to adopt or reject the framing.
+
+**2. Async knowledge handoff:** Someone goes on leave. They dispatch a structured packet set — project status, open decisions, known risks — to a colleague's DID. The colleague's AI ingests on next session start, already contextualized.
+
+**3. Peer review loop:** A designer dispatches a spec packet to an engineer's AI with `intent: "feedback request"` and a TTL of 72 hours. If no response packet arrives within TTL, the sender's AI surfaces a nudge.
+
+**4. Small team shared scheduler:** Multiple people subscribe to a Nostr filter for a shared team channel. Their respective AIs surface relevant packets. No shared server, no admin, no OAuth app.
+
+### 2.2 What This Framing Changes
+
+The person-to-person case is not an extension or stretch goal — it is a consequence of the existing design that was always latent. Recognizing it explicitly changes three downstream decisions:
+
+1. **The dual-keypair model is load-bearing, not overhead** (discussed in §3.1).
+2. **Encryption is non-optional for person-to-person** — NIP-44 (#93) graduates from "nice to have" to a prerequisite for this use case.
+3. **The MCP server (Option B) must expose `send_to_did`** — sending to an arbitrary `did:key`, not only to a pre-paired peer. The recipient's Nostr pubkey can be resolved from their `did:key` at send time.
+
+The question of whether to actively design *for* this use case now vs. treat it as a future horizon is addressed in §5 (Recommended Direction).
+
+---
+
+## 3. Current Architecture: Strengths and Weaknesses
+
+### 3.1 Strengths
+
+**Dual-keypair identity is load-bearing, not overhead.** The separation of `did:key` (ed25519, for packet signing and W3C interop) from Nostr's secp256k1 keypair (for relay transport) is architecturally correct. The ed25519 `did:key` is the stable, portable identity that travels with a *person* across tools and protocols — it can be published in a DID document, verified by any conforming resolver, and is independent of Nostr. The secp256k1 key is a transport artifact: if aya later supports Matrix or an HTTPS relay, the user's `did:key` identity doesn't change. For the one-person-two-machines use case this separation looks like over-engineering; for the person-to-person exchange use case it is the only way to give each party a stable identity without a shared authority. The friction is real (two keypairs to manage, two to explain), but the architecture is right.
 
 **Packet model maps well to AI workflows.** The intent + conflict-strategy + TTL envelope is a thoughtful design. It encodes enough metadata for an AI agent to make autonomous decisions about how to handle incoming context without human direction. This is exactly what "AI-first" looks like at the protocol level.
 
@@ -88,11 +134,13 @@ Research into well-designed AI-consumed CLIs (based on tooling used by LLM agent
 
 **Claude Code hook integration is a force multiplier.** `SessionStart` + `PreToolUse` + `PostToolUse` hooks, combined with pending alerts, recurring crons, and CI watching, make aya meaningfully *part of the AI session* rather than a background daemon the user has to remember to check.
 
-### 2.2 Weaknesses
+### 3.2 Weaknesses
 
 **CLI is the primary interface but was not designed for agent consumption.** The current CLI has rich human-formatted output by default. JSON output requires `--format json` flags and is inconsistently available across subcommands. An AI agent calling `aya status` or `aya schedule list` without JSON mode gets Rich-formatted terminal output that is fragile to parse. This is the single biggest AI-readiness gap.
 
-**Two keypairs add friction without a clear payoff today.** The ed25519/secp256k1 dual-keypair model is future-proofing, but it adds cognitive overhead for users, doubles the identity surface, and complicates the pairing flow. Unless aya is actively using DID-based interop with other systems, the secp256k1 Nostr key *is* the identity from a user's perspective.
+**The dual-keypair model has a UX and documentation debt.** The architecture is correct (see §3.1), but the current onboarding and docs present two keypairs without explaining the separation of concerns clearly. Users don't know why there are two keys; the pairing flow exposes both; `aya status` shows both without labelling their roles. The answer is not to collapse the keypairs but to surface better explanations and hide the Nostr key from day-to-day user interactions.
+
+**Encryption (#93) is a blocker for the person-to-person use case.** NIP-44 content encryption is not yet implemented. Until it is, aya cannot be safely used for cross-person exchange on a public relay — packet content is visible to any relay operator. This is a known gap, but recognizing the person-to-person use case as first-class elevates the priority.
 
 **No schema versioning.** Packets, scheduler items, and alerts lack versioned schemas. A field rename or structural change in a future aya version will silently break AI agents relying on the current output shape.
 
@@ -106,7 +154,7 @@ Research into well-designed AI-consumed CLIs (based on tooling used by LLM agent
 
 ---
 
-## 3. Directional Options
+## 4. Directional Options
 
 ### Option A: AI-Native CLI Hardening ("Clean the Foundation")
 
@@ -220,7 +268,7 @@ Research into well-designed AI-consumed CLIs (based on tooling used by LLM agent
 
 ---
 
-## 4. Recommended Direction
+## 5. Recommended Direction
 
 ### Primary: Option A + Option B (AI-Native CLI Hardening + MCP Server Layer)
 
@@ -230,15 +278,27 @@ The single highest-leverage move for aya in 2026 is making it a first-class MCP 
 
 This approach preserves everything that makes aya unique — signed relay packets, session-aware scheduling, human-in-the-loop oversight — while dramatically improving the experience for the primary consumer (Claude Code). It doesn't require a protocol change, doesn't increase external dependencies, and doesn't remove features that existing users rely on.
 
+**Guardrails: don't foreclose person-to-person**
+
+The person-to-person framing (§2) changes how we execute A+B, even if it doesn't change the *choice* of A+B. Three specific guardrails apply:
+
+1. **MCP tool `send` must accept `--to <did:key>`**, not only `--to <known-instance>`. The recipient does not need to be a pre-paired peer. The send path should resolve a `did:key` to its Nostr pubkey at dispatch time and route to any reachable relay the recipient is known to use. Seeding this requires a lightweight DID resolution or registry — even a simple "publish your aya profile to a known Nostr filter" is sufficient for v1.
+
+2. **The packet envelope schema must be a published external spec**, not just an internal contract. Document it in `docs/packet-schema.md` with enough precision that a third-party aya implementation (or any A2A-compatible agent) could produce conforming packets. This is the foundation for cross-person interop and eventual ACP/A2A compatibility alignment.
+
+3. **NIP-44 encryption (#93) should be tied to this work**, not treated as a separate track. Without encryption, the person-to-person use case is architecturally supported but operationally unsafe on a public relay. Adding `--encrypt` (defaulting to on when sending to an unpaired DID) as part of the MCP server design keeps the door open.
+
 **Concrete sequence:**
 
-1. **Define the aya JSON schema spec** (packet envelope, scheduler item, alert, error response) with explicit `schema_version` fields. Document this in `docs/schema.md`. (~1 week)
+1. **Define the aya JSON schema spec** (packet envelope, scheduler item, alert, error response) with explicit `schema_version` fields. Publish in `docs/packet-schema.md` as an external-facing spec. (~1 week)
 
 2. **Harden CLI output:** audit every subcommand, make `--format json` available everywhere (default for non-interactive/piped sessions via TTY detection), route all errors to stderr as JSON when in machine mode. (~2 weeks)
 
-3. **Build the MCP server:** implement `aya mcp-server` as a stdio MCP server exposing the 7–10 most-used operations as tools. Ship a reference `mcp_config.json` snippet for Claude Code's `~/.claude.json`. (~2 weeks)
+3. **Build the MCP server:** implement `aya mcp-server` as a stdio MCP server. Expose `send` as `send_to_did(did, intent, content, ...)` — not `send_to_instance`. Ship a reference `mcp_config.json` snippet for Claude Code's `~/.claude.json`. (~2 weeks)
 
-4. **Write integration tests** that call aya as a subprocess (both CLI and via the MCP protocol) and assert on JSON output shape. This validates the schema spec and prevents regressions. (~1 week)
+4. **Wire NIP-44 encryption:** implement content encryption for packets sent to non-paired DIDs. Make encryption opt-out (not opt-in) for cross-person sends. (~1 week, can be done in parallel with step 3)
+
+5. **Write integration tests** that call aya as a subprocess (both CLI and via the MCP protocol) and assert on JSON output shape. (~1 week)
 
 ### Secondary: Scheduler Refactor (but not removal)
 
@@ -246,16 +306,16 @@ The scheduler is aya's most complex subsystem and its most differentiated featur
 
 ### Watch for: Option C maturation
 
-If the Nostr-native AI tooling space meaningfully develops over the next 12 months, revisit Option C. The infrastructure is not ready today, but aya's dual-keypair identity model and kind 5999 packet format position it well to participate in that ecosystem if a viable standard emerges.
+If the Nostr-native AI tooling space meaningfully develops over the next 12 months, revisit Option C. The infrastructure is not ready today, but aya's dual-keypair identity model and kind 5999 packet format position it well to participate in that ecosystem if a viable standard emerges. The person-to-person use case is a direct on-ramp: once two people can exchange packets via aya, the jump to multi-party multi-agent is a matter of routing, not architecture.
 
 ---
 
 ## Appendix: Summary Decision Matrix
 
-| Option | AI-Native Fit | Human Oversight | Implementation Cost | Risk | Recommended? |
-|--------|--------------|----------------|--------------------|----|---|
-| A: CLI Hardening | ★★★★★ | ★★★★☆ | Low | Low | **Yes — required** |
-| B: MCP Server | ★★★★★ | ★★★☆☆ | Medium | Low-Med | **Yes — primary bet** |
-| C: Multi-Agent Mesh | ★★★☆☆ | ★★☆☆☆ | Very High | High | No (too early) |
-| D: Strip to Core | ★★★★☆ | ★★★☆☆ | Medium | Medium | No (value loss) |
-| E: Middleware Bus | ★★★☆☆ | ★★★☆☆ | High | Medium | Not yet |
+| Option | AI-Native Fit | Human Oversight | Person-to-Person Fit | Implementation Cost | Risk | Recommended? |
+|--------|--------------|----------------|---------------------|--------------------|----|---|
+| A: CLI Hardening | ★★★★★ | ★★★★☆ | ★★★★☆ | Low | Low | **Yes — required** |
+| B: MCP Server | ★★★★★ | ★★★☆☆ | ★★★★☆ (with `send_to_did`) | Medium | Low-Med | **Yes — primary bet** |
+| C: Multi-Agent Mesh | ★★★☆☆ | ★★☆☆☆ | ★★★★★ (long term) | Very High | High | No (too early) |
+| D: Strip to Core | ★★★★☆ | ★★★☆☆ | ★★★☆☆ | Medium | Medium | No (value loss) |
+| E: Middleware Bus | ★★★☆☆ | ★★★☆☆ | ★★☆☆☆ | High | Medium | Not yet |
