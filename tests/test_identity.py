@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from aya.identity import Identity, Profile, TrustedKey
@@ -174,3 +175,71 @@ class TestProfileMultiRelay:
         data = json.loads(profile_path.read_text())
         assert "default_relay" not in data["aya"]
         assert data["aya"]["default_relays"] == ["wss://legacy.example.com"]
+
+
+# ── ingested_ids TTL pruning ──────────────────────────────────────────────────
+
+
+class TestIngestedIdsTTL:
+    def test_recent_entries_are_kept(self, tmp_path: Path) -> None:
+        """Entries ingested within the last 7 days must survive save/load."""
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text("{}")
+
+        p = Profile.load(profile_path)
+        recent_ts = (
+            (datetime.now(UTC) - timedelta(days=1))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        p.ingested_ids.append({"id": "abc123", "ingested_at": recent_ts})
+        p.save(profile_path)
+
+        restored = Profile.load(profile_path)
+        assert any(e["id"] == "abc123" for e in restored.ingested_ids)
+
+    def test_old_entries_are_pruned(self, tmp_path: Path) -> None:
+        """Entries older than 7 days must be dropped on save."""
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text("{}")
+
+        p = Profile.load(profile_path)
+        # Timestamp well beyond the 7-day TTL window
+        p.ingested_ids.append({"id": "stale001", "ingested_at": "2020-01-01T00:00:00Z"})
+        p.save(profile_path)
+
+        restored = Profile.load(profile_path)
+        assert not any(e["id"] == "stale001" for e in restored.ingested_ids)
+
+    def test_legacy_string_entries_are_migrated(self, tmp_path: Path) -> None:
+        """Old bare-string ingested_ids must be normalised to dicts on load."""
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text(json.dumps({"aya": {"ingested_ids": ["legacy_packet_id"]}}))
+
+        p = Profile.load(profile_path)
+        assert len(p.ingested_ids) == 1
+        entry = p.ingested_ids[0]
+        assert entry["id"] == "legacy_packet_id"
+        assert "ingested_at" in entry
+
+    def test_save_stores_dicts_not_strings(self, tmp_path: Path) -> None:
+        """Saved ingested_ids must be dicts with 'id' and 'ingested_at' keys."""
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text("{}")
+
+        p = Profile.load(profile_path)
+        recent_ts = (
+            (datetime.now(UTC) - timedelta(days=1))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        p.ingested_ids.append({"id": "pkt1", "ingested_at": recent_ts})
+        p.save(profile_path)
+
+        raw = json.loads(profile_path.read_text())
+        ids = raw["aya"]["ingested_ids"]
+        assert len(ids) == 1
+        assert ids[0]["id"] == "pkt1"
+        assert ids[0]["ingested_at"] == recent_ts
