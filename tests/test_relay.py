@@ -613,6 +613,55 @@ class TestFetchPagination:
         # After seeing no-progress on page 2, pagination must stop (2 REQs total).
         assert req_count == 2
 
+    async def test_dedup_boundary_event_across_pages(
+        self, client: RelayClient, sender: Identity, recipient: Identity
+    ) -> None:
+        """Boundary event in both pages is deduped by the inclusive cursor."""
+        base_ts = 1_700_000_000
+
+        def _make_event(idx: int, ts: int) -> dict:
+            p = Packet(
+                **{"from": sender.did, "to": recipient.did},
+                intent=f"Packet {idx}",
+                content="data",
+            )
+            return {"id": f"evt-{idx}", "content": p.to_json(), "created_at": ts}
+
+        # Page 1: _FETCH_PAGE_SIZE events.  The last event has the oldest ts.
+        page1_events = [_make_event(i, base_ts - i) for i in range(_FETCH_PAGE_SIZE)]
+        boundary_event = page1_events[-1]  # oldest event on page 1
+
+        # Page 2: starts with the *same* boundary event (inclusive cursor overlap),
+        # then one genuinely new event.
+        new_event = _make_event(_FETCH_PAGE_SIZE, base_ts - _FETCH_PAGE_SIZE)
+        page2_events = [boundary_event, new_event]
+
+        call_count = 0
+
+        async def fake_read_until_eose(ws, sub_id):
+            nonlocal call_count
+            events = page1_events if call_count == 0 else page2_events
+            call_count += 1
+            for evt in events:
+                yield evt
+
+        mock_ws = AsyncMock()
+        mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
+        mock_ws.__aexit__ = AsyncMock(return_value=False)
+        mock_ws.send = AsyncMock()
+
+        with (
+            patch("aya.relay._read_until_eose", side_effect=fake_read_until_eose),
+            patch("aya.relay.websockets.connect", return_value=mock_ws),
+        ):
+            packets = [pkt async for pkt in client.fetch_pending()]
+
+        # Total unique events: _FETCH_PAGE_SIZE (page 1) + 1 new (page 2).
+        # The boundary event must NOT be yielded twice.
+        assert len(packets) == _FETCH_PAGE_SIZE + 1
+        # Two REQs issued (page 1 full -> paginate, page 2 partial -> stop).
+        assert call_count == 2
+
 
 # ── publish ───────────────────────────────────────────────────────────────────
 
