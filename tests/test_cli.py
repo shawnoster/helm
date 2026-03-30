@@ -950,7 +950,7 @@ class TestReceive:
         """Packets whose IDs are already in ingested_ids must be silently skipped."""
         p = Profile.load(profile_with_sender)
         packet = self._signed_packet(sender, p.instances["default"].did, intent="Already seen")
-        p.ingested_ids.append(packet.id)
+        p.ingested_ids.append({"id": packet.id, "ingested_at": "2026-03-30T00:00:00Z"})
         p.save(profile_with_sender)
 
         async def mock_fetch(*args, **kwargs):
@@ -984,7 +984,7 @@ class TestReceive:
 
         assert result.exit_code == 0, result.output
         saved = Profile.load(profile_with_sender)
-        assert packet.id in saved.ingested_ids
+        assert any(e["id"] == packet.id for e in saved.ingested_ids)
 
     def test_relay_error_shows_friendly_message(self, profile_with_sender: Path) -> None:
         """A relay connection failure must print a friendly message, not raise."""
@@ -1024,7 +1024,7 @@ class TestReceive:
 
         assert result.exit_code == 0, result.output
         saved = Profile.load(profile_with_instance)
-        assert packet.id in saved.ingested_ids
+        assert any(e["id"] == packet.id for e in saved.ingested_ids)
 
     def test_yes_short_flag_works(self, profile_with_instance: Path) -> None:
         """-y must behave identically to --yes for untrusted senders and skip prompts."""
@@ -1051,4 +1051,4 @@ class TestReceive:
 
         assert result.exit_code == 0, result.output
         saved = Profile.load(profile_with_instance)
-        assert packet.id in saved.ingested_ids
+        assert any(e["id"] == packet.id for e in saved.ingested_ids)
