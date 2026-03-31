@@ -10,6 +10,7 @@ import pytest
 from aya.scheduler import (
     LOCAL_TZ,
     _find,
+    _get_local_tz,
     _parse_tags,
     add_recurring,
     add_reminder,
@@ -36,6 +37,55 @@ def _isolate_scheduler(tmp_path, monkeypatch):
 
     monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
     monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+
+
+# ── Timezone configuration ──────────────────────────────────────────────────────
+
+
+class TestGetLocalTz:
+    def test_default_timezone(self, monkeypatch):
+        """_get_local_tz returns America/Denver by default."""
+        monkeypatch.delenv("AYA_TZ", raising=False)
+        # Clear the cache so we get a fresh evaluation
+        _get_local_tz.cache_clear()
+        tz = _get_local_tz()
+        assert str(tz) == "America/Denver"
+
+    def test_custom_timezone(self, monkeypatch):
+        """_get_local_tz respects AYA_TZ env var."""
+        monkeypatch.setenv("AYA_TZ", "America/Los_Angeles")
+        _get_local_tz.cache_clear()
+        tz = _get_local_tz()
+        assert str(tz) == "America/Los_Angeles"
+
+    def test_timezone_with_whitespace(self, monkeypatch):
+        """_get_local_tz strips whitespace from AYA_TZ value."""
+        monkeypatch.setenv("AYA_TZ", " UTC ")
+        _get_local_tz.cache_clear()
+        tz = _get_local_tz()
+        assert str(tz) == "UTC"
+
+    def test_invalid_timezone_fallback(self, monkeypatch, caplog):
+        """_get_local_tz falls back to America/Denver for invalid timezone."""
+        monkeypatch.setenv("AYA_TZ", "Invalid/Zone")
+        _get_local_tz.cache_clear()
+        tz = _get_local_tz()
+        assert str(tz) == "America/Denver"
+        assert "Invalid timezone" in caplog.text
+
+    def test_cache_clears_with_env_var_change(self, monkeypatch):
+        """_get_local_tz cache responds to AYA_TZ changes."""
+        monkeypatch.setenv("AYA_TZ", "America/Los_Angeles")
+        _get_local_tz.cache_clear()
+        tz1 = _get_local_tz()
+
+        # Change env var and clear cache
+        monkeypatch.setenv("AYA_TZ", "UTC")
+        _get_local_tz.cache_clear()
+        tz2 = _get_local_tz()
+
+        assert str(tz1) == "America/Los_Angeles"
+        assert str(tz2) == "UTC"
 
 
 # ── Time parsing ─────────────────────────────────────────────────────────────

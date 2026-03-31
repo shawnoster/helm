@@ -86,7 +86,7 @@ def _get_local_tz() -> ZoneInfo:
 
     Caching ensures consistent timezone throughout the session.
     """
-    tz_name = os.environ.get("AYA_TZ", "America/Denver")
+    tz_name = os.environ.get("AYA_TZ", "America/Denver").strip()
     try:
         return ZoneInfo(tz_name)
     except KeyError:
