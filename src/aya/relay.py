@@ -101,10 +101,13 @@ class RelayClient:
             not isinstance(url, str) or not url.strip() for url in self._relay_urls
         ):
             raise ValueError("relay_urls must contain at least one non-empty string URL")
-        # Keep relay_url as a single-URL alias for backward compatibility.
-        self.relay_url: str = self._relay_urls[0]
         self._private_key_hex = nostr_private_hex
         self.public_key_hex = nostr_public_hex
+
+    @property
+    def relay_url(self) -> str:
+        """Return the first relay URL. Backward compatibility alias for _relay_urls[0]."""
+        return self._relay_urls[0]
 
     async def publish(
         self, packet: Packet, recipient_nostr_pubkey: str, encrypt: bool = True

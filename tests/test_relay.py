@@ -970,3 +970,21 @@ class TestMultiRelayFetch:
         )
         assert c.relay_url == "wss://relay.example.com"
         assert c._relay_urls == ["wss://relay.example.com"]
+
+    async def test_relay_url_property_stays_consistent(self, sender: Identity) -> None:
+        """relay_url property always reflects _relay_urls[0], never becomes stale."""
+        c = RelayClient(
+            relay_urls=["wss://relay1.example.com", "wss://relay2.example.com"],
+            nostr_private_hex=sender.nostr_private_hex,
+            nostr_public_hex=sender.nostr_public_hex,
+        )
+        # Initial state
+        assert c.relay_url == "wss://relay1.example.com"
+
+        # Modify _relay_urls — relay_url should reflect the change immediately
+        c._relay_urls[0] = "wss://relay-new.example.com"
+        assert c.relay_url == "wss://relay-new.example.com"
+
+        # Even if we prepend a new URL, relay_url still reads [0]
+        c._relay_urls.insert(0, "wss://relay-first.example.com")
+        assert c.relay_url == "wss://relay-first.example.com"
