@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -35,6 +36,14 @@ class CheckResult:
     ok: bool
     detail: str
 
+
+# ── display limits ────────────────────────────────────────────────────────────
+
+ALERT_DISPLAY_LIMIT = 4
+DUE_DISPLAY_LIMIT = 4
+UPCOMING_DISPLAY_LIMIT = 3
+WATCH_DISPLAY_LIMIT = 4
+ID_PREVIEW_LENGTH = 8
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -103,6 +112,20 @@ def _perspective() -> str:
     return lines[datetime.now(UTC).toordinal() % len(lines)]
 
 
+def _parse_next_eval(next_eval: Any, now_local: datetime) -> tuple[str, int] | None:
+    """Parse next_eval ISO string and return (date_str, days_until) if due soon, else None."""
+    if not isinstance(next_eval, str) or len(next_eval) < 10:
+        return None
+    try:
+        eval_dt = datetime.fromisoformat(next_eval.replace("Z", "+00:00"))
+        days_until = (eval_dt.date() - now_local.date()).days
+        if days_until <= 1:
+            return (next_eval[:10], days_until)
+    except ValueError:
+        pass
+    return None
+
+
 # ── main ──────────────────────────────────────────────────────────────────────
 
 
@@ -129,17 +152,24 @@ def _gather_status() -> dict[str, Any]:
         ),
     ]
 
+    # Pre-compute check totals once, reuse in all render functions
+    checks_ok = sum(1 for c in checks if c.ok)
+    checks_total = len(checks)
+
     unseen: list[dict[str, Any]] = []
     due: list[dict[str, Any]] = []
     upcoming: list[dict[str, Any]] = []
     active_watches: list[dict[str, Any]] = []
+    degraded = False
     try:
         unseen = get_unseen_alerts()
         due = get_due_reminders(now_local)
         upcoming = get_upcoming_reminders(now_local, hours=12)
         active_watches = get_active_watches()
-    except Exception:
-        pass
+    except (FileNotFoundError, json.JSONDecodeError, OSError, KeyError) as e:
+        # Log scheduler fetch failures but don't crash — show degraded state
+        logging.warning("Failed to load scheduler status: %s", e)
+        degraded = True
 
     return {
         "now_local": now_local,
@@ -147,18 +177,21 @@ def _gather_status() -> dict[str, Any]:
         "user": user,
         "next_eval": next_eval,
         "checks": checks,
+        "checks_ok": checks_ok,
+        "checks_total": checks_total,
         "unseen": unseen,
         "due": due,
         "upcoming": upcoming,
         "active_watches": active_watches,
+        "degraded": degraded,
     }
 
 
 def _render_plain(data: dict[str, Any]) -> str:
     """Compact plain-text status — no Rich markup, minimal lines."""
+    ok = data["checks_ok"]
+    total = data["checks_total"]
     checks = data["checks"]
-    ok = sum(1 for c in checks if c.ok)
-    total = len(checks)
 
     lines: list[str] = []
     lines.append(_greeting(data["now_local"], data["user"], data["ship"]))
@@ -170,29 +203,25 @@ def _render_plain(data: dict[str, Any]) -> str:
         failed = [c for c in checks if not c.ok]
         lines.append(f"Systems {ok}/{total} — failed: {', '.join(c.name for c in failed)}")
 
-    for a in data["unseen"][:4]:
-        lines.append(f"  alert: {a['source_item_id'][:8]}  {a['message'][:60]}")
+    for a in data["unseen"][:ALERT_DISPLAY_LIMIT]:
+        lines.append(f"  alert: {a['source_item_id'][:ID_PREVIEW_LENGTH]}  {a['message'][:60]}")
 
-    for r in data["due"][:4]:
+    for r in data["due"][:DUE_DISPLAY_LIMIT]:
         due_dt = datetime.fromisoformat(r["due_at"])
-        lines.append(f"  due: {r['id'][:8]}  {due_dt.strftime('%I:%M %p')}  {r['message'][:55]}")
+        msg = r["message"][:55]
+        lines.append(f"  due: {r['id'][:ID_PREVIEW_LENGTH]}  {due_dt.strftime('%I:%M %p')}  {msg}")
 
-    for r in data["upcoming"][:3]:
+    for r in data["upcoming"][:UPCOMING_DISPLAY_LIMIT]:
         rd = datetime.fromisoformat(r["due_at"])
         lines.append(f"  upcoming: {rd.strftime('%I:%M %p')}  {r['message'][:55]}")
 
-    for w in data["active_watches"][:4]:
-        lines.append(f"  watch: {w['id'][:8]}  {w['message'][:50]}")
+    for w in data["active_watches"][:WATCH_DISPLAY_LIMIT]:
+        lines.append(f"  watch: {w['id'][:ID_PREVIEW_LENGTH]}  {w['message'][:50]}")
 
-    next_eval = data["next_eval"]
-    if isinstance(next_eval, str) and len(next_eval) >= 10:
-        try:
-            eval_dt = datetime.fromisoformat(next_eval.replace("Z", "+00:00"))
-            days_until = (eval_dt.date() - data["now_local"].date()).days
-            if days_until <= 1:
-                lines.append(f"  Name re-eval due: {next_eval[:10]}")
-        except ValueError:
-            pass
+    next_eval_result = _parse_next_eval(data["next_eval"], data["now_local"])
+    if next_eval_result:
+        date_str, _ = next_eval_result
+        lines.append(f"  Name re-eval due: {date_str}")
 
     lines.append(_perspective())
     return "\n".join(lines)
@@ -200,9 +229,9 @@ def _render_plain(data: dict[str, Any]) -> str:
 
 def _render_json(data: dict[str, Any]) -> str:
     """Machine-readable JSON status."""
+    ok = data["checks_ok"]
+    total = data["checks_total"]
     checks = data["checks"]
-    ok = sum(1 for c in checks if c.ok)
-    total = len(checks)
 
     payload: dict[str, Any] = {
         "greeting": _greeting(data["now_local"], data["user"], data["ship"]),
@@ -215,17 +244,21 @@ def _render_json(data: dict[str, Any]) -> str:
         },
         "alerts": [
             {
-                "id": a.get("id", "")[:8],
-                "source_item_id": a["source_item_id"][:8],
+                "id": a.get("id", "")[:ID_PREVIEW_LENGTH],
+                "source_item_id": a["source_item_id"][:ID_PREVIEW_LENGTH],
                 "message": a["message"],
             }
             for a in data["unseen"]
         ],
         "due": [
-            {"id": r["id"][:8], "due_at": r["due_at"], "message": r["message"]} for r in data["due"]
+            {"id": r["id"][:ID_PREVIEW_LENGTH], "due_at": r["due_at"], "message": r["message"]}
+            for r in data["due"]
         ],
         "upcoming": [{"due_at": r["due_at"], "message": r["message"]} for r in data["upcoming"]],
-        "watches": [{"id": w["id"][:8], "message": w["message"]} for w in data["active_watches"]],
+        "watches": [
+            {"id": w["id"][:ID_PREVIEW_LENGTH], "message": w["message"]}
+            for w in data["active_watches"]
+        ],
         "next_eval": data["next_eval"],
         "perspective": _perspective(),
     }
@@ -236,10 +269,9 @@ def _render_rich(data: dict[str, Any], console: Console) -> None:
     """Full Rich-formatted status for interactive terminal use."""
     now_local = data["now_local"]
     checks = data["checks"]
-    ok = sum(1 for c in checks if c.ok)
-    total = len(checks)
+    ok = data["checks_ok"]
+    total = data["checks_total"]
     all_ok = ok == total
-    next_eval = data["next_eval"]
 
     console.print()
     console.print(f"[bold]{_greeting(now_local, data['user'], data['ship'])}[/bold]")
@@ -254,40 +286,39 @@ def _render_rich(data: dict[str, Any], console: Console) -> None:
             if not c.ok:
                 console.print(f"  [red]✗[/red] {c.name}  [dim]{c.detail}[/dim]")
 
-    if isinstance(next_eval, str) and len(next_eval) >= 10:
-        try:
-            eval_dt = datetime.fromisoformat(next_eval.replace("Z", "+00:00"))
-            days_until = (eval_dt.date() - now_local.date()).days
-            if days_until <= 1:
-                console.print(f"  [dim]Name re-eval due: {next_eval[:10]}[/dim]")
-        except ValueError:
-            pass
+    next_eval_result = _parse_next_eval(data["next_eval"], now_local)
+    if next_eval_result:
+        date_str, _ = next_eval_result
+        console.print(f"  [dim]Name re-eval due: {date_str}[/dim]")
 
     console.print()
 
     unseen = data["unseen"]
     if unseen:
         console.print(f"[bold red]🔔 {len(unseen)} alert(s):[/bold red]")
-        for a in unseen[:4]:
-            console.print(f"  📢 {a['source_item_id'][:8]}  {a['message'][:60]}")
-        if len(unseen) > 4:
-            console.print(f"  [dim]… and {len(unseen) - 4} more[/dim]")
+        for a in unseen[:ALERT_DISPLAY_LIMIT]:
+            console.print(f"  📢 {a['source_item_id'][:ID_PREVIEW_LENGTH]}  {a['message'][:60]}")
+        if len(unseen) > ALERT_DISPLAY_LIMIT:
+            console.print(f"  [dim]… and {len(unseen) - ALERT_DISPLAY_LIMIT} more[/dim]")
         console.print()
 
     due = data["due"]
     if due:
         console.print(f"[bold yellow]⏰ {len(due)} reminder(s) due:[/bold yellow]")
-        for r in due[:4]:
+        for r in due[:DUE_DISPLAY_LIMIT]:
             due_dt = datetime.fromisoformat(r["due_at"])
-            console.print(f"  🔴 {r['id'][:8]}  {due_dt.strftime('%I:%M %p')}  {r['message'][:55]}")
-        if len(due) > 4:
-            console.print(f"  [dim]… and {len(due) - 4} more[/dim]")
+            msg = r["message"][:55]
+            console.print(
+                f"  🔴 {r['id'][:ID_PREVIEW_LENGTH]}  {due_dt.strftime('%I:%M %p')}  {msg}"
+            )
+        if len(due) > DUE_DISPLAY_LIMIT:
+            console.print(f"  [dim]… and {len(due) - DUE_DISPLAY_LIMIT} more[/dim]")
         console.print()
 
     upcoming = data["upcoming"]
     if upcoming:
         console.print("[bold]Upcoming (12h):[/bold]")
-        for r in upcoming[:3]:
+        for r in upcoming[:UPCOMING_DISPLAY_LIMIT]:
             rd = datetime.fromisoformat(r["due_at"])
             console.print(f"  ⏳ {rd.strftime('%I:%M %p')}  {r['message'][:55]}")
         console.print()
@@ -295,10 +326,13 @@ def _render_rich(data: dict[str, Any], console: Console) -> None:
     active_watches = data["active_watches"]
     if active_watches:
         console.print(f"[bold]Watches ({len(active_watches)} active):[/bold]")
-        for w in active_watches[:4]:
+        for w in active_watches[:WATCH_DISPLAY_LIMIT]:
             last = w.get("last_checked_at")
             last_str = datetime.fromisoformat(last).strftime("%H:%M") if last else "never"
-            console.print(f"  👁  {w['id'][:8]}  {w['message'][:50]}  [dim]checked {last_str}[/dim]")
+            msg = w["message"][:50]
+            console.print(
+                f"  👁  {w['id'][:ID_PREVIEW_LENGTH]}  {msg}  [dim]checked {last_str}[/dim]"
+            )
         console.print()
 
     console.print(Rule(style="dim"))
