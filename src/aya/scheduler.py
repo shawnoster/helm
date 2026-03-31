@@ -1123,11 +1123,15 @@ def get_due_reminders(now: datetime | None = None) -> list[dict[str, Any]]:
     for item in items:
         if item.get("type") != "reminder" or item.get("status") not in ("pending", "snoozed"):
             continue
-        if item.get("status") == "snoozed" and item.get("snoozed_until"):
-            if datetime.fromisoformat(item["snoozed_until"]) > now:
-                continue
-        if datetime.fromisoformat(item["due_at"]) <= now:
-            due.append(item)
+        try:
+            if item.get("status") == "snoozed" and item.get("snoozed_until"):
+                if datetime.fromisoformat(item["snoozed_until"]) > now:
+                    continue
+            if datetime.fromisoformat(item["due_at"]) <= now:
+                due.append(item)
+        except ValueError:
+            # Skip items with malformed timestamps
+            continue
     return due
 
 
@@ -1141,9 +1145,13 @@ def get_upcoming_reminders(now: datetime | None = None, hours: int = 24) -> list
     for item in items:
         if item.get("type") != "reminder" or item.get("status") not in ("pending", "snoozed"):
             continue
-        reminder_due = datetime.fromisoformat(item["due_at"])
-        if now < reminder_due <= horizon:
-            upcoming.append(item)
+        try:
+            reminder_due = datetime.fromisoformat(item["due_at"])
+            if now < reminder_due <= horizon:
+                upcoming.append(item)
+        except ValueError:
+            # Skip items with malformed timestamps
+            continue
     upcoming.sort(key=lambda r: r["due_at"])
     return upcoming
 

@@ -152,24 +152,27 @@ def _gather_status() -> dict[str, Any]:
         ),
     ]
 
-    # Pre-compute check totals once, reuse in all render functions
-    checks_ok = sum(1 for c in checks if c.ok)
-    checks_total = len(checks)
-
     unseen: list[dict[str, Any]] = []
     due: list[dict[str, Any]] = []
     upcoming: list[dict[str, Any]] = []
     active_watches: list[dict[str, Any]] = []
-    degraded = False
+    scheduler_ok = True
     try:
         unseen = get_unseen_alerts()
         due = get_due_reminders(now_local)
         upcoming = get_upcoming_reminders(now_local, hours=12)
         active_watches = get_active_watches()
     except (FileNotFoundError, json.JSONDecodeError, OSError, KeyError) as e:
-        # Log scheduler fetch failures but don't crash — show degraded state
+        # Log scheduler fetch failures but don't crash — mark scheduler check failed
         logging.warning("Failed to load scheduler status: %s", e)
-        degraded = True
+        scheduler_ok = False
+
+    # Add synthetic check for scheduler data integrity
+    checks.append(CheckResult("scheduler-data", scheduler_ok, "Scheduler alerts/reminders loaded"))
+
+    # Pre-compute check totals once, reuse in all render functions
+    checks_ok = sum(1 for c in checks if c.ok)
+    checks_total = len(checks)
 
     return {
         "now_local": now_local,
@@ -183,7 +186,6 @@ def _gather_status() -> dict[str, Any]:
         "due": due,
         "upcoming": upcoming,
         "active_watches": active_watches,
-        "degraded": degraded,
     }
 
 
