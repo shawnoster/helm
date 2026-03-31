@@ -1522,31 +1522,46 @@ def _display_items(items: list[dict[str, Any]]) -> None:
 
     now = datetime.now(_get_local_tz())
 
-    for item_type in ("reminder", "watch", "recurring", "event"):
-        typed = [i for i in items if i.get("type") == item_type]
+    status_icons = {
+        STATUS_PENDING: "⏳",
+        STATUS_ACTIVE: "✅",
+        STATUS_SNOOZED: "💤",
+        STATUS_DELIVERED: "📬",
+        STATUS_DISMISSED: "✗",
+    }
+
+    for item_type in (TYPE_REMINDER, TYPE_WATCH, TYPE_RECURRING, TYPE_EVENT):
+        typed = _items_of_type(items, item_type)
         if not typed:
             continue
-        for i in typed:
-            {
-                "pending": "⏳",
-                "active": "✅",
-                "snoozed": "💤",
-                "delivered": "📬",
-                "dismissed": "✗",
-            }.get(i.get("status", "active"), "•")
-            f" [{', '.join(i['tags'])}]" if i.get("tags") else ""
 
-            if i.get("type") == "reminder":
+        print(f"\n{item_type.upper()}:")  # noqa: T201
+        for i in typed:
+            status = i.get("status", STATUS_ACTIVE)
+            icon = status_icons.get(status, "•")
+            tags_str = f" [{', '.join(i['tags'])}]" if i.get("tags") else ""
+            message = i.get("message", "")
+
+            if item_type == TYPE_REMINDER:
                 due = datetime.fromisoformat(i["due_at"])
-                due.strftime("%a %b %d, %I:%M %p")
-                due <= now and i.get("status") == "pending"
-            elif i.get("type") == "watch":
-                i.get("provider", "?")
-                i.get("poll_interval_minutes", "?")
+                due_str = due.strftime("%a %b %d, %I:%M %p")
+                is_overdue = "⚠️" if due <= now and status == STATUS_PENDING else ""
+                print(  # noqa: T201
+                    f"  {icon} {message}{tags_str} — due {due_str} {is_overdue}".rstrip()
+                )
+            elif item_type == TYPE_WATCH:
+                provider = i.get("provider", "?")
+                interval = i.get("poll_interval_minutes", "?")
                 last = i.get("last_checked_at")
-                datetime.fromisoformat(last).strftime("%H:%M") if last else "never"
-            elif i.get("type") == "recurring":
-                i.get("cron", "?")
-                " [session]" if i.get("session_required") else ""
-            elif i.get("type") == "event":
-                i.get("trigger", "?")
+                last_checked = datetime.fromisoformat(last).strftime("%H:%M") if last else "never"
+                print(  # noqa: T201
+                    f"  {icon} {message}{tags_str} — {provider} (every {interval}m, "
+                    f"checked {last_checked})"
+                )
+            elif item_type == TYPE_RECURRING:
+                cron = i.get("cron", "?")
+                session_flag = " [session]" if i.get("session_required") else ""
+                print(f"  {icon} {message}{tags_str} — {cron}{session_flag}")  # noqa: T201
+            elif item_type == TYPE_EVENT:
+                trigger = i.get("trigger", "?")
+                print(f"  {icon} {message}{tags_str} — on {trigger}")  # noqa: T201
