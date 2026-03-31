@@ -313,7 +313,16 @@ async def publish_pair_request(
     code_hash: str,
     relay_url: str | list[str],
 ) -> str:
-    """Publish a pair-request event to all configured relays. Returns the event ID."""
+    """Publish a pair-request event to all configured relays, returns event ID. **ASYNC.**
+
+    Usage::
+
+        # In async context: await
+        event_id = await publish_pair_request(identity, label, code_hash, relay_url)
+
+        # In sync context: asyncio.run()
+        event_id = asyncio.run(publish_pair_request(identity, label, code_hash, relay_url))
+    """
     relay_urls = [relay_url] if isinstance(relay_url, str) else relay_url
     request_event = _build_pair_request(identity, label, code_hash, relay_urls[0])
     published = False
@@ -358,11 +367,19 @@ async def poll_for_pair_response(
     request_event_id: str,
     timeout_seconds: int = PAIR_TTL_SECONDS,
 ) -> TrustedKey | None:
-    """Poll all configured relays for a pair-response.
+    """Poll all configured relays for a pair-response. **ASYNC.**
 
     Polls each relay in turn, returning as soon as any relay yields a response.
     Applies per-relay exponential backoff when a relay has transient failures to
     avoid hammering rate-limited relays on reconnect.
+
+    Usage::
+
+        # In async context: await
+        trusted = await poll_for_pair_response(relay_url, my_pubkey, event_id)
+
+        # In sync context: asyncio.run()
+        trusted = asyncio.run(poll_for_pair_response(relay_url, my_pubkey, event_id))
     """
     relay_urls = [relay_url] if isinstance(relay_url, str) else relay_url
     since_ts = int(datetime.now(UTC).timestamp()) - 5
@@ -444,11 +461,20 @@ async def join_pairing(
     code: str,
     relay_url: str | list[str],
 ) -> TrustedKey:
-    """
+    """Joiner half of pairing flow — join using a pairing code. **ASYNC.**
+
     Joiner flow:
       1. Hash the code, find matching pair-request on relay
       2. Publish pair-response
       3. Return TrustedKey for the initiator
+
+    Usage::
+
+        # In async context: await
+        trusted = await join_pairing(identity, code, relay_url)
+
+        # In sync context: asyncio.run()
+        trusted = asyncio.run(join_pairing(identity, code, relay_url))
     """
     relay_urls = [relay_url] if isinstance(relay_url, str) else relay_url
     code_h = hash_code(code)
