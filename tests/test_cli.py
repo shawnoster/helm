@@ -1222,7 +1222,192 @@ class TestReceive:
         assert any(e["id"] == packet.id for e in saved.ingested_ids)
 
 
-# ── AUTO format resolution ──────────────────────────────────────────────────
+# ── inbox ─────────────────────────────────────────────────────────────────────
+
+
+class TestInbox:
+    @pytest.fixture
+    def sender(self) -> Identity:
+        return Identity.generate("work")
+
+    @pytest.fixture
+    def profile_with_sender(self, profile_with_instance: Path, sender: Identity) -> Path:
+        p = Profile.load(profile_with_instance)
+        p.trusted_keys["work"] = TrustedKey(
+            did=sender.did, label="work", nostr_pubkey=sender.nostr_public_hex
+        )
+        p.save(profile_with_instance)
+        return profile_with_instance
+
+    def _signed_packet(self, sender: Identity, to_did: str, intent: str = "Test packet") -> Packet:
+        pkt = Packet(
+            **{"from": sender.did, "to": to_did},
+            intent=intent,
+            content="Test content.",
+        )
+        return pkt.sign(sender)
+
+    def test_filters_ingested_packets_by_default(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        """inbox must hide already-ingested packets unless --all is passed."""
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did, intent="Old packet")
+        recent_ts = (
+            (datetime.now(UTC) - timedelta(days=1))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        p.ingested_ids.append({"id": packet.id, "ingested_at": recent_ts})
+        p.save(profile_with_sender)
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["inbox", "--format", "text", "--profile", str(profile_with_sender)],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "Old packet" not in result.output
+        assert "Inbox empty" in result.output
+
+    def test_shows_new_packets(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        """inbox must show packets not yet in ingested_ids."""
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did, intent="Fresh packet")
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["inbox", "--format", "text", "--profile", str(profile_with_sender)],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "Fresh packet" in result.output
+
+    def test_all_flag_shows_ingested_packets(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        """inbox --all must show ingested packets marked as [ingested]."""
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did, intent="Old packet")
+        recent_ts = (
+            (datetime.now(UTC) - timedelta(days=1))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        p.ingested_ids.append({"id": packet.id, "ingested_at": recent_ts})
+        p.save(profile_with_sender)
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["inbox", "--all", "--format", "text", "--profile", str(profile_with_sender)],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "Old packet" in result.output
+        assert "[ingested]" in result.output
+
+    def test_all_flag_shows_count_summary(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        """inbox --all with some ingested packets must show a 'N total, M new' summary."""
+        p = Profile.load(profile_with_sender)
+        ingested_packet = self._signed_packet(
+            sender, p.instances["default"].did, intent="Ingested"
+        )
+        new_packet = self._signed_packet(sender, p.instances["default"].did, intent="New")
+        recent_ts = (
+            (datetime.now(UTC) - timedelta(days=1))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        p.ingested_ids.append({"id": ingested_packet.id, "ingested_at": recent_ts})
+        p.save(profile_with_sender)
+
+        async def mock_fetch(*args, **kwargs):
+            yield ingested_packet
+            yield new_packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["inbox", "--all", "--format", "text", "--profile", str(profile_with_sender)],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "2 total, 1 new" in result.output
+
+    def test_json_output_includes_ingested_field_with_all_flag(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        """inbox --all --format json must include an 'ingested' field for each packet."""
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did, intent="Already seen")
+        recent_ts = (
+            (datetime.now(UTC) - timedelta(days=1))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        p.ingested_ids.append({"id": packet.id, "ingested_at": recent_ts})
+        p.save(profile_with_sender)
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["inbox", "--all", "--format", "json", "--profile", str(profile_with_sender)],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert data[0]["ingested"] is True
+
+    def test_json_output_no_ingested_field_without_all_flag(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        """inbox --format json (default) must not include an 'ingested' field."""
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did, intent="Fresh")
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["inbox", "--format", "json", "--profile", str(profile_with_sender)],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert len(data) == 1
+        assert "ingested" not in data[0]
 
 
 class TestAutoFormat:
