@@ -248,7 +248,7 @@ class TestPairingFlowMocked:
             patch("aya.pair._find_pair_request", return_value=request_event),
             patch("aya.pair.websockets.connect", return_value=CapturingWS()),
         ):
-            await join_pairing(home, "work", code, "wss://relay.test")
+            await join_pairing(home, code, "wss://relay.test")
 
         assert sent_events, "Expected a response event to be sent"
         response_content = json.loads(sent_events[0]["content"])
