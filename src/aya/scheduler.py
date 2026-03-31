@@ -22,6 +22,7 @@ from __future__ import annotations
 import fcntl
 import functools
 import json
+import logging
 import os
 import re
 import subprocess
@@ -648,7 +649,8 @@ def _run_gh(args: list[str], timeout: int = 15) -> dict[str, Any] | list | None:
         if result.returncode != 0:
             return None
         return json.loads(result.stdout) if result.stdout.strip() else None
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError):
+    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError) as e:
+        logging.debug("gh command failed: %s", e)
         return None
 
 
@@ -719,7 +721,8 @@ def _check_jira_query(config: dict[str, Any]) -> dict[str, Any] | None:
                 for i in data.get("issues", [])
             ],
         }
-    except Exception:
+    except Exception as e:
+        logging.debug("Jira query failed: %s", e)
         return None
 
 
@@ -750,7 +753,8 @@ def _check_jira_ticket(config: dict[str, Any]) -> dict[str, Any] | None:
             "status": fields.get("status", {}).get("name", ""),
             "assignee": (fields.get("assignee") or {}).get("displayName", "Unassigned"),
         }
-    except Exception:
+    except Exception as e:
+        logging.debug("Jira ticket check failed: %s", e)
         return None
 
 
@@ -1078,6 +1082,7 @@ def run_poll(quiet: bool = False) -> None:
         now = datetime.now(_get_local_tz())
         items_modified = False
         alerts_modified = False
+        existing_sources = {a["source_item_id"] for a in alerts if not a.get("seen")}
 
         for item in items:
             if (
@@ -1122,7 +1127,6 @@ def run_poll(quiet: bool = False) -> None:
             elif item["type"] == "reminder" and item["status"] == "pending":
                 due = datetime.fromisoformat(item["due_at"])
                 if due <= now:
-                    existing_sources = {a["source_item_id"] for a in alerts if not a.get("seen")}
                     if item["id"] not in existing_sources:
                         alert = _create_alert(
                             source_item_id=item["id"],
