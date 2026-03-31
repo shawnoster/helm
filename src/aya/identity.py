@@ -114,9 +114,7 @@ def _validate_instance(key: str, data: dict[str, Any]) -> Identity:
     try:
         return Identity(**data)
     except TypeError as e:
-        raise ValueError(
-            f"Instance '{key}' is malformed: missing or invalid required field. {e}"
-        ) from e
+        raise ValueError(f"Instance '{key}' is malformed: {e}") from e
     except Exception as e:
         raise ValueError(f"Instance '{key}' could not be loaded: {e}") from e
 
