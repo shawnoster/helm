@@ -564,14 +564,10 @@ def add_seed_alert(
     if open_questions:
         detail_lines.append("**Open questions:**")
         detail_lines.extend(f"  • {q}" for q in open_questions)
-    alert = {
-        "id": _new_id(),
-        # source_item_id is required by run_poll/tick for existing_sources dedup;
-        # use the originating packet ID so the alert can be traced back to its source.
-        "source_item_id": packet_id or _new_id(),
-        "created_at": now.isoformat(),
-        "message": f"Seed from {from_label}: {intent}",
-        "details": {
+    alert = _create_alert(
+        source_item_id=packet_id or _new_id(),
+        message=f"Seed from {from_label}: {intent}",
+        details={
             "type": "seed",
             "intent": intent,
             "opener": opener,
@@ -580,8 +576,8 @@ def add_seed_alert(
             "from_label": from_label,
             "body": "\n".join(detail_lines),
         },
-        "seen": False,
-    }
+        now=now,
+    )
     with _file_lock():
         alerts = _load_alerts_unlocked()
         alerts.append(alert)
@@ -598,6 +594,42 @@ def _find(items: list[dict[str, Any]], item_id: str) -> dict[str, Any] | None:
 
 def _new_id() -> str:
     return str(uuid.uuid4())
+
+
+# ── infrastructure helpers ───────────────────────────────────────────────────
+
+
+def _load_collection_unlocked(path: Path, key: str) -> list[dict[str, Any]]:
+    """Generic loader for JSON collections (caller holds lock)."""
+    if not path.exists():
+        return []
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return []
+    return data.get(key, []) if isinstance(data, dict) else []
+
+
+def _create_alert(
+    source_item_id: str, message: str, details: dict[str, Any], now: datetime
+) -> dict[str, Any]:
+    """Create an alert dict with standard fields."""
+    return {
+        "id": _new_id(),
+        "source_item_id": source_item_id,
+        "created_at": now.isoformat(),
+        "message": message,
+        "details": details,
+        "seen": False,
+    }
+
+
+def _get_jira_credentials() -> tuple[str, str, str]:
+    """Extract Jira credentials from environment. Returns (email, token, server)."""
+    email = os.environ.get("ATLASSIAN_EMAIL", "")
+    token = os.environ.get("ATLASSIAN_API_TOKEN", "")
+    server = os.environ.get("ATLASSIAN_SERVER_URL", "").rstrip("/")
+    return email, token, server
 
 
 # ── watch providers ──────────────────────────────────────────────────────────
@@ -659,9 +691,7 @@ def _check_github_pr(config: dict[str, Any]) -> dict[str, Any] | None:
 def _check_jira_query(config: dict[str, Any]) -> dict[str, Any] | None:
     """Run a JQL query and return results."""
     jql = config["jql"]
-    email = os.environ.get("ATLASSIAN_EMAIL", "")
-    token = os.environ.get("ATLASSIAN_API_TOKEN", "")
-    server = os.environ.get("ATLASSIAN_SERVER_URL", "").rstrip("/")
+    email, token, server = _get_jira_credentials()
 
     if not all([email, token, server]):
         return None
@@ -696,9 +726,7 @@ def _check_jira_query(config: dict[str, Any]) -> dict[str, Any] | None:
 def _check_jira_ticket(config: dict[str, Any]) -> dict[str, Any] | None:
     """Check a specific Jira ticket's status."""
     ticket = config["ticket"]
-    email = os.environ.get("ATLASSIAN_EMAIL", "")
-    token = os.environ.get("ATLASSIAN_API_TOKEN", "")
-    server = os.environ.get("ATLASSIAN_SERVER_URL", "").rstrip("/")
+    email, token, server = _get_jira_credentials()
 
     if not all([email, token, server]):
         return None
@@ -1009,26 +1037,12 @@ def snooze_item(item_id: str, until_text: str) -> tuple[dict[str, Any], datetime
 
 def _load_items_unlocked() -> list[dict[str, Any]]:
     """Read scheduler items without acquiring a lock (caller holds lock)."""
-    path = _scheduler_file()
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return []
-    return data.get("items", []) if isinstance(data, dict) else []
+    return _load_collection_unlocked(_scheduler_file(), "items")
 
 
 def _load_alerts_unlocked() -> list[dict[str, Any]]:
     """Read alerts without acquiring a lock (caller holds lock)."""
-    path = _alerts_file()
-    if not path.exists():
-        return []
-    try:
-        data = json.loads(path.read_text())
-    except (json.JSONDecodeError, OSError):
-        return []
-    return data.get("alerts", []) if isinstance(data, dict) else []
+    return _load_collection_unlocked(_alerts_file(), "alerts")
 
 
 def run_poll(quiet: bool = False) -> None:
@@ -1064,14 +1078,12 @@ def run_poll(quiet: bool = False) -> None:
                     items_modified = True
 
                     if changed:
-                        alert = {
-                            "id": _new_id(),
-                            "source_item_id": item["id"],
-                            "created_at": now.isoformat(),
-                            "message": _format_watch_alert(item, new_state),
-                            "details": new_state,
-                            "seen": False,
-                        }
+                        alert = _create_alert(
+                            source_item_id=item["id"],
+                            message=_format_watch_alert(item, new_state),
+                            details=new_state,
+                            now=now,
+                        )
                         alerts.append(alert)
                         alerts_modified = True
                         if not quiet:
@@ -1091,14 +1103,12 @@ def run_poll(quiet: bool = False) -> None:
                 if due <= now:
                     existing_sources = {a["source_item_id"] for a in alerts if not a.get("seen")}
                     if item["id"] not in existing_sources:
-                        alert = {
-                            "id": _new_id(),
-                            "source_item_id": item["id"],
-                            "created_at": now.isoformat(),
-                            "message": f"Reminder due: {item['message']}",
-                            "details": {"due_at": item["due_at"]},
-                            "seen": False,
-                        }
+                        alert = _create_alert(
+                            source_item_id=item["id"],
+                            message=f"Reminder due: {item['message']}",
+                            details={"due_at": item["due_at"]},
+                            now=now,
+                        )
                         alerts.append(alert)
                         alerts_modified = True
                         if not quiet:
