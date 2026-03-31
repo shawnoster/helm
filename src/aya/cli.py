@@ -193,7 +193,7 @@ def version(
     """Show the installed aya version."""
     format_ = resolve_format(format_)
     if format_ == OutputFormat.JSON:
-        console.out(json.dumps({"version": __version__}))
+        _output_json({"version": __version__})
     else:
         console.print(f"aya {__version__}")
 
@@ -589,13 +589,7 @@ def inbox(
 
         packets = [pkt async for pkt in client.fetch_pending()]
         if format_ == OutputFormat.JSON:
-            console.out(
-                json.dumps(
-                    [_packet_to_dict(pkt, p) for pkt in packets],
-                    indent=2,
-                    default=str,
-                )
-            )
+            _output_json([_packet_to_dict(pkt, p) for pkt in packets])
         elif not packets:
             console.print("[dim]Inbox empty.[/dim]")
         else:
@@ -809,7 +803,7 @@ def schedule_list(
     format_ = resolve_format(format_)
     items = list_items(show_all=all_items, item_type=item_type)
     if format_ == OutputFormat.JSON:
-        console.out(json.dumps(items, indent=2, default=str))
+        _output_json(items)
     else:
         _display_items(items)
 
@@ -825,7 +819,7 @@ def schedule_check(
     due_items, unseen = check_due()
 
     if format_ == OutputFormat.JSON:
-        console.out(json.dumps({"due": due_items, "alerts": unseen}, indent=2, default=str))
+        _output_json({"due": due_items, "alerts": unseen})
         return
 
     if not due_items and not unseen:
@@ -916,7 +910,7 @@ def schedule_pending(
     format_ = resolve_format(format_)
     pending = get_pending()
     if format_ == OutputFormat.JSON:
-        console.out(json.dumps(pending, indent=2, default=str))
+        _output_json(pending)
     else:
         console.print(format_pending(pending))
 
@@ -931,7 +925,7 @@ def schedule_status(
     format_ = resolve_format(format_)
     status = get_scheduler_status()
     if format_ == OutputFormat.JSON:
-        console.out(json.dumps(status, indent=2, default=str))
+        _output_json(status)
     else:
         console.print(format_scheduler_status(status))
 
@@ -948,7 +942,7 @@ def schedule_alerts(
     unseen = show_alerts(mark_seen=mark_seen)
 
     if format_ == OutputFormat.JSON:
-        console.out(json.dumps(unseen, indent=2, default=str))
+        _output_json(unseen)
         return
 
     if not unseen:
@@ -1162,7 +1156,13 @@ def _resolve_did(to: str, profile: Profile) -> tuple[str, str]:
     raise typer.Exit(1)
 
 
-def _packet_to_dict(pkt: Packet, profile: Profile) -> dict[str, object]:
+def _output_json(data: object) -> None:
+    """Output data as formatted JSON to console."""
+    console.out(json.dumps(data, indent=2, default=str))
+
+
+def _extract_packet_data(pkt: Packet, profile: Profile) -> dict[str, object]:
+    """Extract all packet fields and computed values for reuse across displays."""
     return {
         "id": pkt.id,
         "intent": pkt.intent,
@@ -1175,6 +1175,11 @@ def _packet_to_dict(pkt: Packet, profile: Profile) -> dict[str, object]:
     }
 
 
+def _packet_to_dict(pkt: Packet, profile: Profile) -> dict[str, object]:
+    """Convert packet to dict for JSON output."""
+    return _extract_packet_data(pkt, profile)
+
+
 def _show_inbox(packets: list[Packet], profile: Profile) -> None:
     table = Table(title=f"Inbox — {len(packets)} packet(s)", show_lines=True)
     table.add_column("ID", style="dim", width=10)
@@ -1185,15 +1190,15 @@ def _show_inbox(packets: list[Packet], profile: Profile) -> None:
     table.add_column("Trust")
 
     for pkt in packets:
-        from_label = _label_for_did(pkt.from_did, profile)
-        trusted = "[green]✓[/green]" if profile.is_trusted(pkt.from_did) else "[yellow]?[/yellow]"
+        data = _extract_packet_data(pkt, profile)
+        trusted_display = "[green]✓[/green]" if data["trusted"] else "[yellow]?[/yellow]"
         table.add_row(
-            pkt.id[:8],
-            pkt.intent,
-            from_label,
-            human_age(pkt.sent_at),
-            pkt.content_type,
-            trusted,
+            data["id"][:8],
+            data["intent"],
+            data["from_label"],
+            data["age"],
+            data["content_type"],
+            trusted_display,
         )
     console.print(table)
 
