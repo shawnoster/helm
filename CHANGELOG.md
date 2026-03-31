@@ -2,6 +2,13 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Pin `coincurve<21` to avoid source build failure on Python 3.14 — coincurve 21.0.0 has a broken
+  `hatch_build.py` that looks for cffi's LICENSE file during build, but cffi 2.0.0 changed sdist
+  packaging so that file no longer exists in the expected location (closes #101). The pin will be
+  lifted when coincurve ships cp314 wheels or cffi fixes its sdist packaging.
+
 ### Removed
 
 - `aya bootstrap` and `aya reset` commands — workspace scaffolding is no longer part of aya's
