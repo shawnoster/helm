@@ -221,7 +221,107 @@ class TestTrust:
         assert "No Nostr pubkey" not in result.output
 
 
-# ── pack ──────────────────────────────────────────────────────────────────────
+# ── pair ──────────────────────────────────────────────────────────────────────
+
+
+class TestPair:
+    def test_initiator_stores_peer_under_peer_label(self, profile_with_instance: Path) -> None:
+        """Initiator must store the peer DID under --peer label, not the local label.
+
+        Regression test: before the fix, p.trusted_keys[trusted.label] used the
+        label from the response content (which was the initiator's own label), so
+        the peer DID overwrote the local self-trust entry.
+        """
+        from aya.pair import TrustedKey as PairTrustedKey
+
+        local_identity = Identity.generate("guild-shawnoster")
+        peer_identity = Identity.generate("sean-okeefe")
+
+        p = Profile.load(profile_with_instance)
+        p.instances["guild-shawnoster"] = local_identity
+        p.save(profile_with_instance)
+
+        # Simulate what poll_for_pair_response returns: TrustedKey whose label
+        # is the initiator's own name (the bug: content["label"] was local label)
+        buggy_trusted = PairTrustedKey(
+            did=peer_identity.did,
+            label="guild-shawnoster",  # wrong label — the old bug
+            nostr_pubkey=peer_identity.nostr_public_hex,
+        )
+
+        with (
+            patch("aya.cli.generate_code", return_value="TEST-CODE-0001"),
+            patch("aya.cli.hash_code", return_value="deadbeef"),
+            patch("aya.cli.publish_pair_request", return_value="req_event_id"),
+            patch("aya.cli.poll_for_pair_response", return_value=buggy_trusted),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "pair",
+                    "--peer",
+                    "sean-okeefe",
+                    "--as",
+                    "guild-shawnoster",
+                    "--profile",
+                    str(profile_with_instance),
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(profile_with_instance.read_text())
+        trusted_keys = data["aya"]["trusted_keys"]
+
+        # Peer DID must be stored under the --peer label
+        assert "sean-okeefe" in trusted_keys, "Peer not stored under --peer label"
+        assert trusted_keys["sean-okeefe"]["did"] == peer_identity.did
+
+        # Local label must NOT be overwritten with the peer DID
+        assert (
+            "guild-shawnoster" not in trusted_keys
+            or trusted_keys.get("guild-shawnoster", {}).get("did") != peer_identity.did
+        ), "Peer DID must not overwrite local label entry"
+
+    def test_joiner_stores_peer_under_peer_label(self, profile_with_instance: Path) -> None:
+        """Joiner must store the initiator DID under --peer label."""
+        from aya.pair import TrustedKey as PairTrustedKey
+
+        local_identity = Identity.generate("sean-okeefe")
+        initiator_identity = Identity.generate("guild-shawnoster")
+
+        p = Profile.load(profile_with_instance)
+        p.instances["sean-okeefe"] = local_identity
+        p.save(profile_with_instance)
+
+        # join_pairing returns TrustedKey with the initiator's label from request content
+        initiator_trusted = PairTrustedKey(
+            did=initiator_identity.did,
+            label="guild-shawnoster",
+            nostr_pubkey=initiator_identity.nostr_public_hex,
+        )
+
+        with patch("aya.cli.join_pairing", return_value=initiator_trusted):
+            result = runner.invoke(
+                app,
+                [
+                    "pair",
+                    "--code",
+                    "CRUSH-BASIL-9046",
+                    "--peer",
+                    "guild-shawnoster",
+                    "--as",
+                    "sean-okeefe",
+                    "--profile",
+                    str(profile_with_instance),
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(profile_with_instance.read_text())
+        trusted_keys = data["aya"]["trusted_keys"]
+
+        assert "guild-shawnoster" in trusted_keys, "Initiator not stored under --peer label"
+        assert trusted_keys["guild-shawnoster"]["did"] == initiator_identity.did
 
 
 class TestPack:

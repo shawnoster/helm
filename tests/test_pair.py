@@ -188,7 +188,8 @@ class TestPairingFlowMocked:
     async def test_join_pairing_success(self, work, home):
         code = "TEST-CODE-1234"
         code_h = hash_code(code)
-        request_event = _build_pair_request(work, "work", code_h, "wss://relay.test")
+        # Request embeds the initiator's own label (work.label = "work")
+        request_event = _build_pair_request(work, work.label, code_h, "wss://relay.test")
 
         # Patch at the function level — _find_pair_request returns the event,
         # publish goes through a simple mock ws
@@ -202,11 +203,57 @@ class TestPairingFlowMocked:
                 return_value=_make_ws_mock([]),
             ),
         ):
-            trusted = await join_pairing(home, "home", code, "wss://relay.test")
+            trusted = await join_pairing(home, code, "wss://relay.test")
 
         assert trusted.did == work.did
         assert trusted.label == "work"
         assert trusted.nostr_pubkey == work.nostr_public_hex
+
+    async def test_join_pairing_response_embeds_joiner_own_label(self, work, home):
+        """join_pairing must embed the joiner's own label in the response, not the --peer label.
+
+        Regression test for: peer DID stored under local label instead of --peer label.
+        The joiner's response content label should be the joiner's own identity label
+        (home.label = "home") so the initiator knows what label to assign the peer.
+        """
+        code = "TEST-CODE-5678"
+        code_h = hash_code(code)
+        request_event = _build_pair_request(work, work.label, code_h, "wss://relay.test")
+
+        sent_events: list[dict] = []
+
+        class CapturingWS:
+            async def send(self, data):
+                msg = json.loads(data)
+                if msg[0] == "EVENT":
+                    sent_events.append(msg[1])
+
+            async def recv(self):
+                return json.dumps(["OK", "event_id", True, ""])
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                raise StopAsyncIteration
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *args):
+                pass
+
+        with (
+            patch("aya.pair._find_pair_request", return_value=request_event),
+            patch("aya.pair.websockets.connect", return_value=CapturingWS()),
+        ):
+            await join_pairing(home, code, "wss://relay.test")
+
+        assert sent_events, "Expected a response event to be sent"
+        response_content = json.loads(sent_events[0]["content"])
+        # The label in the response must be the joiner's own label, not the --peer value
+        assert response_content["label"] == home.label  # "home", not "work"
+        assert response_content["did"] == home.did
 
     async def test_find_pair_request_no_match(self):
         # Relay returns EOSE immediately — no matching events

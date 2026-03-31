@@ -441,7 +441,6 @@ async def _poll_single_relay(
 
 async def join_pairing(
     identity: Identity,
-    label: str,
     code: str,
     relay_url: str | list[str],
 ) -> TrustedKey:
@@ -466,8 +465,9 @@ async def join_pairing(
     request_event_id = request["id"]
 
     # Publish response to all relays; succeed if at least one accepts
+    # Embed our own label so the initiator knows what to call us
     response_event = _build_pair_response(
-        identity, label, initiator_pubkey, request_event_id, relay_urls[0]
+        identity, identity.label, initiator_pubkey, request_event_id, relay_urls[0]
     )
     published = False
     for url in relay_urls:
