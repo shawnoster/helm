@@ -203,9 +203,23 @@ class Profile:
         # Migrate profiles written by older versions (assistant_sync → aya)
         aya_data = data.get("aya") or data.get("assistant_sync", {})
 
+        # Validate aya_data is a dict before calling methods on it
+        if not isinstance(aya_data, dict):
+            raise ValueError(
+                f"Profile 'aya' section must be a dictionary, got {type(aya_data).__name__}. "
+                "Profile may be corrupted."
+            )
+
         # Load and validate instances
         instances = {}
-        for k, v in aya_data.get("instances", {}).items():
+        instances_data = aya_data.get("instances", {})
+        if not isinstance(instances_data, dict):
+            raise ValueError(
+                f"Profile 'instances' must be a dictionary, got {type(instances_data).__name__}"
+            )
+        for k, v in instances_data.items():
+            if not isinstance(v, dict):
+                raise ValueError(f"Instance '{k}' must be a dictionary, got {type(v).__name__}")
             # Migrate old profiles missing Nostr keys
             if "nostr_private_hex" not in v:
                 nostr_secret = secrets.token_bytes(32)
@@ -221,7 +235,14 @@ class Profile:
 
         # Load and validate trusted keys
         trusted = {}
-        for k, v in aya_data.get("trusted_keys", {}).items():
+        trusted_keys_data = aya_data.get("trusted_keys", {})
+        if not isinstance(trusted_keys_data, dict):
+            raise ValueError(
+                f"Profile 'trusted_keys' must be a dict, got {type(trusted_keys_data).__name__}"
+            )
+        for k, v in trusted_keys_data.items():
+            if not isinstance(v, dict):
+                raise ValueError(f"Trusted key '{k}' must be a dictionary, got {type(v).__name__}")
             try:
                 trusted[k] = _validate_trusted_key(k, v)
             except ValueError as e:
