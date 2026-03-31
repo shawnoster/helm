@@ -598,9 +598,10 @@ def inbox(
         display_packets = all_packets if show_all else new_packets
 
         if format_ == OutputFormat.JSON:
+            ingested_for_json = ingested_set if show_all else None
             console.out(
                 json.dumps(
-                    [_packet_to_dict(pkt, p, ingested_set if show_all else None) for pkt in display_packets],
+                    [_packet_to_dict(pkt, p, ingested_for_json) for pkt in display_packets],
                     indent=2,
                     default=str,
                 )
@@ -612,9 +613,7 @@ def inbox(
             if show_all and len(all_packets) != len(new_packets):
                 total = len(all_packets)
                 new = len(new_packets)
-                console.print(
-                    f"[dim]{total} total, {new} new[/dim]"
-                )
+                console.print(f"[dim]{total} total, {new} new[/dim]")
 
     asyncio.run(_run())
 
@@ -1211,9 +1210,7 @@ def _show_inbox(
         trusted = "[green]✓[/green]" if profile.is_trusted(pkt.from_did) else "[yellow]?[/yellow]"
         already_ingested = ingested_set is not None and pkt.id in ingested_set
         if already_ingested:
-            intent: str | Text = Text.assemble(
-                (pkt.intent, "dim"), (" [ingested]", "dim")
-            )
+            intent: str | Text = Text.assemble((pkt.intent, "dim"), (" [ingested]", "dim"))
         else:
             intent = pkt.intent
         table.add_row(

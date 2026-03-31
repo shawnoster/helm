@@ -1276,9 +1276,7 @@ class TestInbox:
         assert "Old packet" not in result.output
         assert "Inbox empty" in result.output
 
-    def test_shows_new_packets(
-        self, profile_with_sender: Path, sender: Identity
-    ) -> None:
+    def test_shows_new_packets(self, profile_with_sender: Path, sender: Identity) -> None:
         """inbox must show packets not yet in ingested_ids."""
         p = Profile.load(profile_with_sender)
         packet = self._signed_packet(sender, p.instances["default"].did, intent="Fresh packet")
@@ -1330,9 +1328,7 @@ class TestInbox:
     ) -> None:
         """inbox --all with some ingested packets must show a 'N total, M new' summary."""
         p = Profile.load(profile_with_sender)
-        ingested_packet = self._signed_packet(
-            sender, p.instances["default"].did, intent="Ingested"
-        )
+        ingested_packet = self._signed_packet(sender, p.instances["default"].did, intent="Ingested")
         new_packet = self._signed_packet(sender, p.instances["default"].did, intent="New")
         recent_ts = (
             (datetime.now(UTC) - timedelta(days=1))
