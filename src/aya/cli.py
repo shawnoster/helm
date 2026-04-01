@@ -513,10 +513,13 @@ def receive(
 
         # Compute since from last_checked to avoid re-scanning the full window on
         # every poll.  60-second lookback guards against minor clock drift.
+        # Clamp to at most 7 days back so a very stale last_checked doesn't
+        # trigger an unbounded relay scan or override the relay's default window.
         since: datetime | None = None
         if p.last_checked:
+            now = datetime.now(UTC)
             oldest = min(datetime.fromisoformat(v) for v in p.last_checked.values())
-            since = oldest - timedelta(seconds=60)
+            since = max(oldest - timedelta(seconds=60), now - timedelta(days=7))
 
         # Fetch pending packets for this instance; ingested_ids is the authoritative
         # dedup mechanism and filters already-seen packets below.
@@ -560,6 +563,7 @@ def receive(
         if not verified:
             if not quiet:
                 console.print("[dim]No valid packets.[/dim]")
+            p.save(profile)
             return
 
         _show_inbox(verified, p)
@@ -1357,14 +1361,27 @@ def _copy_to_clipboard(text: str) -> None:
     xsel = shutil.which("xsel")
     clip = shutil.which("clip.exe")
     if xclip:
-        subprocess.run([xclip, "-selection", "clipboard"], input=text.encode(), check=False)  # noqa: S603
-        console.print("[dim]Copied to clipboard (xclip)[/dim]")
+        result = subprocess.run(  # noqa: S603
+            [xclip, "-selection", "clipboard"], input=text.encode(), check=False
+        )
+        if result.returncode == 0:
+            console.print("[dim]Copied to clipboard (xclip)[/dim]")
+        else:
+            err.print(f"[yellow]--copy: xclip failed (exit {result.returncode})[/yellow]")
     elif xsel:
-        subprocess.run([xsel, "--clipboard", "--input"], input=text.encode(), check=False)  # noqa: S603
-        console.print("[dim]Copied to clipboard (xsel)[/dim]")
+        result = subprocess.run(  # noqa: S603
+            [xsel, "--clipboard", "--input"], input=text.encode(), check=False
+        )
+        if result.returncode == 0:
+            console.print("[dim]Copied to clipboard (xsel)[/dim]")
+        else:
+            err.print(f"[yellow]--copy: xsel failed (exit {result.returncode})[/yellow]")
     elif clip:
-        subprocess.run([clip], input=text.encode(), check=False)  # noqa: S603
-        console.print("[dim]Copied to clipboard (clip.exe)[/dim]")
+        result = subprocess.run([clip], input=text.encode(), check=False)  # noqa: S603
+        if result.returncode == 0:
+            console.print("[dim]Copied to clipboard (clip.exe)[/dim]")
+        else:
+            err.print(f"[yellow]--copy: clip.exe failed (exit {result.returncode})[/yellow]")
     else:
         err.print("[yellow]--copy: no clipboard tool found (xclip, xsel, clip.exe)[/yellow]")
 

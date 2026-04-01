@@ -275,18 +275,13 @@ def test_context_cmd_no_notebook_path(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_context_cmd_renders_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    aya_home = tmp_path / "aya_home"
-    aya_home.mkdir()
     nb = _make_notebook(tmp_path)
     _make_project(nb / "projects", "aya", "Active", "A tool")
     (nb / "todos.md").write_text("- [ ] Do something\n")
     (nb / "inbox.md").write_text("")
     (nb / "daily" / "2026-03-31.md").write_text("")
 
-    import json
-
-    (aya_home / "config.json").write_text(json.dumps({"notebook_path": str(nb)}))
-    monkeypatch.setenv("AYA_HOME", str(aya_home))
+    monkeypatch.setattr("aya.cli.get_notebook_path", lambda: nb)
 
     result = runner.invoke(app, ["context"])
     assert result.exit_code == 0
