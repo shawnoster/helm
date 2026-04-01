@@ -22,7 +22,7 @@ from aya import __version__
 from aya.ci import watch_pr_checks
 from aya.config import get_notebook_path, load_config, set_config_value
 from aya.context import build_context_block
-from aya.identity import Identity, Profile, TrustedKey
+from aya.identity import Identity, Profile, TrustedKey, _assert_valid_ulid
 from aya.install import install_scheduler, uninstall_scheduler
 from aya.packet import ConflictStrategy, ContentType, Packet, human_age
 from aya.pair import (
@@ -575,6 +575,7 @@ def receive(
             now_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             if auto_ingest and trusted:
                 _ingest(packet)
+                _assert_valid_ulid(packet.id)
                 p.ingested_ids.append({"id": packet.id, "ingested_at": now_iso})
                 continue
 
@@ -584,6 +585,7 @@ def receive(
             )
             if ingest:
                 _ingest(packet)
+                _assert_valid_ulid(packet.id)
                 p.ingested_ids.append({"id": packet.id, "ingested_at": now_iso})
                 sender_nostr_pub = _resolve_nostr_pubkey(packet.from_did, p)
                 if sender_nostr_pub:

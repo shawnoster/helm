@@ -134,6 +134,18 @@ def _validate_trusted_key(key: str, data: dict[str, Any]) -> TrustedKey:
         raise ValueError(f"Trusted key '{key}' could not be loaded: {e}") from e
 
 
+def _assert_valid_ulid(id_: str) -> None:
+    """Raise ``ValueError`` if *id_* is not a valid 26-character ULID.
+
+    Call this before appending to ``ingested_ids`` so that truncated display
+    prefixes or other malformed values are rejected at write time.
+    """
+    if not _is_valid_ulid(id_):
+        raise ValueError(
+            f"Refusing to store invalid ULID in ingested_ids (len={len(id_)}): {id_!r}"
+        )
+
+
 def _normalize_ingested_ids(raw: object) -> list[dict[str, str]]:
     """Coerce legacy string entries to the ``{id, ingested_at}`` dict format.
 
@@ -142,7 +154,9 @@ def _normalize_ingested_ids(raw: object) -> list[dict[str, str]]:
     ``ingested_at`` set to the current time so they survive the next TTL prune
     and don't cause an immediate false-re-ingestion.
 
-    Logs warnings for entries with invalid ULIDs but preserves the data.
+    Entries whose ``id`` field is not a valid 26-character ULID are silently
+    dropped.  This serves as a one-time migration that removes any truncated
+    8-character display prefixes that were erroneously stored by older versions.
     """
     if not isinstance(raw, list):
         return []
@@ -150,15 +164,21 @@ def _normalize_ingested_ids(raw: object) -> list[dict[str, str]]:
     result: list[dict[str, str]] = []
     for entry in raw:
         if isinstance(entry, str):
-            # Validate that the string is a valid ULID, but preserve it anyway
             if not _is_valid_ulid(entry):
-                logger.warning("Ingested_id entry has invalid ULID format: %s", entry)
+                logger.warning(
+                    "Dropping ingested_id entry with invalid ULID (len=%d): %r", len(entry), entry
+                )
+                continue
             result.append({"id": entry, "ingested_at": now_iso})
         elif isinstance(entry, dict) and "id" in entry:
-            # Validate ULID in dict entries
-            entry_id = entry.get("id")
-            if entry_id and not _is_valid_ulid(entry_id):
-                logger.warning("Ingested_id entry has invalid ULID format: %s", entry_id)
+            entry_id = entry.get("id", "")
+            if not _is_valid_ulid(entry_id):
+                logger.warning(
+                    "Dropping ingested_id entry with invalid ULID (len=%d): %r",
+                    len(entry_id),
+                    entry_id,
+                )
+                continue
             result.append(entry)
     return result
 

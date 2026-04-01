@@ -6,6 +6,8 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from ulid import ULID
+
 from aya.identity import Identity, Profile, TrustedKey
 
 
@@ -193,11 +195,12 @@ class TestIngestedIdsTTL:
             .isoformat()
             .replace("+00:00", "Z")
         )
-        p.ingested_ids.append({"id": "abc123", "ingested_at": recent_ts})
+        valid_id = str(ULID())
+        p.ingested_ids.append({"id": valid_id, "ingested_at": recent_ts})
         p.save(profile_path)
 
         restored = Profile.load(profile_path)
-        assert any(e["id"] == "abc123" for e in restored.ingested_ids)
+        assert any(e["id"] == valid_id for e in restored.ingested_ids)
 
     def test_old_entries_are_pruned(self, tmp_path: Path) -> None:
         """Entries older than 7 days must be dropped on save."""
@@ -205,22 +208,24 @@ class TestIngestedIdsTTL:
         profile_path.write_text("{}")
 
         p = Profile.load(profile_path)
+        stale_id = str(ULID())
         # Timestamp well beyond the 7-day TTL window
-        p.ingested_ids.append({"id": "stale001", "ingested_at": "2020-01-01T00:00:00Z"})
+        p.ingested_ids.append({"id": stale_id, "ingested_at": "2020-01-01T00:00:00Z"})
         p.save(profile_path)
 
         restored = Profile.load(profile_path)
-        assert not any(e["id"] == "stale001" for e in restored.ingested_ids)
+        assert not any(e["id"] == stale_id for e in restored.ingested_ids)
 
     def test_legacy_string_entries_are_migrated(self, tmp_path: Path) -> None:
-        """Old bare-string ingested_ids must be normalised to dicts on load."""
+        """Old bare-string ingested_ids with valid ULIDs must be normalised to dicts on load."""
         profile_path = tmp_path / "profile.json"
-        profile_path.write_text(json.dumps({"aya": {"ingested_ids": ["legacy_packet_id"]}}))
+        valid_id = str(ULID())
+        profile_path.write_text(json.dumps({"aya": {"ingested_ids": [valid_id]}}))
 
         p = Profile.load(profile_path)
         assert len(p.ingested_ids) == 1
         entry = p.ingested_ids[0]
-        assert entry["id"] == "legacy_packet_id"
+        assert entry["id"] == valid_id
         assert "ingested_at" in entry
 
     def test_save_stores_dicts_not_strings(self, tmp_path: Path) -> None:
@@ -235,11 +240,89 @@ class TestIngestedIdsTTL:
             .isoformat()
             .replace("+00:00", "Z")
         )
-        p.ingested_ids.append({"id": "pkt1", "ingested_at": recent_ts})
+        valid_id = str(ULID())
+        p.ingested_ids.append({"id": valid_id, "ingested_at": recent_ts})
         p.save(profile_path)
 
         raw = json.loads(profile_path.read_text())
         ids = raw["aya"]["ingested_ids"]
         assert len(ids) == 1
-        assert ids[0]["id"] == "pkt1"
+        assert ids[0]["id"] == valid_id
         assert ids[0]["ingested_at"] == recent_ts
+
+
+# ── Issue #123: truncated ULID prefix migration ───────────────────────────────
+
+
+class TestTruncatedUlidMigration:
+    """Guard against truncated 8-char display prefixes being stored in ingested_ids."""
+
+    def test_truncated_entry_dropped_on_load(self, tmp_path: Path) -> None:
+        """Truncated 8-char display prefix must be stripped from ingested_ids on load."""
+        full_id = str(ULID())
+        truncated_id = full_id[:8]
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text(
+            json.dumps(
+                {
+                    "aya": {
+                        "ingested_ids": [
+                            {"id": truncated_id, "ingested_at": "2026-03-30T06:00:21Z"},
+                            {"id": full_id, "ingested_at": "2026-03-30T06:00:21Z"},
+                        ]
+                    }
+                }
+            )
+        )
+
+        p = Profile.load(profile_path)
+        ids = [e["id"] for e in p.ingested_ids]
+        assert full_id in ids, "Full ULID must be retained"
+        assert truncated_id not in ids, "Truncated 8-char prefix must be dropped"
+        assert len(ids) == 1, "Exactly one entry must remain after migration"
+
+    def test_only_full_ulid_written_to_ingested_ids(self, tmp_path: Path) -> None:
+        """Only the full 26-character ULID must appear in ingested_ids after save/load."""
+        full_id = str(ULID())
+        recent_ts = (
+            (datetime.now(UTC) - timedelta(days=1))
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text("{}")
+
+        p = Profile.load(profile_path)
+        p.ingested_ids.append({"id": full_id, "ingested_at": recent_ts})
+        p.save(profile_path)
+
+        raw = json.loads(profile_path.read_text())
+        ids = raw["aya"]["ingested_ids"]
+        assert len(ids) == 1
+        assert ids[0]["id"] == full_id
+        assert len(ids[0]["id"]) == 26
+
+    def test_assert_valid_ulid_accepts_full_id(self) -> None:
+        """_assert_valid_ulid must not raise for a valid 26-char ULID."""
+        from aya.identity import _assert_valid_ulid
+
+        _assert_valid_ulid(str(ULID()))  # must not raise
+
+    def test_assert_valid_ulid_rejects_truncated(self) -> None:
+        """_assert_valid_ulid must raise ValueError for an 8-char display prefix."""
+        import pytest
+
+        from aya.identity import _assert_valid_ulid
+
+        truncated = str(ULID())[:8]
+        with pytest.raises(ValueError, match="invalid ULID"):
+            _assert_valid_ulid(truncated)
+
+    def test_legacy_bare_string_invalid_ulid_dropped(self, tmp_path: Path) -> None:
+        """Legacy bare-string entries that are not valid ULIDs must be dropped, not migrated."""
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text(json.dumps({"aya": {"ingested_ids": ["01KMEWBY"]}}))
+
+        p = Profile.load(profile_path)
+        assert p.ingested_ids == [], "Invalid bare-string ULID must be dropped on load"
