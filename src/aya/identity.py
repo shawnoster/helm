@@ -154,9 +154,10 @@ def _normalize_ingested_ids(raw: object) -> list[dict[str, str]]:
     ``ingested_at`` set to the current time so they survive the next TTL prune
     and don't cause an immediate false-re-ingestion.
 
-    Entries whose ``id`` field is not a valid 26-character ULID are silently
-    dropped.  This serves as a one-time migration that removes any truncated
-    8-character display prefixes that were erroneously stored by older versions.
+    Entries whose ``id`` field is not a valid 26-character ULID are dropped,
+    with a warning logged.  This serves as a one-time migration that removes any
+    truncated 8-character display prefixes that were erroneously stored by older
+    versions.
     """
     if not isinstance(raw, list):
         return []
@@ -173,9 +174,10 @@ def _normalize_ingested_ids(raw: object) -> list[dict[str, str]]:
         elif isinstance(entry, dict) and "id" in entry:
             entry_id = entry.get("id", "")
             if not _is_valid_ulid(entry_id):
+                entry_len = len(entry_id) if isinstance(entry_id, str) else 0
                 logger.warning(
                     "Dropping ingested_id entry with invalid ULID (len=%d): %r",
-                    len(entry_id),
+                    entry_len,
                     entry_id,
                 )
                 continue
