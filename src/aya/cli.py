@@ -574,8 +574,8 @@ def receive(
 
             now_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             if auto_ingest and trusted:
-                _ingest(packet)
                 _assert_valid_ulid(packet.id)
+                _ingest(packet)
                 p.ingested_ids.append({"id": packet.id, "ingested_at": now_iso})
                 continue
 
@@ -584,8 +584,8 @@ def receive(
                 default=trusted,
             )
             if ingest:
-                _ingest(packet)
                 _assert_valid_ulid(packet.id)
+                _ingest(packet)
                 p.ingested_ids.append({"id": packet.id, "ingested_at": now_iso})
                 sender_nostr_pub = _resolve_nostr_pubkey(packet.from_did, p)
                 if sender_nostr_pub:

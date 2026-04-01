@@ -6,9 +6,10 @@ import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from ulid import ULID
 
-from aya.identity import Identity, Profile, TrustedKey
+from aya.identity import Identity, Profile, TrustedKey, _assert_valid_ulid
 
 
 class TestIdentityGeneration:
@@ -305,16 +306,10 @@ class TestTruncatedUlidMigration:
 
     def test_assert_valid_ulid_accepts_full_id(self) -> None:
         """_assert_valid_ulid must not raise for a valid 26-char ULID."""
-        from aya.identity import _assert_valid_ulid
-
         _assert_valid_ulid(str(ULID()))  # must not raise
 
     def test_assert_valid_ulid_rejects_truncated(self) -> None:
         """_assert_valid_ulid must raise ValueError for an 8-char display prefix."""
-        import pytest
-
-        from aya.identity import _assert_valid_ulid
-
         truncated = str(ULID())[:8]
         with pytest.raises(ValueError, match="invalid ULID"):
             _assert_valid_ulid(truncated)
