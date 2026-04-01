@@ -525,7 +525,9 @@ def dispatch(
 @app.command()
 def ack(
     packet_id: str = typer.Argument(help="Packet ID or prefix to acknowledge"),
-    message: str = typer.Argument(None, help="Short reply message (default: 'acknowledged')"),
+    message: str | None = typer.Argument(
+        None, help="Short reply message (default: 'acknowledged')"
+    ),
     dismiss: bool = typer.Option(
         False, "--dismiss", help="No-action acknowledgment; message defaults to 'acknowledged'"
     ),
@@ -541,7 +543,10 @@ def ack(
         p = _load_profile(profile)
         local = _resolve_instance(p, as_)
 
-        # Resolve full packet ID from ingested_ids (prefix match)
+        # Resolve full packet ID from ingested_ids (prefix match, min 8 chars)
+        if len(packet_id) < 8:
+            err.print("[red]Packet ID prefix must be at least 8 characters.[/red]")
+            raise typer.Exit(1)
         ingested_ids = [entry["id"] for entry in p.ingested_ids]
         matched = [pid for pid in ingested_ids if pid.startswith(packet_id)]
         if not matched:
