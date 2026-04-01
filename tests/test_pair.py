@@ -19,6 +19,7 @@ from aya.pair import (
     _build_pair_request,
     _build_pair_response,
     _find_pair_request,
+    _find_pair_request_with_retry,
     generate_code,
     hash_code,
     join_pairing,
@@ -263,6 +264,94 @@ class TestPairingFlowMocked:
             result = await _find_pair_request("wss://relay.test", "nonexistent_hash")
 
         assert result is None
+
+    async def test_join_pairing_not_found_error_message(self, home):
+        """PairingError raised when no request is found must list actionable causes."""
+        from aya.pair import PairingError
+
+        with (
+            patch("aya.pair._find_pair_request_with_retry", return_value=None),
+            pytest.raises(PairingError) as exc_info,
+        ):
+            await join_pairing(home, "WRONG-CODE-0000", "wss://relay.test")
+
+        msg = str(exc_info.value)
+        assert "Wrong code" in msg
+        assert "Expired" in msg
+        assert "propagation lag" in msg or "relay propagation" in msg.lower()
+        assert "Relay mismatch" in msg or "relay mismatch" in msg.lower()
+        assert "retry" in msg.lower()
+
+    async def test_find_pair_request_with_retry_succeeds_first_try(self):
+        """Returns immediately when the first attempt finds a match."""
+        fake_event = {"id": "abc", "pubkey": "xyz", "content": "{}"}
+        call_count = 0
+
+        async def fake_find(relay_urls, code_hash):
+            nonlocal call_count
+            call_count += 1
+            return fake_event
+
+        with patch("aya.pair._find_pair_request", side_effect=fake_find):
+            result = await _find_pair_request_with_retry(["wss://relay.test"], "hash")
+
+        assert result == fake_event
+        assert call_count == 1
+
+    async def test_find_pair_request_with_retry_retries_on_not_found(self):
+        """Retries with backoff when relay returns None (propagation lag scenario)."""
+        fake_event = {"id": "abc", "pubkey": "xyz", "content": "{}"}
+        call_count = 0
+
+        async def fake_find(relay_urls, code_hash):
+            nonlocal call_count
+            call_count += 1
+            # Return None for first two calls, then succeed
+            return fake_event if call_count >= 3 else None
+
+        sleep_calls = []
+
+        async def fake_sleep(t):
+            sleep_calls.append(t)
+
+        with (
+            patch("aya.pair._find_pair_request", side_effect=fake_find),
+            patch("aya.pair.asyncio.sleep", side_effect=fake_sleep),
+        ):
+            result = await _find_pair_request_with_retry(
+                ["wss://relay.test"], "hash", _delays=(1, 2, 4)
+            )
+
+        assert result == fake_event
+        assert call_count == 3
+        # Two retries → two sleeps with the first two delay values
+        assert sleep_calls == [1, 2]
+
+    async def test_find_pair_request_with_retry_gives_up_after_max_retries(self):
+        """Returns None after exhausting all retry attempts."""
+        call_count = 0
+
+        async def fake_find(relay_urls, code_hash):
+            nonlocal call_count
+            call_count += 1
+
+        sleep_calls = []
+
+        async def fake_sleep(t):
+            sleep_calls.append(t)
+
+        with (
+            patch("aya.pair._find_pair_request", side_effect=fake_find),
+            patch("aya.pair.asyncio.sleep", side_effect=fake_sleep),
+        ):
+            result = await _find_pair_request_with_retry(
+                ["wss://relay.test"], "hash", _delays=(1, 2, 4)
+            )
+
+        assert result is None
+        # 1 initial attempt + 3 retries = 4 total calls, 3 sleeps
+        assert call_count == 4
+        assert sleep_calls == [1, 2, 4]
 
 
 class TestPollForPairResponseErrors:

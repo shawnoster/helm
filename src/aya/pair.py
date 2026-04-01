@@ -479,10 +479,20 @@ async def join_pairing(
     relay_urls = [relay_url] if isinstance(relay_url, str) else relay_url
     code_h = hash_code(code)
 
-    # Find the pair request on any relay
-    request = await _find_pair_request(relay_urls, code_h)
+    # Find the pair request on any relay, with retry backoff
+    request = await _find_pair_request_with_retry(relay_urls, code_h)
     if not request:
-        raise PairingError("No matching pairing request found. Check the code and try again.")
+        raise PairingError(
+            "No matching pairing request found.\n"
+            "\n"
+            "Possible causes:\n"
+            "  • Wrong code — double-check the code and try again\n"
+            "  • Expired — pairing codes are valid for 10 minutes\n"
+            "  • Relay propagation lag — the request may not have synced yet\n"
+            "  • Relay mismatch — both sides must use the same relay\n"
+            "\n"
+            "Wait a few seconds and retry, or restart the pairing flow."
+        )
 
     req_content = json.loads(request["content"])
     initiator_did = req_content["did"]
@@ -613,6 +623,36 @@ async def _find_pair_request(relay_url: str | list[str], code_hash: str) -> dict
                 await ws.send(json.dumps(["CLOSE", sub_id]))
         except Exception as exc:
             logger.warning("Failed to query %s for pair request: %s", url, exc)
+    return None
+
+
+_FIND_RETRY_DELAYS = (1, 2, 4)  # seconds — exponential backoff for not-found retries
+
+
+async def _find_pair_request_with_retry(
+    relay_urls: list[str], code_hash: str, *, _delays: tuple[int, ...] = _FIND_RETRY_DELAYS
+) -> dict | None:
+    """Wrap :func:`_find_pair_request` with exponential backoff for "not found" results.
+
+    Relays may lag behind on propagation, so retry up to ``len(_delays)`` times
+    with increasing waits (1 s, 2 s, 4 s) before giving up.  Connection errors
+    inside ``_find_pair_request`` are already logged there; here we only retry
+    on a clean ``None`` (no matching event found yet).
+    """
+    result = await _find_pair_request(relay_urls, code_hash)
+    if result is not None:
+        return result
+    for attempt, delay in enumerate(_delays, start=1):
+        logger.debug(
+            "Pair request not found (attempt %d/%d); retrying in %ds",
+            attempt,
+            len(_delays),
+            delay,
+        )
+        await asyncio.sleep(delay)
+        result = await _find_pair_request(relay_urls, code_hash)
+        if result is not None:
+            return result
     return None
 
 

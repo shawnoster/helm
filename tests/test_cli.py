@@ -796,7 +796,7 @@ class TestDispatch:
                 input="data\n",
             )
         assert result.exit_code != 0
-        assert "Could not reach relay" in result.output
+        assert "Dispatch failed" in result.output
 
 
 # ── schedule status ──────────────────────────────────────────────────────────
