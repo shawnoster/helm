@@ -519,6 +519,134 @@ def dispatch(
     asyncio.run(_run())
 
 
+# ── ack ───────────────────────────────────────────────────────────────────────
+
+
+@app.command()
+def ack(
+    packet_id: str = typer.Argument(help="Packet ID or prefix to acknowledge"),
+    message: str = typer.Argument(None, help="Short reply message (default: 'acknowledged')"),
+    dismiss: bool = typer.Option(
+        False, "--dismiss", help="No-action acknowledgment; message defaults to 'acknowledged'"
+    ),
+    as_: str = typer.Option(
+        "default", "--as", "--instance", help="Local identity to act as (legacy alias: --instance)"
+    ),
+    relay: str = typer.Option(None, help="Relay URL (overrides profile default)"),
+    profile: Path = typer.Option(DEFAULT_PROFILE),
+) -> None:
+    """Acknowledge a received seed packet — sends a reply back to the sender."""
+
+    async def _run() -> None:
+        p = _load_profile(profile)
+        local = _resolve_instance(p, as_)
+
+        # Resolve full packet ID from ingested_ids (prefix match)
+        ingested_ids = [entry["id"] for entry in p.ingested_ids]
+        matched = [pid for pid in ingested_ids if pid.startswith(packet_id)]
+        if not matched:
+            err.print(
+                f"[red]Packet ID '{packet_id}' not found in ingested_ids.[/red]\n"
+                "Only ingested packets can be acknowledged."
+            )
+            raise typer.Exit(1)
+        if len(matched) > 1:
+            err.print(
+                f"[red]Ambiguous prefix '{packet_id}' — matches {len(matched)} packets:[/red]\n"
+                + "\n".join(f"  {pid}" for pid in matched)
+            )
+            raise typer.Exit(1)
+
+        full_packet_id = matched[0]
+
+        # Determine the sender's DID — look through trusted keys for a packet
+        # that arrived from a known peer.  Since we don't store per-packet
+        # sender metadata in ingested_ids, we must find the original sender
+        # via the relay or trusted keys.  As a best-effort, look up a single
+        # trusted key (the common case for cross-instance ACK) or require the
+        # user to specify.
+        #
+        # Strategy: if there is exactly one trusted peer with a Nostr pubkey,
+        # use them.  If there are multiple, the user must disambiguate with
+        # a DID or peer label via --to (future enhancement).  For now emit a
+        # helpful error when ambiguous.
+        trusted_with_nostr = [
+            (label, tk) for label, tk in p.trusted_keys.items() if tk.nostr_pubkey
+        ]
+
+        if not trusted_with_nostr:
+            err.print(
+                "[red]No trusted peers with a Nostr pubkey found.[/red]\n"
+                "Pair with the sender first: [bold]aya pair[/bold]"
+            )
+            raise typer.Exit(1)
+
+        if len(trusted_with_nostr) > 1:
+            # Can't auto-resolve; surface a helpful message.
+            names = ", ".join(lbl for lbl, _ in trusted_with_nostr)
+            err.print(
+                "[red]Multiple trusted peers — cannot determine ACK recipient.[/red]\n"
+                f"Available: [cyan]{names}[/cyan]\n"
+                "[dim]Support for --to <peer> will be added in a future release.[/dim]"
+            )
+            raise typer.Exit(1)
+
+        to_label, to_key = trusted_with_nostr[0]
+        to_did = to_key.did
+        recipient_nostr_pub = to_key.nostr_pubkey  # guaranteed non-None above
+
+        reply_text = message if message else "acknowledged"
+
+        ack_packet = Packet(
+            **{"from": local.did, "to": to_did},
+            intent="ack",
+            content_type=ContentType.JSON,
+            content={
+                "in_reply_to": full_packet_id,
+                "message": reply_text,
+                "dismiss": dismiss,
+            },
+            in_reply_to=full_packet_id,
+        )
+        signed = ack_packet.sign(local)
+
+        relay_urls = [relay] if relay else p.default_relays
+        client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
+        try:
+            event_id = await client.publish(signed, recipient_nostr_pub, encrypt=True)
+        except Exception:
+            err.print("[yellow]Could not reach relay — ack failed.[/yellow]")
+            raise typer.Exit(1) from None
+
+        # Mark any matching seed alert as seen (best-effort)
+        try:
+            alerts = show_alerts(mark_seen=False)
+            for alert in alerts:
+                if alert.get("source_item_id", "").startswith(packet_id):
+                    dismiss_alert(alert["id"])
+                    break
+        except Exception:  # noqa: S110
+            pass  # alert cleanup is best-effort; do not block the ACK response
+
+        relay_count = len(relay_urls)
+        relay_display = (
+            relay_urls[0] if relay_count == 1 else f"{relay_urls[0]} (+{relay_count - 1})"
+        )
+        console.print(
+            Panel.fit(
+                f"[bold green]✓ ACK sent[/bold green]\n\n"
+                f"In reply to: [dim]{full_packet_id[:8]}[/dim]\n"
+                f"To:          [dim]{to_label}[/dim]\n"
+                f"Message:     [cyan]{reply_text}[/cyan]\n"
+                f"Event:       [dim]{event_id[:8]}[/dim]\n"
+                f"Relay:       [dim]{relay_display}[/dim]",
+                title="aya — ack",
+            )
+        )
+
+    asyncio.run(_run())
+
+
 # ── receive ───────────────────────────────────────────────────────────────────
 
 

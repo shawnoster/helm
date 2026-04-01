@@ -61,6 +61,7 @@ class Packet(BaseModel):
     content_type: ContentType = ContentType.MARKDOWN
     content: str | dict[str, Any] = ""
     reply_to: str | None = None
+    in_reply_to: str | None = None
     conflict_strategy: ConflictStrategy = ConflictStrategy.LAST_WRITE_WINS
     tags: list[str] = Field(default_factory=list)
     encrypted: bool = False
