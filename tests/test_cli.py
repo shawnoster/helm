@@ -1519,3 +1519,246 @@ class TestAutoFormat:
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
         assert "version" in data
+
+
+# ── deprecation warnings ──────────────────────────────────────────────────────
+
+
+class TestDeprecationWarnings:
+    """Verify that legacy flags emit deprecation warnings and still work correctly."""
+
+    def test_trust_label_warns(self, profile_with_instance: Path) -> None:
+        """--label on trust emits a deprecation warning to stderr."""
+        home = Identity.generate("home")
+        result = runner.invoke(
+            app,
+            [
+                "trust",
+                home.did,
+                "--label",
+                "home",
+                "--profile",
+                str(profile_with_instance),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        stderr = result.stderr or ""
+        assert "deprecated" in stderr
+        assert "--peer" in stderr
+
+    def test_trust_peer_no_warning(self, profile_with_instance: Path) -> None:
+        """--peer on trust does NOT emit a deprecation warning."""
+        home = Identity.generate("home")
+        result = runner.invoke(
+            app,
+            [
+                "trust",
+                home.did,
+                "--peer",
+                "home",
+                "--profile",
+                str(profile_with_instance),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        stderr = result.stderr or ""
+        assert "deprecated" not in stderr
+
+    def test_pair_label_warns(self, profile_with_instance: Path) -> None:
+        """--label on pair emits a deprecation warning to stderr."""
+        from unittest.mock import patch
+
+        from aya.pair import TrustedKey as PairTrustedKey
+
+        local_identity = Identity.generate("remote-host")
+        p = Profile.load(profile_with_instance)
+        p.instances["remote-host"] = local_identity
+        p.save(profile_with_instance)
+
+        peer_identity = Identity.generate("peer-host")
+        mock_trusted = PairTrustedKey(
+            did=peer_identity.did,
+            label="peer-host",
+            nostr_pubkey=peer_identity.nostr_public_hex,
+        )
+
+        with (
+            patch("aya.cli.generate_code", return_value="ABCD1234"),
+            patch("aya.cli.hash_code", return_value="deadbeef"),
+            patch("aya.cli.publish_pair_request"),
+            patch("aya.cli.poll_for_pair_response", return_value=mock_trusted),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "pair",
+                    "--label",
+                    "peer-host",
+                    "--as",
+                    "remote-host",
+                    "--profile",
+                    str(profile_with_instance),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        stderr = result.stderr or ""
+        assert "deprecated" in stderr
+        assert "--peer" in stderr
+
+    def test_pair_peer_no_warning(self, profile_with_instance: Path) -> None:
+        """--peer on pair does NOT emit a deprecation warning."""
+        from unittest.mock import patch
+
+        from aya.pair import TrustedKey as PairTrustedKey
+
+        local_identity = Identity.generate("remote-host")
+        p = Profile.load(profile_with_instance)
+        p.instances["remote-host"] = local_identity
+        p.save(profile_with_instance)
+
+        peer_identity = Identity.generate("peer-host")
+        mock_trusted = PairTrustedKey(
+            did=peer_identity.did,
+            label="peer-host",
+            nostr_pubkey=peer_identity.nostr_public_hex,
+        )
+
+        with (
+            patch("aya.cli.generate_code", return_value="ABCD1234"),
+            patch("aya.cli.hash_code", return_value="deadbeef"),
+            patch("aya.cli.publish_pair_request"),
+            patch("aya.cli.poll_for_pair_response", return_value=mock_trusted),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "pair",
+                    "--peer",
+                    "peer-host",
+                    "--as",
+                    "remote-host",
+                    "--profile",
+                    str(profile_with_instance),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        stderr = result.stderr or ""
+        assert "deprecated" not in stderr
+
+    def test_pack_instance_warns(self, profile_with_trusted: Path, tmp_path: Path) -> None:
+        """--instance on pack emits a deprecation warning to stderr."""
+        out_file = tmp_path / "packet.json"
+        result = runner.invoke(
+            app,
+            [
+                "pack",
+                "--to",
+                "home",
+                "--intent",
+                "legacy flag test",
+                "--out",
+                str(out_file),
+                "--instance",
+                "default",  # uses the "default" instance which must exist in the fixture
+                "--profile",
+                str(profile_with_trusted),
+            ],
+            input="test content\n",
+        )
+        assert result.exit_code == 0, result.output
+        stderr = result.stderr or ""
+        assert "deprecated" in stderr
+        assert "--as" in stderr
+
+    def test_pack_instance_and_as_together_errors(
+        self, profile_with_trusted: Path, tmp_path: Path
+    ) -> None:
+        """Passing both --as and --instance is a usage error (exit 2)."""
+        out_file = tmp_path / "packet.json"
+        result = runner.invoke(
+            app,
+            [
+                "pack",
+                "--to",
+                "home",
+                "--intent",
+                "conflict test",
+                "--out",
+                str(out_file),
+                "--as",
+                "work",
+                "--instance",
+                "home",
+                "--profile",
+                str(profile_with_trusted),
+            ],
+            input="test content\n",
+        )
+        assert result.exit_code == 2
+        stderr = result.stderr or result.output
+        assert "Cannot use" in stderr
+
+    def test_pack_as_no_warning(self, profile_with_trusted: Path, tmp_path: Path) -> None:
+        """--as on pack does NOT emit a deprecation warning."""
+        out_file = tmp_path / "packet.json"
+        result = runner.invoke(
+            app,
+            [
+                "pack",
+                "--to",
+                "home",
+                "--intent",
+                "new flag test",
+                "--out",
+                str(out_file),
+                "--as",
+                "default",
+                "--profile",
+                str(profile_with_trusted),
+            ],
+            input="test content\n",
+        )
+        assert result.exit_code == 0, result.output
+        stderr = result.stderr or ""
+        assert "deprecated" not in stderr
+
+    def test_pair_instance_warns(self, profile_with_instance: Path) -> None:
+        """--instance on pair emits a deprecation warning to stderr."""
+        from unittest.mock import patch
+
+        from aya.pair import TrustedKey as PairTrustedKey
+
+        local_identity = Identity.generate("remote-host")
+        p = Profile.load(profile_with_instance)
+        p.instances["remote-host"] = local_identity
+        p.save(profile_with_instance)
+
+        peer_identity = Identity.generate("peer-host")
+        mock_trusted = PairTrustedKey(
+            did=peer_identity.did,
+            label="peer-host",
+            nostr_pubkey=peer_identity.nostr_public_hex,
+        )
+
+        with (
+            patch("aya.cli.generate_code", return_value="ABCD1234"),
+            patch("aya.cli.hash_code", return_value="deadbeef"),
+            patch("aya.cli.publish_pair_request"),
+            patch("aya.cli.poll_for_pair_response", return_value=mock_trusted),
+        ):
+            result = runner.invoke(
+                app,
+                [
+                    "pair",
+                    "--peer",
+                    "peer-host",
+                    "--instance",
+                    "remote-host",
+                    "--profile",
+                    str(profile_with_instance),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        stderr = result.stderr or ""
+        assert "deprecated" in stderr
+        assert "--as" in stderr

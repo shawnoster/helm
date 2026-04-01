@@ -259,9 +259,8 @@ def init(
 @app.command()
 def trust(
     did: str = typer.Argument(help="DID to trust (did:key:z6Mk…)"),
-    peer: str = typer.Option(
-        ..., "--peer", "--label", help="Name for the remote peer (legacy alias: --label)"
-    ),
+    peer: str = typer.Option(None, "--peer", help="Name for the remote peer"),
+    label: str = typer.Option(None, "--label", help="[deprecated] Use --peer instead", hidden=True),
     nostr_pubkey: str = typer.Option(
         None,
         help="Nostr pubkey hex (required for send/receive; pairing fills this automatically)",
@@ -269,6 +268,15 @@ def trust(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Add a DID to your trusted keys list."""
+    if label is not None and peer is not None:
+        err.print("[red]Cannot use --peer and --label together. Use --peer only.[/red]")
+        raise typer.Exit(2)
+    if label is not None:
+        err.print("[yellow]Warning: --label is deprecated, use --peer instead[/yellow]")
+        peer = label
+    if peer is None:
+        err.print("[red]Missing option '--peer'.[/red]")
+        raise typer.Exit(2)
     p = _load_profile(profile)
     p.trusted_keys[peer] = TrustedKey(
         did=did,
@@ -296,8 +304,9 @@ def pack(
     seed: bool = typer.Option(False, help="Create a conversation seed instead of content"),
     opener: str = typer.Option(None, help="[seed] Opening question for the receiving assistant"),
     out: Path = typer.Option(None, help="Write packet JSON to file (default: stdout)"),
-    as_: str = typer.Option(
-        "default", "--as", "--instance", help="Local identity to act as (legacy alias: --instance)"
+    as_: str = typer.Option("default", "--as", help="Local identity to act as"),
+    instance: str = typer.Option(
+        None, "--instance", help="[deprecated] Use --as instead", hidden=True
     ),
     conflict: ConflictStrategy = typer.Option(
         ConflictStrategy.LAST_WRITE_WINS, help="Conflict resolution strategy"
@@ -305,6 +314,12 @@ def pack(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Pack a knowledge packet ready to send."""
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
+    if instance is not None:
+        err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
+        as_ = instance
     p = _load_profile(profile)
     local = _resolve_instance(p, as_)
 
@@ -358,12 +373,19 @@ def pack(
 def send(
     packet_file: Path = typer.Argument(help="Packet JSON file to send"),
     relay: str = typer.Option(None, help="Relay URL (overrides profile default)"),
-    as_: str = typer.Option(
-        "default", "--as", "--instance", help="Local identity to act as (legacy alias: --instance)"
+    as_: str = typer.Option("default", "--as", help="Local identity to act as"),
+    instance: str = typer.Option(
+        None, "--instance", help="[deprecated] Use --as instead", hidden=True
     ),
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Send a packet to a Nostr relay."""
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
+    if instance is not None:
+        err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
+        as_ = instance
     p = _load_profile(profile)
     local = _resolve_instance(p, as_)
 
@@ -395,8 +417,9 @@ def dispatch(
     context: str = typer.Option(None, help="Annotation for the receiving assistant"),
     seed: bool = typer.Option(False, help="Create a conversation seed instead of content"),
     opener: str = typer.Option(None, help="[seed] Opening question for the receiving assistant"),
-    as_: str = typer.Option(
-        "default", "--as", "--instance", help="Local identity to act as (legacy alias: --instance)"
+    as_: str = typer.Option("default", "--as", help="Local identity to act as"),
+    instance: str = typer.Option(
+        None, "--instance", help="[deprecated] Use --as instead", hidden=True
     ),
     relay: str = typer.Option(None, help="Relay URL (overrides profile default)"),
     conflict: ConflictStrategy = typer.Option(
@@ -408,6 +431,12 @@ def dispatch(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Pack and send in one step — the natural 'pack for home' flow."""
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
+    if instance is not None:
+        err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
+        as_ = instance
 
     async def _run() -> None:
         p = _load_profile(profile)
@@ -496,8 +525,9 @@ def dispatch(
 @app.command()
 def receive(
     relay: str = typer.Option(None),
-    as_: str = typer.Option(
-        "default", "--as", "--instance", help="Local identity to act as (legacy alias: --instance)"
+    as_: str = typer.Option("default", "--as", help="Local identity to act as"),
+    instance: str = typer.Option(
+        None, "--instance", help="[deprecated] Use --as instead", hidden=True
     ),
     auto_ingest: bool = typer.Option(False, help="Ingest all trusted packets without prompting"),
     yes: bool = typer.Option(
@@ -509,6 +539,12 @@ def receive(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Poll for pending packets and surface them for review."""
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
+    if instance is not None:
+        err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
+        as_ = instance
 
     async def _run() -> None:
         p = _load_profile(profile)
@@ -610,8 +646,9 @@ def receive(
 @app.command()
 def inbox(
     relay: str = typer.Option(None),
-    as_: str = typer.Option(
-        "default", "--as", "--instance", help="Local identity to act as (legacy alias: --instance)"
+    as_: str = typer.Option("default", "--as", help="Local identity to act as"),
+    instance: str = typer.Option(
+        None, "--instance", help="[deprecated] Use --as instead", hidden=True
     ),
     format_: OutputFormat = typer.Option(
         OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
@@ -622,6 +659,12 @@ def inbox(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """List pending packets without ingesting."""
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
+    if instance is not None:
+        err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
+        as_ = instance
     format_ = resolve_format(format_)
 
     async def _run() -> None:
@@ -658,16 +701,34 @@ def inbox(
 @app.command()
 def pair(
     code: str = typer.Option(None, help="Pairing code from the other instance (joiner mode)"),
-    peer: str = typer.Option(
-        ..., "--peer", "--label", help="Name for the remote peer (legacy alias: --label)"
-    ),
-    as_: str = typer.Option(
-        "default", "--as", "--instance", help="Local identity to act as (legacy alias: --instance)"
+    peer: str = typer.Option(None, "--peer", help="Name for the remote peer"),
+    label: str = typer.Option(None, "--label", help="[deprecated] Use --peer instead", hidden=True),
+    as_: str = typer.Option("default", "--as", help="Local identity to act as"),
+    instance: str = typer.Option(
+        None, "--instance", help="[deprecated] Use --as instead", hidden=True
     ),
     relay: str = typer.Option(None, help="Relay URL (overrides profile default)"),
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Pair two instances with a short-lived code — no manual DID exchange."""
+    if label is not None and peer is not None:
+        err.print("[red]Cannot use --peer and --label together. Use --peer only.[/red]")
+        raise typer.Exit(2)
+    if label is not None:
+        err.print("[yellow]Warning: --label is deprecated, use --peer instead[/yellow]")
+        peer = label
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
+    if instance is not None:
+        err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
+        as_ = instance
+    if peer is None:
+        err.print("[red]Missing option '--peer'.[/red]")
+        raise typer.Exit(2)
     p = _load_profile(profile)
     local = _resolve_instance(p, as_)
 
