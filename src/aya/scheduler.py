@@ -32,7 +32,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, NotRequired, TypedDict, cast, overload
 from zoneinfo import ZoneInfo
 
 from aya import paths as _paths
@@ -61,6 +61,171 @@ CONDITION_APPROVED_OR_MERGED = "approved_or_merged"
 CONDITION_MERGED = "merged"
 CONDITION_NEW_RESULTS = "new_results"
 CONDITION_STATUS_CHANGED = "status_changed"
+
+# ── TypedDict schemas ────────────────────────────────────────────────────────
+
+
+class SchedulerItem(TypedDict):
+    """Base fields present on every scheduler item."""
+
+    id: str
+    type: str
+    status: str
+    created_at: str
+    message: str
+    tags: list[str]
+    session_required: bool
+    # Reminder-specific (absent on watch / recurring items)
+    due_at: NotRequired[str]
+    delivered_at: NotRequired[str | None]
+    snoozed_until: NotRequired[str | None]
+    # Watch-specific
+    provider: NotRequired[str]
+    watch_config: NotRequired[GithubPrConfig | JiraQueryConfig | JiraTicketConfig]
+    condition: NotRequired[str]
+    poll_interval_minutes: NotRequired[int]
+    last_checked_at: NotRequired[str | None]
+    last_state: NotRequired[WatchState | None]
+    remove_when: NotRequired[str]
+    # Recurring-specific
+    cron: NotRequired[str]
+    prompt: NotRequired[str]
+    idle_back_off: NotRequired[str]
+    only_during: NotRequired[str]
+    # Event-specific
+    trigger: NotRequired[str]
+
+
+class AlertDetails(TypedDict, total=False):
+    """Details payload stored inside an AlertItem.  All fields are optional
+    because different alert sources populate different subsets."""
+
+    # Generic reminder detail
+    due_at: str
+    # Seed-packet detail
+    type: str
+    intent: str
+    opener: str
+    context_summary: str
+    open_questions: list[str]
+    from_label: str
+    body: str
+    # Watch-state snapshot fields (GitHub PR)
+    pr_state: str
+    merged: bool
+    draft: bool
+    title: str
+    reviews: list[dict[str, Any]]
+    has_approval: bool
+    # Watch-state snapshot fields (Jira query)
+    total: int
+    issues: list[dict[str, Any]]
+    # Watch-state snapshot fields (Jira ticket)
+    key: str
+    summary: str
+    status: str
+    assignee: str
+
+
+class AlertItem(TypedDict):
+    """A persisted alert record."""
+
+    id: str
+    source_item_id: str
+    created_at: str
+    message: str
+    details: AlertDetails
+    seen: bool
+    delivered_at: NotRequired[str]
+    delivered_by: NotRequired[str]
+
+
+class ClaimData(TypedDict):
+    """Contents of a `.claimed` file used for alert-delivery deduplication."""
+
+    instance: str
+    claimed_at: str
+    ttl_seconds: int
+
+
+class GithubPrConfig(TypedDict):
+    """watch_config for a github-pr watch."""
+
+    owner: str
+    repo: str
+    pr: int
+
+
+class JiraQueryConfig(TypedDict):
+    """watch_config for a jira-query watch."""
+
+    jql: str
+
+
+class JiraTicketConfig(TypedDict):
+    """watch_config for a jira-ticket watch."""
+
+    ticket: str
+
+
+class GithubPrState(TypedDict):
+    """State snapshot returned by _check_github_pr."""
+
+    pr_state: str | None
+    merged: bool
+    draft: bool
+    title: str
+    reviews: list[dict[str, Any]]
+    has_approval: bool
+
+
+class JiraQueryState(TypedDict):
+    """State snapshot returned by _check_jira_query."""
+
+    total: int
+    issues: list[dict[str, Any]]
+
+
+class JiraTicketState(TypedDict):
+    """State snapshot returned by _check_jira_ticket."""
+
+    key: str
+    summary: str
+    status: str
+    assignee: str
+
+
+# Union of all possible watch-state shapes
+WatchState = GithubPrState | JiraQueryState | JiraTicketState
+
+
+class SuppressedCron(TypedDict):
+    """Entry in the suppressed_crons list returned by get_session_crons."""
+
+    item: SchedulerItem
+    reason: str
+
+
+class PendingResult(TypedDict):
+    """Return value of get_pending()."""
+
+    alerts: list[AlertItem]
+    session_crons: list[SchedulerItem]
+    suppressed_crons: list[SuppressedCron]
+    instance_id: str
+
+
+class SchedulerStatus(TypedDict):
+    """Return value of get_scheduler_status()."""
+
+    active_watches: list[SchedulerItem]
+    pending_reminders: list[SchedulerItem]
+    session_crons: list[SchedulerItem]
+    unseen_alerts: list[AlertItem]
+    recent_deliveries: list[AlertItem]
+    total_items: int
+    total_alerts: int
+
 
 # ── Module-level path accessors ─────────────────────────────────────────────
 # These functions check module globals first so monkeypatch still works in
@@ -520,22 +685,22 @@ def sweep_stale_claims(max_age_seconds: int = 86400) -> int:
 # ── storage ──────────────────────────────────────────────────────────────────
 
 
-def load_items() -> list[dict[str, Any]]:
+def load_items() -> list[SchedulerItem]:
     data = _locked_read(_scheduler_file())
     return data.get("items", []) if data else []
 
 
-def save_items(items: list[dict[str, Any]]) -> None:
+def save_items(items: list[SchedulerItem]) -> None:
     with _file_lock():
         _atomic_write(_scheduler_file(), {"items": items})
 
 
-def load_alerts() -> list[dict[str, Any]]:
+def load_alerts() -> list[AlertItem]:
     data = _locked_read(_alerts_file())
     return data.get("alerts", []) if data else []
 
 
-def save_alerts(alerts: list[dict[str, Any]]) -> None:
+def save_alerts(alerts: list[AlertItem]) -> None:
     with _file_lock():
         _atomic_write(_alerts_file(), {"alerts": alerts})
 
@@ -543,17 +708,17 @@ def save_alerts(alerts: list[dict[str, Any]]) -> None:
 # ── filter helpers ───────────────────────────────────────────────────────────
 
 
-def _items_of_type(items: list[dict[str, Any]], *types: str) -> list[dict[str, Any]]:
+def _items_of_type(items: list[SchedulerItem], *types: str) -> list[SchedulerItem]:
     """Filter items by type."""
     return [i for i in items if i.get("type") in types]
 
 
-def _items_with_status(items: list[dict[str, Any]], *statuses: str) -> list[dict[str, Any]]:
+def _items_with_status(items: list[SchedulerItem], *statuses: str) -> list[SchedulerItem]:
     """Filter items by status."""
     return [i for i in items if i.get("status") in statuses]
 
 
-def _unseen(alerts: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _unseen(alerts: list[AlertItem]) -> list[AlertItem]:
     """Filter unseen alerts."""
     return [a for a in alerts if not a.get("seen")]
 
@@ -565,7 +730,7 @@ def add_seed_alert(
     open_questions: list[str],
     from_label: str,
     packet_id: str = "",
-) -> dict[str, Any]:
+) -> AlertItem:
     """Persist a seed packet as an unseen alert so it surfaces via pending on next session start."""
     now = datetime.now(_get_local_tz())
     detail_lines = [f"**From:** {from_label}", f"**Opener:** {opener}"]
@@ -595,7 +760,17 @@ def add_seed_alert(
     return alert
 
 
-def _find(items: list[dict[str, Any]], item_id: str) -> dict[str, Any] | None:
+@overload
+def _find(items: list[SchedulerItem], item_id: str) -> SchedulerItem | None: ...
+
+
+@overload
+def _find(items: list[AlertItem], item_id: str) -> AlertItem | None: ...
+
+
+def _find(
+    items: list[SchedulerItem] | list[AlertItem], item_id: str
+) -> SchedulerItem | AlertItem | None:
     for item in items:
         if item["id"] == item_id or item["id"].startswith(item_id):
             return item
@@ -621,8 +796,8 @@ def _load_collection_unlocked(path: Path, key: str) -> list[dict[str, Any]]:
 
 
 def _create_alert(
-    source_item_id: str, message: str, details: dict[str, Any], now: datetime
-) -> dict[str, Any]:
+    source_item_id: str, message: str, details: AlertDetails, now: datetime
+) -> AlertItem:
     """Create an alert dict with standard fields."""
     return {
         "id": _new_id(),
@@ -663,7 +838,7 @@ def _run_gh(args: list[str], timeout: int = 15) -> dict[str, Any] | list | None:
         return None
 
 
-def _check_github_pr(config: dict[str, Any]) -> dict[str, Any] | None:
+def _check_github_pr(config: GithubPrConfig) -> GithubPrState | None:
     """Check GitHub PR status and reviews."""
     owner = config["owner"]
     repo = config["repo"]
@@ -699,7 +874,7 @@ def _check_github_pr(config: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def _check_jira_query(config: dict[str, Any]) -> dict[str, Any] | None:
+def _check_jira_query(config: JiraQueryConfig) -> JiraQueryState | None:
     """Run a JQL query and return results."""
     jql = config["jql"]
     email, token, server = _get_jira_credentials()
@@ -735,7 +910,7 @@ def _check_jira_query(config: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
-def _check_jira_ticket(config: dict[str, Any]) -> dict[str, Any] | None:
+def _check_jira_ticket(config: JiraTicketConfig) -> JiraTicketState | None:
     """Check a specific Jira ticket's status."""
     ticket = config["ticket"]
     email, token, server = _get_jira_credentials()
@@ -767,7 +942,7 @@ def _check_jira_ticket(config: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
 
-WATCH_PROVIDERS = {
+WATCH_PROVIDERS: dict[str, Callable[..., WatchState | None]] = {
     "github-pr": _check_github_pr,
     "jira-query": _check_jira_query,
     "jira-ticket": _check_jira_ticket,
@@ -777,41 +952,41 @@ WATCH_PROVIDERS = {
 # ── change detection strategies ──────────────────────────────────────────────
 
 
-def _detect_json_diff(new: dict[str, Any], last: dict[str, Any] | None) -> bool:
+def _detect_json_diff(new: WatchState, last: WatchState | None) -> bool:
     """Detect change by comparing JSON dumps."""
     return json.dumps(new, sort_keys=True) != json.dumps(last, sort_keys=True)
 
 
-def _detect_github_approved_or_merged(new: dict[str, Any], last: dict[str, Any] | None) -> bool:
+def _detect_github_approved_or_merged(new: GithubPrState, last: GithubPrState | None) -> bool:
     """Detect if PR was approved or merged."""
-    was_approved = (last or {}).get("has_approval", False)
-    was_merged = (last or {}).get("merged", False)
+    was_approved = last["has_approval"] if last else False
+    was_merged = last["merged"] if last else False
     return (new["has_approval"] and not was_approved) or (new["merged"] and not was_merged)
 
 
-def _detect_github_merged(new: dict[str, Any], last: dict[str, Any] | None) -> bool:
+def _detect_github_merged(new: GithubPrState, last: GithubPrState | None) -> bool:
     """Detect if PR was merged."""
-    return new["merged"] and not (last or {}).get("merged", False)
+    return new["merged"] and not (last["merged"] if last else False)
 
 
-def _detect_jira_new_results(new: dict[str, Any], last: dict[str, Any] | None) -> bool:
+def _detect_jira_new_results(new: JiraQueryState, last: JiraQueryState | None) -> bool:
     """Detect new issues in Jira query results."""
-    old_keys = {i["key"] for i in (last or {}).get("issues", [])}
-    new_keys = {i["key"] for i in new.get("issues", [])}
+    old_keys = {i["key"] for i in last["issues"]} if last else set()
+    new_keys = {i["key"] for i in new["issues"]}
     return bool(new_keys - old_keys)
 
 
-def _detect_jira_count_change(new: dict[str, Any], last: dict[str, Any] | None) -> bool:
+def _detect_jira_count_change(new: JiraQueryState, last: JiraQueryState | None) -> bool:
     """Detect change in Jira query result count."""
-    return new.get("total", 0) != (last or {}).get("total", 0)
+    return new["total"] != (last["total"] if last else 0)
 
 
-def _detect_jira_status_changed(new: dict[str, Any], last: dict[str, Any] | None) -> bool:
+def _detect_jira_status_changed(new: JiraTicketState, last: JiraTicketState | None) -> bool:
     """Detect if Jira ticket status changed."""
-    return new.get("status") != (last or {}).get("status")
+    return new["status"] != (last["status"] if last else None)
 
 
-_CHANGE_DETECTORS: dict[tuple[str, str], Callable[[dict, dict | None], bool]] = {
+_CHANGE_DETECTORS: dict[tuple[str, str], Callable[[Any, Any], bool]] = {
     ("github-pr", "approved_or_merged"): _detect_github_approved_or_merged,
     ("github-pr", "merged"): _detect_github_merged,
     ("github-pr", ""): _detect_json_diff,
@@ -822,14 +997,17 @@ _CHANGE_DETECTORS: dict[tuple[str, str], Callable[[dict, dict | None], bool]] = 
 }
 
 
-def poll_watch(item: dict[str, Any]) -> tuple[dict | None, bool]:
+def poll_watch(item: SchedulerItem) -> tuple[WatchState | None, bool]:
     """Poll a watch item. Returns (new_state, changed)."""
     provider = item.get("provider", "")
     check_fn = WATCH_PROVIDERS.get(provider)
     if not check_fn:
         return None, False
 
-    new_state = check_fn(item.get("watch_config", {}))
+    watch_config = item.get("watch_config")
+    if watch_config is None:
+        return None, False
+    new_state = check_fn(watch_config)
     if new_state is None:
         return None, False
 
@@ -843,7 +1021,7 @@ def poll_watch(item: dict[str, Any]) -> tuple[dict | None, bool]:
     return new_state, changed
 
 
-def _evaluate_auto_remove(item: dict[str, Any], state: dict[str, Any]) -> bool:
+def _evaluate_auto_remove(item: SchedulerItem, state: WatchState) -> bool:
     """Check if a watch should be auto-removed based on remove_when condition."""
     remove_when = item.get("remove_when", "")
     if not remove_when:
@@ -856,7 +1034,7 @@ def _evaluate_auto_remove(item: dict[str, Any], state: dict[str, Any]) -> bool:
 # ── core operations ──────────────────────────────────────────────────────────
 
 
-def add_reminder(message: str, due_text: str, tags: str = "") -> dict[str, Any]:
+def add_reminder(message: str, due_text: str, tags: str = "") -> SchedulerItem:
     """Add a one-shot reminder. Returns the created item."""
     now = datetime.now(_get_local_tz())
     due = parse_due(due_text, now)
@@ -887,10 +1065,10 @@ def add_watch(
     condition: str = "",
     interval: int = 30,
     remove_when: str = "",
-) -> dict[str, Any]:
+) -> SchedulerItem:
     """Add a condition-based watch. Returns the created item."""
     now = datetime.now(_get_local_tz())
-    watch_config: dict[str, Any] = {}
+    watch_config: GithubPrConfig | JiraQueryConfig | JiraTicketConfig
 
     if provider == "github-pr":
         m = re.match(r"([^/]+)/([^#]+)#(\d+)", target)
@@ -939,7 +1117,7 @@ def add_recurring(
     tags: str = "",
     idle_back_off: str = "",
     only_during: str = "",
-) -> dict[str, Any]:
+) -> SchedulerItem:
     """Add a persistent recurring session job. Returns the created item.
 
     Args:
@@ -961,7 +1139,7 @@ def add_recurring(
         parse_work_hours(only_during)  # raises ValueError on bad input
 
     now = datetime.now(_get_local_tz())
-    item: dict[str, Any] = {
+    item: SchedulerItem = {
         "id": _new_id(),
         "type": "recurring",
         "status": "active",
@@ -986,7 +1164,7 @@ def add_recurring(
 def list_items(
     show_all: bool = False,
     item_type: str | None = None,
-) -> list[dict[str, Any]]:
+) -> list[SchedulerItem]:
     """Return filtered list of scheduler items."""
     items = load_items()
     if item_type:
@@ -996,7 +1174,7 @@ def list_items(
     return items
 
 
-def check_due() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def check_due() -> tuple[list[SchedulerItem], list[AlertItem]]:
     """Check for due reminders and unseen alerts. Returns (due_items, unseen_alerts).
 
     Holds exclusive lock when snooze→pending transitions require a write.
@@ -1028,7 +1206,7 @@ def check_due() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return due_items, unseen
 
 
-def dismiss_item(item_id: str) -> dict[str, Any]:
+def dismiss_item(item_id: str) -> SchedulerItem:
     """Dismiss an item by ID (prefix match). Returns the dismissed item."""
     with _file_lock():
         items = _load_items_unlocked()
@@ -1042,7 +1220,7 @@ def dismiss_item(item_id: str) -> dict[str, Any]:
     return item
 
 
-def dismiss_alert(alert_id: str) -> dict[str, Any]:
+def dismiss_alert(alert_id: str) -> AlertItem:
     """Dismiss an alert by ID (prefix match). Returns the dismissed alert."""
     with _file_lock():
         alerts = _load_alerts_unlocked()
@@ -1054,7 +1232,7 @@ def dismiss_alert(alert_id: str) -> dict[str, Any]:
     return alert
 
 
-def snooze_item(item_id: str, until_text: str) -> tuple[dict[str, Any], datetime]:
+def snooze_item(item_id: str, until_text: str) -> tuple[SchedulerItem, datetime]:
     """Snooze a reminder. Returns (item, snooze_until_datetime)."""
     with _file_lock():
         items = _load_items_unlocked()
@@ -1069,14 +1247,14 @@ def snooze_item(item_id: str, until_text: str) -> tuple[dict[str, Any], datetime
     return item, snooze_until
 
 
-def _load_items_unlocked() -> list[dict[str, Any]]:
+def _load_items_unlocked() -> list[SchedulerItem]:
     """Read scheduler items without acquiring a lock (caller holds lock)."""
-    return _load_collection_unlocked(_scheduler_file(), "items")
+    return cast(list[SchedulerItem], _load_collection_unlocked(_scheduler_file(), "items"))
 
 
-def _load_alerts_unlocked() -> list[dict[str, Any]]:
+def _load_alerts_unlocked() -> list[AlertItem]:
     """Read alerts without acquiring a lock (caller holds lock)."""
-    return _load_collection_unlocked(_alerts_file(), "alerts")
+    return cast(list[AlertItem], _load_collection_unlocked(_alerts_file(), "alerts"))
 
 
 def run_poll(quiet: bool = False) -> None:
@@ -1154,7 +1332,7 @@ def run_poll(quiet: bool = False) -> None:
             _atomic_write(_alerts_file(), {"alerts": alerts})
 
 
-def show_alerts(mark_seen: bool = False) -> list[dict[str, Any]]:
+def show_alerts(mark_seen: bool = False) -> list[AlertItem]:
     """Show and optionally clear alerts. Returns unseen alerts."""
     if mark_seen:
         with _file_lock():
@@ -1174,7 +1352,7 @@ def _parse_tags(tags: str) -> list[str]:
     return [t.strip() for t in tags.split(",") if t.strip()] if tags else []
 
 
-def _format_watch_alert(item: dict[str, Any], state: dict[str, Any]) -> str:
+def _format_watch_alert(item: SchedulerItem, state: WatchState) -> str:
     """Format a human-readable alert message from watch state change."""
     provider = item.get("provider", "")
     base = item.get("message", "Watch triggered")
@@ -1201,7 +1379,7 @@ def _format_watch_alert(item: dict[str, Any], state: dict[str, Any]) -> str:
 # ── programmatic API (for status_check.py, morning.md) ──────────────────────
 
 
-def get_due_reminders(now: datetime | None = None) -> list[dict[str, Any]]:
+def get_due_reminders(now: datetime | None = None) -> list[SchedulerItem]:
     """Return pending reminders that are due. No side effects."""
     items = load_items()
     if now is None:
@@ -1222,7 +1400,7 @@ def get_due_reminders(now: datetime | None = None) -> list[dict[str, Any]]:
     return due
 
 
-def get_upcoming_reminders(now: datetime | None = None, hours: int = 24) -> list[dict[str, Any]]:
+def get_upcoming_reminders(now: datetime | None = None, hours: int = 24) -> list[SchedulerItem]:
     """Return pending reminders due within N hours."""
     items = load_items()
     if now is None:
@@ -1243,12 +1421,12 @@ def get_upcoming_reminders(now: datetime | None = None, hours: int = 24) -> list
     return upcoming
 
 
-def get_unseen_alerts() -> list[dict[str, Any]]:
+def get_unseen_alerts() -> list[AlertItem]:
     """Return unseen alerts from daemon."""
     return [a for a in load_alerts() if not a.get("seen")]
 
 
-def get_active_watches() -> list[dict[str, Any]]:
+def get_active_watches() -> list[SchedulerItem]:
     """Return all active watches."""
     return [i for i in load_items() if i["type"] == "watch" and i["status"] == "active"]
 
@@ -1289,7 +1467,7 @@ def expire_old_alerts(max_age_days: int = _ALERT_MAX_AGE_DAYS) -> int:
         return removed
 
 
-def get_pending(instance_id: str | None = None) -> dict[str, Any]:
+def get_pending(instance_id: str | None = None) -> PendingResult:
     """Get pending items for a session — alerts to deliver + session crons to register.
 
     This is the SessionStart hook entry point:
@@ -1338,7 +1516,7 @@ def get_pending(instance_id: str | None = None) -> dict[str, Any]:
     }
 
 
-def get_session_crons() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def get_session_crons() -> tuple[list[SchedulerItem], list[SuppressedCron]]:
     """Return active session crons, filtered by idle back-off and work hours.
 
     Returns (active_crons, suppressed_crons) without any alert side effects.
@@ -1369,7 +1547,7 @@ def get_session_crons() -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     return session_crons, suppressed_crons
 
 
-def format_pending(pending: dict[str, Any]) -> str:
+def format_pending(pending: PendingResult) -> str:
     """Format pending items as human-readable text for session injection."""
     lines: list[str] = []
     alerts = pending.get("alerts", [])
@@ -1422,7 +1600,7 @@ def format_pending(pending: dict[str, Any]) -> str:
 # ── scheduler status (Phase 5C) ─────────────────────────────────────────────
 
 
-def get_scheduler_status() -> dict[str, Any]:
+def get_scheduler_status() -> SchedulerStatus:
     """Return a structured overview of the scheduler state.
 
     Used by `aya scheduler status` and `make assistant-status`.
@@ -1465,7 +1643,7 @@ def get_scheduler_status() -> dict[str, Any]:
     }
 
 
-def format_scheduler_status(status: dict[str, Any]) -> str:
+def format_scheduler_status(status: SchedulerStatus) -> str:
     """Format scheduler status as human-readable text."""
     lines: list[str] = []
     now = datetime.now(_get_local_tz())
@@ -1524,7 +1702,7 @@ def format_scheduler_status(status: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def _display_items(items: list[dict[str, Any]]) -> None:
+def _display_items(items: list[SchedulerItem]) -> None:
     """Pretty-print scheduler items grouped by type."""
     if not items:
         return
