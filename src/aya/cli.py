@@ -265,6 +265,9 @@ def trust(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Add a DID to your trusted keys list."""
+    if label is not None and peer is not None:
+        err.print("[red]Cannot use --peer and --label together. Use --peer only.[/red]")
+        raise typer.Exit(2)
     if label is not None:
         err.print("[yellow]Warning: --label is deprecated, use --peer instead[/yellow]")
         peer = label
@@ -308,6 +311,9 @@ def pack(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Pack a knowledge packet ready to send."""
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
     if instance is not None:
         err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
         as_ = instance
@@ -371,6 +377,9 @@ def send(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Send a packet to a Nostr relay."""
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
     if instance is not None:
         err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
         as_ = instance
@@ -419,6 +428,9 @@ def dispatch(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Pack and send in one step — the natural 'pack for home' flow."""
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
     if instance is not None:
         err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
         as_ = instance
@@ -521,6 +533,9 @@ def receive(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Poll for pending packets and surface them for review."""
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
     if instance is not None:
         err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
         as_ = instance
@@ -637,6 +652,9 @@ def inbox(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """List pending packets without ingesting."""
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
     if instance is not None:
         err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
         as_ = instance
@@ -686,9 +704,18 @@ def pair(
     profile: Path = typer.Option(DEFAULT_PROFILE),
 ) -> None:
     """Pair two instances with a short-lived code — no manual DID exchange."""
+    if label is not None and peer is not None:
+        err.print("[red]Cannot use --peer and --label together. Use --peer only.[/red]")
+        raise typer.Exit(2)
     if label is not None:
         err.print("[yellow]Warning: --label is deprecated, use --peer instead[/yellow]")
         peer = label
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
+    if instance is not None and as_ != "default":
+        err.print("[red]Cannot use --as and --instance together. Use --as only.[/red]")
+        raise typer.Exit(2)
     if instance is not None:
         err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
         as_ = instance

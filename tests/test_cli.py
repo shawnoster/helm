@@ -1659,7 +1659,7 @@ class TestDeprecationWarnings:
                 "--out",
                 str(out_file),
                 "--instance",
-                "default",
+                "default",  # uses the "default" instance which must exist in the fixture
                 "--profile",
                 str(profile_with_trusted),
             ],
@@ -1669,6 +1669,34 @@ class TestDeprecationWarnings:
         stderr = result.stderr or ""
         assert "deprecated" in stderr
         assert "--as" in stderr
+
+    def test_pack_instance_and_as_together_errors(
+        self, profile_with_trusted: Path, tmp_path: Path
+    ) -> None:
+        """Passing both --as and --instance is a usage error (exit 2)."""
+        out_file = tmp_path / "packet.json"
+        result = runner.invoke(
+            app,
+            [
+                "pack",
+                "--to",
+                "home",
+                "--intent",
+                "conflict test",
+                "--out",
+                str(out_file),
+                "--as",
+                "work",
+                "--instance",
+                "home",
+                "--profile",
+                str(profile_with_trusted),
+            ],
+            input="test content\n",
+        )
+        assert result.exit_code == 2
+        stderr = result.stderr or result.output
+        assert "Cannot use" in stderr
 
     def test_pack_as_no_warning(self, profile_with_trusted: Path, tmp_path: Path) -> None:
         """--as on pack does NOT emit a deprecation warning."""
