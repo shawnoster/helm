@@ -1221,6 +1221,60 @@ class TestReceive:
         saved = Profile.load(profile_with_instance)
         assert any(e["id"] == packet.id for e in saved.ingested_ids)
 
+    def test_receive_since_lookback(self, profile_with_sender: Path, sender: Identity) -> None:
+        """When last_checked is set, receive passes since = last_checked - 60s."""
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did)
+
+        # Record a previous check time on one relay
+        relay_url = p.default_relays[0]
+        last_check_time = datetime(2026, 3, 31, 12, 0, 0, tzinfo=UTC)
+        p.last_checked[relay_url] = (
+            last_check_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        )
+        p.save(profile_with_sender)
+
+        fetch_calls: list[tuple] = []
+
+        async def mock_fetch(*args, **kwargs):
+            fetch_calls.append((args, kwargs))
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            runner.invoke(
+                app,
+                ["receive", "--auto-ingest", "--quiet", "--profile", str(profile_with_sender)],
+            )
+
+        assert len(fetch_calls) == 1
+        called_since = fetch_calls[0][1].get("since")
+        assert called_since is not None
+        expected_since = last_check_time - timedelta(seconds=60)
+        assert called_since == expected_since
+
+    def test_receive_last_checked_persistence(self, profile_with_sender: Path) -> None:
+        """receive saves last_checked for each relay even when inbox is empty."""
+        p = Profile.load(profile_with_sender)
+        relay_url = p.default_relays[0]
+        assert relay_url not in p.last_checked  # clean slate
+
+        async def mock_fetch(*args, **kwargs):
+            if False:  # pragma: no cover
+                yield  # makes this an async generator
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["receive", "--quiet", "--profile", str(profile_with_sender)],
+            )
+
+        assert result.exit_code == 0, result.output
+        saved = Profile.load(profile_with_sender)
+        assert relay_url in saved.last_checked
+        assert saved.last_checked[relay_url]  # non-empty ISO timestamp
+
 
 # ── inbox ─────────────────────────────────────────────────────────────────────
 
