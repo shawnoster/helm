@@ -8,7 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
@@ -511,21 +511,35 @@ def receive(
         relay_urls = [relay] if relay else p.default_relays
         client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
 
-        # Fetch pending packets for this instance (subject to fetch_pending()'s
-        # limit); ingested_ids is the authoritative dedup mechanism and filters
-        # already-seen packets below.
+        # Compute since from last_checked to avoid re-scanning the full window on
+        # every poll.  60-second lookback guards against minor clock drift.
+        since: datetime | None = None
+        if p.last_checked:
+            oldest = min(datetime.fromisoformat(v) for v in p.last_checked.values())
+            since = oldest - timedelta(seconds=60)
+
+        # Fetch pending packets for this instance; ingested_ids is the authoritative
+        # dedup mechanism and filters already-seen packets below.
         packets: list[Packet] = []
+        since_kwargs: dict = {"since": since} if since is not None else {}
         try:
-            async for packet in client.fetch_pending():
+            async for packet in client.fetch_pending(**since_kwargs):
                 packets.append(packet)
         except Exception:
             if not quiet:
                 err.print("[yellow]Could not reach relay — skipping relay fetch.[/yellow]")
             return
 
+        # Record that we checked these relays — persist even when inbox is empty
+        # so future polls use a narrow since window rather than the full 7-day default.
+        now_check_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        for url in relay_urls:
+            p.last_checked[url] = now_check_iso
+
         if not packets:
             if not quiet:
                 console.print("[dim]No pending packets.[/dim]")
+            p.save(profile)
             return
 
         # Verify signatures — reject tampered or unsigned packets
@@ -571,7 +585,7 @@ def receive(
                 if sender_nostr_pub:
                     await client.send_receipt(packet, sender_nostr_pub)
 
-        # Persist updated ingested_ids.
+        # Persist updated ingested_ids and last_checked.
         p.save(profile)
 
     asyncio.run(_run())
