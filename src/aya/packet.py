@@ -18,6 +18,8 @@ from ulid import ULID
 
 from aya.identity import Identity
 
+logger = logging.getLogger(__name__)
+
 PROTOCOL_VERSION = "aya/0.2"
 
 
@@ -99,6 +101,7 @@ class Packet(BaseModel):
             identity.public_key().verify(sig_bytes, self.canonical_bytes())
             return True
         except Exception:
+            logger.warning("Signature verification failed for packet %s", self.id)
             return False
 
     def verify_from_did(self) -> bool:
@@ -120,6 +123,7 @@ class Packet(BaseModel):
             pub_key.verify(sig_bytes, self.canonical_bytes())
             return True
         except Exception:
+            logger.warning("DID-based signature verification failed for packet %s", self.id)
             return False
 
     def fingerprint(self) -> str:

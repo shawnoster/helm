@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import shutil
 import subprocess
@@ -63,6 +64,8 @@ from aya.scheduler import (
     snooze_item,
 )
 from aya.status import run_status
+
+logger = logging.getLogger(__name__)
 
 
 class OutputFormat(StrEnum):
@@ -462,6 +465,7 @@ def dispatch(
         try:
             event_id = await client.publish(signed, recipient_nostr_pub, encrypt=not no_encrypt)
         except Exception:
+            logger.exception("Relay publish failed during dispatch")
             err.print("[yellow]Could not reach relay — dispatch failed.[/yellow]")
             raise typer.Exit(1) from None
 
@@ -529,6 +533,7 @@ def receive(
             async for packet in client.fetch_pending(**since_kwargs):
                 packets.append(packet)
         except Exception:
+            logger.exception("Relay fetch failed during receive")
             if not quiet:
                 err.print("[yellow]Could not reach relay — skipping relay fetch.[/yellow]")
             return
