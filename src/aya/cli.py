@@ -5,8 +5,10 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
+import subprocess
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
 
@@ -18,6 +20,8 @@ from rich.text import Text
 
 from aya import __version__
 from aya.ci import watch_pr_checks
+from aya.config import get_notebook_path, load_config, set_config_value
+from aya.context import build_context_block
 from aya.identity import Identity, Profile, TrustedKey
 from aya.install import install_scheduler, uninstall_scheduler
 from aya.packet import ConflictStrategy, ContentType, Packet, human_age
@@ -29,7 +33,7 @@ from aya.pair import (
     poll_for_pair_response,
     publish_pair_request,
 )
-from aya.paths import PROFILE_PATH
+from aya.paths import CONFIG_PATH, PROFILE_PATH
 from aya.profile import ensure_profile
 from aya.relay import RelayClient
 
@@ -126,6 +130,15 @@ ci_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(ci_app, name="ci")
+
+# ── Config sub-app ────────────────────────────────────────────────────────────
+
+config_app = typer.Typer(
+    name="config",
+    help="Workspace configuration (notebook path, etc.).",
+    no_args_is_help=True,
+)
+app.add_typer(config_app, name="config")
 
 console = Console()
 err = Console(stderr=True)
@@ -498,21 +511,38 @@ def receive(
         relay_urls = [relay] if relay else p.default_relays
         client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
 
-        # Fetch pending packets for this instance (subject to fetch_pending()'s
-        # limit); ingested_ids is the authoritative dedup mechanism and filters
-        # already-seen packets below.
+        # Compute since from last_checked to avoid re-scanning the full window on
+        # every poll.  60-second lookback guards against minor clock drift.
+        # Clamp to at most 7 days back so a very stale last_checked doesn't
+        # trigger an unbounded relay scan or override the relay's default window.
+        since: datetime | None = None
+        if p.last_checked:
+            now = datetime.now(UTC)
+            oldest = min(datetime.fromisoformat(v) for v in p.last_checked.values())
+            since = max(oldest - timedelta(seconds=60), now - timedelta(days=7))
+
+        # Fetch pending packets for this instance; ingested_ids is the authoritative
+        # dedup mechanism and filters already-seen packets below.
         packets: list[Packet] = []
+        since_kwargs: dict = {"since": since} if since is not None else {}
         try:
-            async for packet in client.fetch_pending():
+            async for packet in client.fetch_pending(**since_kwargs):
                 packets.append(packet)
         except Exception:
             if not quiet:
                 err.print("[yellow]Could not reach relay — skipping relay fetch.[/yellow]")
             return
 
+        # Record that we checked these relays — persist even when inbox is empty
+        # so future polls use a narrow since window rather than the full 7-day default.
+        now_check_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        for url in relay_urls:
+            p.last_checked[url] = now_check_iso
+
         if not packets:
             if not quiet:
                 console.print("[dim]No pending packets.[/dim]")
+            p.save(profile)
             return
 
         # Verify signatures — reject tampered or unsigned packets
@@ -533,6 +563,7 @@ def receive(
         if not verified:
             if not quiet:
                 console.print("[dim]No valid packets.[/dim]")
+            p.save(profile)
             return
 
         _show_inbox(verified, p)
@@ -558,7 +589,7 @@ def receive(
                 if sender_nostr_pub:
                     await client.send_receipt(packet, sender_nostr_pub)
 
-        # Persist updated ingested_ids.
+        # Persist updated ingested_ids and last_checked.
         p.save(profile)
 
     asyncio.run(_run())
@@ -1291,3 +1322,99 @@ def _ingest(packet: Packet) -> None:
                 subtitle=f"[dim]{packet.id[:8]} · {packet.sent_at[:10]}[/dim]",
             )
         )
+
+
+# ── Config commands ───────────────────────────────────────────────────────────
+
+
+@config_app.command("set")
+def config_set(
+    key: str = typer.Argument(..., help="Config key (e.g. notebook_path)"),
+    value: str = typer.Argument(..., help="Value to set"),
+) -> None:
+    """Set a config value in ~/.aya/config.json."""
+    set_config_value(key, value)
+    console.print(f"[green]✓[/green] {key} = {value}")
+    console.print(f"[dim]Saved to {CONFIG_PATH}[/dim]")
+
+
+@config_app.command("show")
+def config_show() -> None:
+    """Show current config."""
+    config = load_config()
+    if not config:
+        console.print("[dim]No config set. Use `aya config set <key> <value>`.[/dim]")
+        return
+    table = Table(show_header=True, header_style="bold")
+    table.add_column("Key")
+    table.add_column("Value")
+    for k, v in sorted(config.items()):
+        table.add_row(k, str(v))
+    console.print(table)
+
+
+# ── Clipboard helper ─────────────────────────────────────────────────────────
+
+
+def _copy_to_clipboard(text: str) -> None:
+    xclip = shutil.which("xclip")
+    xsel = shutil.which("xsel")
+    clip = shutil.which("clip.exe")
+    if xclip:
+        result = subprocess.run(  # noqa: S603
+            [xclip, "-selection", "clipboard"], input=text.encode(), check=False
+        )
+        if result.returncode == 0:
+            console.print("[dim]Copied to clipboard (xclip)[/dim]")
+        else:
+            err.print(f"[yellow]--copy: xclip failed (exit {result.returncode})[/yellow]")
+    elif xsel:
+        result = subprocess.run(  # noqa: S603
+            [xsel, "--clipboard", "--input"], input=text.encode(), check=False
+        )
+        if result.returncode == 0:
+            console.print("[dim]Copied to clipboard (xsel)[/dim]")
+        else:
+            err.print(f"[yellow]--copy: xsel failed (exit {result.returncode})[/yellow]")
+    elif clip:
+        result = subprocess.run([clip], input=text.encode(), check=False)  # noqa: S603
+        if result.returncode == 0:
+            console.print("[dim]Copied to clipboard (clip.exe)[/dim]")
+        else:
+            err.print(f"[yellow]--copy: clip.exe failed (exit {result.returncode})[/yellow]")
+    else:
+        err.print("[yellow]--copy: no clipboard tool found (xclip, xsel, clip.exe)[/yellow]")
+
+
+# ── Context command ───────────────────────────────────────────────────────────
+
+
+@app.command("context")
+def context_cmd(
+    short: bool = typer.Option(False, "--short", help="Compact one-line format"),
+    copy: bool = typer.Option(False, "--copy", help="Copy output to clipboard"),
+    all_projects: bool = typer.Option(False, "--all", help="Include brainstorming projects"),
+    project: str | None = typer.Option(None, "--project", help="Filter to a single project"),
+) -> None:
+    """Assemble a paste-ready session handshake block from the notebook."""
+    notebook_path = get_notebook_path()
+    if not notebook_path:
+        err.print(
+            "[red]notebook_path not set.[/red] "
+            "Run: [bold]aya config set notebook_path ~/notebook[/bold]"
+        )
+        raise typer.Exit(1)
+    if not notebook_path.exists():
+        err.print(f"[red]Notebook path does not exist:[/red] {notebook_path}")
+        raise typer.Exit(1)
+
+    output = build_context_block(
+        notebook_path,
+        short=short,
+        include_brainstorming=all_projects,
+        project_filter=project,
+    )
+    console.print(output)
+
+    if copy:
+        _copy_to_clipboard(output)

@@ -14,12 +14,15 @@ from aya.scheduler import (
     _parse_tags,
     add_recurring,
     add_reminder,
+    add_seed_alert,
     add_watch,
     check_due,
     dismiss_item,
+    get_pending,
     list_items,
     load_items,
     parse_due,
+    run_tick,
     save_items,
     show_alerts,
     snooze_item,
@@ -482,3 +485,77 @@ class TestMissingFields:
         # Should not raise — item is skipped because status not in ("pending", "snoozed")
         due, _unseen = check_due()
         assert isinstance(due, list)
+
+
+# ── Seed alerts ───────────────────────────────────────────────────────────────
+
+
+class TestSeedAlerts:
+    def test_add_seed_alert_appends_unseen(self):
+        """add_seed_alert persists an alert with seen=False and the given packet_id."""
+        alert = add_seed_alert(
+            intent="Context sync",
+            opener="Hey, what's the status?",
+            context_summary="Working on Dead Reckoning spec.",
+            open_questions=["Should /session absorb /switch?"],
+            from_label="work",
+            packet_id="test-packet-id-123",
+        )
+        assert alert["seen"] is False
+        assert alert["source_item_id"] == "test-packet-id-123"
+
+    def test_add_seed_alert_generates_id_when_no_packet_id(self):
+        """add_seed_alert generates a source_item_id when packet_id is omitted."""
+        alert = add_seed_alert(
+            intent="Quick note",
+            opener="",
+            context_summary="",
+            open_questions=[],
+            from_label="home",
+        )
+        assert alert["seen"] is False
+        assert alert["source_item_id"]  # non-empty
+
+    def test_pending_claims_seed_alert(self):
+        """get_pending() returns a seed alert and marks it claimed."""
+        alert = add_seed_alert(
+            intent="Relay context",
+            opener="Opening message here.",
+            context_summary="",
+            open_questions=[],
+            from_label="work",
+            packet_id="seed-pkt-456",
+        )
+        pending = get_pending("test-instance")
+        assert any(a["id"] == alert["id"] for a in pending["alerts"])
+
+    def test_tick_with_mixed_alert_types(self):
+        """run_tick() handles a mix of a due reminder and a seed alert without error."""
+        # Inject an overdue reminder directly
+        items = load_items()
+        past = (datetime.now(LOCAL_TZ) - timedelta(hours=1)).isoformat()
+        items.append(
+            {
+                "id": "overdue-reminder",
+                "type": "reminder",
+                "status": "pending",
+                "created_at": past,
+                "message": "Overdue task",
+                "tags": [],
+                "session_required": False,
+                "due_at": past,
+                "delivered_at": None,
+                "snoozed_until": None,
+            }
+        )
+        save_items(items)
+        add_seed_alert(
+            intent="Mixed type test",
+            opener="Opener",
+            context_summary="",
+            open_questions=[],
+            from_label="work",
+        )
+        result = run_tick()
+        assert isinstance(result, dict)
+        assert "claims_swept" in result
