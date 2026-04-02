@@ -569,7 +569,7 @@ class TestSeedAlerts:
 
 class TestSchemaVersion:
     def test_save_items_includes_schema_version(self):
-        """save_items writes schema_version to scheduler.json."""
+        """add_reminder writes schema_version to scheduler.json."""
         from aya import scheduler
 
         add_reminder("versioned", "in 1 hour")
@@ -577,7 +577,7 @@ class TestSchemaVersion:
         assert data["schema_version"] == SCHEDULER_SCHEMA_VERSION
 
     def test_save_alerts_includes_schema_version(self):
-        """show_alerts(mark_seen=True) writes schema_version to alerts.json."""
+        """add_seed_alert writes schema_version to alerts.json."""
         from aya import scheduler
 
         add_seed_alert(

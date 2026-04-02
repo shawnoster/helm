@@ -711,18 +711,23 @@ def sweep_stale_claims(max_age_seconds: int = 86400) -> int:
 # ── storage ──────────────────────────────────────────────────────────────────
 
 
+def _check_schema_version(data: dict[str, Any], expected: int, filename: str) -> None:
+    """Log a warning if the file's schema_version is newer than expected."""
+    raw = data.get("schema_version", 0)
+    file_version = raw if isinstance(raw, int) else 0
+    if not isinstance(raw, int) and raw is not None:
+        logger.warning("%s has non-integer schema_version: %r — treating as 0", filename, raw)
+    if file_version > expected:
+        logger.warning("%s schema_version %d > expected %d", filename, file_version, expected)
+
+
 def load_items() -> list[SchedulerItem]:
     data = _locked_read(_scheduler_file())
     if not data:
         return []
-    file_version = data.get("schema_version", 0)
-    if file_version > SCHEDULER_SCHEMA_VERSION:
-        logger.warning(
-            "scheduler.json schema_version %d > expected %d",
-            file_version,
-            SCHEDULER_SCHEMA_VERSION,
-        )
-    return cast(list[SchedulerItem], data.get("items", []))
+    _check_schema_version(data, SCHEDULER_SCHEMA_VERSION, "scheduler.json")
+    items = data.get("items", [])
+    return cast(list[SchedulerItem], items if isinstance(items, list) else [])
 
 
 def save_items(items: list[SchedulerItem]) -> None:
@@ -734,14 +739,9 @@ def load_alerts() -> list[AlertItem]:
     data = _locked_read(_alerts_file())
     if not data:
         return []
-    file_version = data.get("schema_version", 0)
-    if file_version > ALERTS_SCHEMA_VERSION:
-        logger.warning(
-            "alerts.json schema_version %d > expected %d",
-            file_version,
-            ALERTS_SCHEMA_VERSION,
-        )
-    return cast(list[AlertItem], data.get("alerts", []))
+    _check_schema_version(data, ALERTS_SCHEMA_VERSION, "alerts.json")
+    alerts = data.get("alerts", [])
+    return cast(list[AlertItem], alerts if isinstance(alerts, list) else [])
 
 
 def save_alerts(alerts: list[AlertItem]) -> None:
@@ -839,19 +839,10 @@ def _load_collection_unlocked(path: Path, key: str) -> list[dict[str, Any]]:
     if not isinstance(data, dict):
         return []
     # Forward compatibility: warn if schema is newer than expected
-    file_version = data.get("schema_version", 0)
-    if key == "items" and file_version > SCHEDULER_SCHEMA_VERSION:
-        logger.warning(
-            "scheduler.json schema_version %d > expected %d",
-            file_version,
-            SCHEDULER_SCHEMA_VERSION,
-        )
-    elif key == "alerts" and file_version > ALERTS_SCHEMA_VERSION:
-        logger.warning(
-            "alerts.json schema_version %d > expected %d",
-            file_version,
-            ALERTS_SCHEMA_VERSION,
-        )
+    if key == "items":
+        _check_schema_version(data, SCHEDULER_SCHEMA_VERSION, "scheduler.json")
+    elif key == "alerts":
+        _check_schema_version(data, ALERTS_SCHEMA_VERSION, "alerts.json")
     result = data.get(key, [])
     return result if isinstance(result, list) else []
 

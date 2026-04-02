@@ -230,7 +230,12 @@ class Profile:
 
         # Forward compatibility: warn if schema is newer than expected
         if isinstance(aya_data, dict):
-            file_version = aya_data.get("schema_version", 0)
+            raw_version = aya_data.get("schema_version", 0)
+            file_version = raw_version if isinstance(raw_version, int) else 0
+            if not isinstance(raw_version, int) and raw_version is not None:
+                logger.warning(
+                    "profile has non-integer schema_version: %r — treating as 0", raw_version
+                )
             if file_version > PROFILE_SCHEMA_VERSION:
                 logger.warning(
                     "profile schema_version %d > expected %d",
