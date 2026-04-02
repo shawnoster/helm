@@ -165,7 +165,7 @@ strict = true
 # mypy 1.19 does not support disable_error_codes per-module; ignore_errors used instead.
 # Remove each entry as the module is brought into strict compliance.
 [[tool.mypy.overrides]]
-module = ["aya.packet", "aya.relay", "aya.pair", "aya.status", "aya.cli"]
+module = ["aya.packet", "aya.relay", "aya.pair", "aya.status", "aya.cli", "aya.mcp_server"]
 ignore_errors = true
 
 [tool.semantic_release]

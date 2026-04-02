@@ -211,10 +211,10 @@ def _resolve_did(to: str, profile: Any) -> tuple[str, str]:
 def _resolve_nostr_pubkey(did: str, profile: Any) -> str | None:
     for key in profile.trusted_keys.values():
         if key.did == did and key.nostr_pubkey:
-            return key.nostr_pubkey
+            return str(key.nostr_pubkey)
     for inst in profile.instances.values():
         if inst.did == did:
-            return inst.nostr_public_hex
+            return str(inst.nostr_public_hex)
     return None
 
 
@@ -420,6 +420,9 @@ async def _handle_ack(arguments: dict[str, Any]) -> list[types.TextContent]:
     )
     signed = ack_packet.sign(local)
 
+    if recipient_nostr_pub is None:
+        return _error("No Nostr pubkey found for ACK recipient.")
+
     relay_urls = profile.default_relays
     client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
     event_id = await client.publish(signed, recipient_nostr_pub, encrypt=True)
@@ -446,7 +449,7 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[types.TextCont
     if handler is None:
         return _error(f"Unknown tool: {name}")
     try:
-        return await handler(arguments)  # type: ignore[no-any-return]
+        return await handler(arguments)
     except Exception as exc:
         logger.exception("Tool %s failed", name)
         return _error(str(exc))
