@@ -2082,3 +2082,133 @@ class TestAck:
         assert result.exit_code == 0, result.output
         ack_pkt: Packet = mock_publish.call_args[0][0]
         assert ack_pkt.to_did == peer.did
+
+
+# ── dry-run ─────────────────────────────────────────────────────────────────
+
+
+class TestDryRun:
+    """Tests for --dry-run flag across relay-publishing and state-mutating commands."""
+
+    def test_send_dry_run(self, profile_with_trusted: Path, tmp_path: Path) -> None:
+        """--dry-run prints packet JSON and does not call publish."""
+        p = Profile.load(profile_with_trusted)
+        local = p.instances["default"]
+        home_key = p.trusted_keys["home"]
+        pkt = Packet(
+            **{"from": local.did, "to": home_key.did},
+            intent="dry run test",
+            content="hello",
+        )
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_publish = AsyncMock(return_value="a" * 64)
+            mock_cls.return_value.publish = mock_publish
+            result = runner.invoke(
+                app,
+                [
+                    "send",
+                    str(packet_file),
+                    "--dry-run",
+                    "--profile",
+                    str(profile_with_trusted),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        output_data = json.loads(result.output)
+        assert output_data["id"] == pkt.id
+        assert output_data["intent"] == "dry run test"
+        mock_publish.assert_not_awaited()
+
+    def test_dispatch_dry_run(
+        self, profile_with_trusted: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--dry-run prints signed packet JSON and does not call publish."""
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_publish = AsyncMock(return_value="a" * 64)
+            mock_cls.return_value.publish = mock_publish
+            result = runner.invoke(
+                app,
+                [
+                    "dispatch",
+                    "--to",
+                    "home",
+                    "--intent",
+                    "dry dispatch test",
+                    "--dry-run",
+                    "--profile",
+                    str(profile_with_trusted),
+                ],
+                input="Some content for dispatch.\n",
+            )
+        assert result.exit_code == 0, result.output
+        output_data = json.loads(result.output)
+        assert output_data["intent"] == "dry dispatch test"
+        assert "id" in output_data
+        mock_publish.assert_not_awaited()
+
+    def test_ack_dry_run(self, tmp_path: Path) -> None:
+        """--dry-run prints ACK packet JSON and does not call publish."""
+        from datetime import UTC, datetime
+
+        local = Identity.generate("default")
+        home = Identity.generate("home")
+
+        profile = Profile(alias="Ace", ship_mind_name="", user_name="Shawn")
+        profile.instances["default"] = local
+        profile.trusted_keys["home"] = TrustedKey(
+            did=home.did, label="home", nostr_pubkey=home.nostr_public_hex
+        )
+
+        pkt = Packet(**{"from": home.did, "to": local.did}, intent="seed from home")
+        now_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        profile.ingested_ids.append({"id": pkt.id, "ingested_at": now_iso, "from_did": home.did})
+
+        profile_path = tmp_path / "profile.json"
+        profile.save(profile_path)
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_publish = AsyncMock(return_value="c" * 64)
+            mock_cls.return_value.publish = mock_publish
+            result = runner.invoke(
+                app,
+                ["ack", pkt.id, "looks good", "--dry-run", "--profile", str(profile_path)],
+            )
+        assert result.exit_code == 0, result.output
+        output_data = json.loads(result.output)
+        assert output_data["intent"] == "ack"
+        assert "id" in output_data
+        mock_publish.assert_not_awaited()
+
+    def test_schedule_remind_dry_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--dry-run prints reminder item and does not write to scheduler file."""
+        scheduler_file = tmp_path / "assistant" / "memory" / "scheduler.json"
+        alerts_file = tmp_path / "assistant" / "memory" / "alerts.json"
+        scheduler_file.parent.mkdir(parents=True)
+        scheduler_file.write_text(json.dumps({"items": []}))
+        alerts_file.write_text(json.dumps({"alerts": []}))
+
+        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+
+        result = runner.invoke(
+            app,
+            [
+                "schedule",
+                "remind",
+                "--message",
+                "Stand up and stretch",
+                "--due",
+                "in 1 hour",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        output_data = json.loads(result.output)
+        assert output_data["type"] == "reminder"
+        assert output_data["message"] == "Stand up and stretch"
+        # Scheduler file should still be empty
+        data = json.loads(scheduler_file.read_text())
+        assert len(data["items"]) == 0
