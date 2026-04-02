@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -431,15 +432,17 @@ def pack(
     signed = packet.sign(local)
     json_output = signed.to_json()
 
+    if out:
+        out.write_text(json_output)
+
     if format_ == OutputFormat.JSON:
         _output_json(json.loads(json_output))
         raise typer.Exit(0)
 
-    if out:
-        out.write_text(json_output)
-        console.print(f"[green]✓[/green] Packet written to [cyan]{out}[/cyan]")
-    else:
+    if not out:
         sys.stdout.write(json_output)
+    else:
+        console.print(f"[green]✓[/green] Packet written to [cyan]{out}[/cyan]")
 
 
 # ── send ──────────────────────────────────────────────────────────────────────
@@ -868,6 +871,8 @@ def receive(
             logger.exception("Relay fetch failed during receive")
             if not quiet:
                 err.print("[yellow]Could not reach relay — skipping relay fetch.[/yellow]")
+            if format_ == OutputFormat.JSON:
+                _output_json([])
             return
 
         # Record that we checked these relays — persist even when inbox is empty
@@ -1129,28 +1134,36 @@ def pair(
         code_h = hash_code(pairing_code)
 
         # Publish the request — embed our own label so the joiner knows what to call us
-        console.print("[dim]Publishing pairing request…[/dim]")
+        if format_ != OutputFormat.JSON:
+            console.print("[dim]Publishing pairing request…[/dim]")
         request_event_id = asyncio.run(publish_pair_request(local, local.label, code_h, relay_urls))
 
         # Show the code — user reads this aloud or types it on the other machine
-        console.print(
-            Panel.fit(
-                f"[bold]Pairing code:[/bold]  [bold cyan]{pairing_code}[/bold cyan]\n\n"
-                "Enter this on your other machine:\n"
-                f"  [dim]aya pair --code {pairing_code}"
-                " --peer <their-name> --as <local-identity>[/dim]\n\n"
-                "[dim]Expires in 10 minutes.[/dim]",
-                title="aya — pair",
+        if format_ != OutputFormat.JSON:
+            console.print(
+                Panel.fit(
+                    f"[bold]Pairing code:[/bold]  [bold cyan]{pairing_code}[/bold cyan]\n\n"
+                    "Enter this on your other machine:\n"
+                    f"  [dim]aya pair --code {pairing_code}"
+                    " --peer <their-name> --as <local-identity>[/dim]\n\n"
+                    "[dim]Expires in 10 minutes.[/dim]",
+                    title="aya — pair",
+                )
             )
-        )
 
         # Poll for response
-        with console.status("[bold cyan]Waiting for the other peer…[/bold cyan]"):
+        if format_ != OutputFormat.JSON:
+            ctx_mgr = console.status("[bold cyan]Waiting for the other peer…[/bold cyan]")
+        else:
+            ctx_mgr = nullcontext()
+        with ctx_mgr:
             trusted = asyncio.run(
                 poll_for_pair_response(relay_urls, local.nostr_public_hex, request_event_id)
             )
 
         if trusted is None:
+            if format_ == OutputFormat.JSON:
+                _emit_error("PAIR_TIMEOUT", "Pairing timed out")
             console.print(
                 "[bold yellow]Pairing timed out.[/bold yellow] "
                 "Run [bold]aya pair[/bold] again for a new code."
