@@ -28,6 +28,7 @@ from .storage import (
     sweep_stale_claims,
 )
 from .time_utils import (
+    _ALERT_MAX_AGE_DAYS,
     _get_local_tz,
     is_idle,
     is_within_work_hours,
@@ -426,7 +427,7 @@ def run_tick(quiet: bool = False) -> dict[str, int]:
     """Run one scheduler tick — poll watches, check reminders, sweep stale claims.
 
     This is the canonical entry point for system cron:
-        */5 * * * * aya scheduler tick --quiet
+        */5 * * * * aya schedule tick --quiet
 
     Returns a summary dict: {"watches_checked": N, "alerts_generated": N, "claims_swept": N}
     """
@@ -438,7 +439,7 @@ def run_tick(quiet: bool = False) -> dict[str, int]:
     return {"claims_swept": swept, "alerts_expired": expired}
 
 
-def expire_old_alerts(max_age_days: int = 7) -> int:
+def expire_old_alerts(max_age_days: int = _ALERT_MAX_AGE_DAYS) -> int:
     """Remove alerts older than max_age_days. Returns count removed."""
     with _file_lock():
         alerts = _load_alerts_unlocked()
@@ -461,7 +462,7 @@ def get_pending(instance_id: str | None = None) -> PendingResult:
     """Get pending items for a session — alerts to deliver + session crons to register.
 
     This is the SessionStart hook entry point:
-        aya scheduler pending --format text
+        aya schedule pending --format text
 
     Claims each alert it returns so other sessions don't re-deliver.
 
@@ -611,7 +612,7 @@ def get_active_watches() -> list[SchedulerItem]:
 def get_scheduler_status() -> SchedulerStatus:
     """Return a structured overview of the scheduler state.
 
-    Used by `aya scheduler status` and `make assistant-status`.
+    Used by `aya schedule status` and `make assistant-status`.
     """
     items = load_items()
     alerts = load_alerts()

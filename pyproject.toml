@@ -106,14 +106,6 @@ known-first-party = ["aya"]
     "PLW1510",  # subprocess.run without check — best-effort scaffold step
     "ARG001",   # unused arg in callback signature required by caller contract
 ]
-"src/aya/scheduler.py" = [
-    "B007",     # unused loop var — pre-existing
-    "S603",     # subprocess call — gh CLI, not untrusted input
-    "S607",     # partial path — gh resolved from PATH
-    "ARG001",   # as_json param kept for API consistency
-    "SIM102",   # nested if intentional for readability
-    "PLC0415",  # httpx is an optional dep not in requirements; import kept lazy inside try/except
-]
 "src/aya/scheduler/__init__.py" = [
     "F401",     # re-exports for backwards compatibility
     "I001",     # import grouping: re-exports organised by submodule, not stdlib order

@@ -1,19 +1,19 @@
 """Unified scheduler — reminders, watches, recurring items, and events.
 
-Replaces reminders.py. Persists across AI sessions via scheduler.json.
-Out-of-session polling via watcher_daemon.py + systemd timer.
+Persists across AI sessions via scheduler.json.
+Out-of-session polling via systemd timer.
 
-Usage:
-    scheduler.py remind  --due "tomorrow 9am" -m "Check the PR"
-    scheduler.py watch   github-pr owner/repo#123 -m "PR approved"
-    scheduler.py watch   jira-query "project=CSD AND created>=-1d" -m "New CSD tickets"
-    scheduler.py watch   jira-ticket CSD-225 -m "Ticket status changed"
-    scheduler.py list    [--all] [--type TYPE]
-    scheduler.py check   [--format json]
-    scheduler.py dismiss <id>
-    scheduler.py snooze  <id> --until "in 1 hour"
-    scheduler.py poll    [--quiet]
-    scheduler.py alerts  [--format json]
+Usage (via CLI):
+    aya schedule remind  --due "tomorrow 9am" -m "Check the PR"
+    aya schedule watch   github-pr owner/repo#123 -m "PR approved"
+    aya schedule watch   jira-query "project=CSD AND created>=-1d" -m "New CSD tickets"
+    aya schedule watch   jira-ticket CSD-225 -m "Ticket status changed"
+    aya schedule list    [--all] [--type TYPE]
+    aya schedule check   [--format json]
+    aya schedule dismiss <id>
+    aya schedule snooze  <id> --until "in 1 hour"
+    aya schedule poll    [--quiet]
+    aya schedule alerts  [--format json]
 """
 
 from __future__ import annotations
