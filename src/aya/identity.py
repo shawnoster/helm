@@ -20,6 +20,9 @@ from ulid import ULID
 
 logger = logging.getLogger(__name__)
 
+# ── schema version ────────────────────────────────────────────────────────────
+PROFILE_SCHEMA_VERSION = 1
+
 # Multicodec prefix for ed25519 public keys: 0xed 0x01
 _ED25519_MULTICODEC = bytes([0xED, 0x01])
 
@@ -225,6 +228,21 @@ class Profile:
         # Migrate profiles written by older versions (assistant_sync → aya)
         aya_data = data.get("aya") or data.get("assistant_sync", {})
 
+        # Forward compatibility: warn if schema is newer than expected
+        if isinstance(aya_data, dict):
+            raw_version = aya_data.get("schema_version", 0)
+            file_version = raw_version if isinstance(raw_version, int) else 0
+            if not isinstance(raw_version, int) and raw_version is not None:
+                logger.warning(
+                    "profile has non-integer schema_version: %r — treating as 0", raw_version
+                )
+            if file_version > PROFILE_SCHEMA_VERSION:
+                logger.warning(
+                    "profile schema_version %d > expected %d",
+                    file_version,
+                    PROFILE_SCHEMA_VERSION,
+                )
+
         # Validate aya_data is a dict before calling methods on it
         if not isinstance(aya_data, dict):
             raise ValueError(
@@ -309,6 +327,7 @@ class Profile:
         # Drop legacy key on first save with new format
         data.pop("assistant_sync", None)
         data.setdefault("aya", {})
+        data["aya"]["schema_version"] = PROFILE_SCHEMA_VERSION
         data["aya"]["instances"] = {
             k: {
                 "did": v.did,

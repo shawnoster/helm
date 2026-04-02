@@ -8,9 +8,12 @@ from datetime import datetime, timedelta
 import pytest
 
 from aya.scheduler import (
+    ALERTS_SCHEMA_VERSION,
     LOCAL_TZ,
+    SCHEDULER_SCHEMA_VERSION,
     _find,
     _get_local_tz,
+    _load_collection_unlocked,
     _parse_tags,
     add_recurring,
     add_reminder,
@@ -559,3 +562,55 @@ class TestSeedAlerts:
         result = run_tick()
         assert isinstance(result, dict)
         assert "claims_swept" in result
+
+
+# ── Schema version ──────────────────────────────────────────────────────────
+
+
+class TestSchemaVersion:
+    def test_save_items_includes_schema_version(self):
+        """add_reminder writes schema_version to scheduler.json."""
+        from aya import scheduler
+
+        add_reminder("versioned", "in 1 hour")
+        data = json.loads(scheduler.SCHEDULER_FILE.read_text())
+        assert data["schema_version"] == SCHEDULER_SCHEMA_VERSION
+
+    def test_save_alerts_includes_schema_version(self):
+        """add_seed_alert writes schema_version to alerts.json."""
+        from aya import scheduler
+
+        add_seed_alert(
+            intent="version test",
+            opener="hi",
+            context_summary="",
+            open_questions=[],
+            from_label="home",
+        )
+        data = json.loads(scheduler.ALERTS_FILE.read_text())
+        assert data["schema_version"] == ALERTS_SCHEMA_VERSION
+
+    def test_load_without_schema_version_backward_compat(self):
+        """Files without schema_version load successfully (treated as v0)."""
+        from aya import scheduler
+
+        scheduler.SCHEDULER_FILE.write_text(json.dumps({"items": []}))
+        items = load_items()
+        assert items == []
+
+    def test_load_future_schema_version_warns(self, caplog):
+        """Loading a file with a higher schema_version logs a warning."""
+        from aya import scheduler
+
+        scheduler.SCHEDULER_FILE.write_text(json.dumps({"schema_version": 999, "items": []}))
+        items = load_items()
+        assert items == []
+        assert "schema_version 999" in caplog.text
+
+    def test_load_alerts_future_schema_version_warns(self, caplog):
+        """Loading alerts with a higher schema_version logs a warning."""
+        from aya import scheduler
+
+        scheduler.ALERTS_FILE.write_text(json.dumps({"schema_version": 999, "alerts": []}))
+        _load_collection_unlocked(scheduler.ALERTS_FILE, "alerts")
+        assert "schema_version 999" in caplog.text

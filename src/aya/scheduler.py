@@ -58,6 +58,21 @@ PROVIDER_GITHUB_PR = "github-pr"
 PROVIDER_JIRA_QUERY = "jira-query"
 PROVIDER_JIRA_TICKET = "jira-ticket"
 
+# ── schema versions ──────────────────────────────────────────────────────────
+SCHEDULER_SCHEMA_VERSION = 1
+ALERTS_SCHEMA_VERSION = 1
+
+
+def _scheduler_data(items: list[SchedulerItem]) -> dict[str, Any]:
+    """Build the top-level dict for scheduler.json writes."""
+    return {"schema_version": SCHEDULER_SCHEMA_VERSION, "items": items}
+
+
+def _alerts_data(alerts: list[AlertItem]) -> dict[str, Any]:
+    """Build the top-level dict for alerts.json writes."""
+    return {"schema_version": ALERTS_SCHEMA_VERSION, "alerts": alerts}
+
+
 # ── watch conditions ─────────────────────────────────────────────────────────
 CONDITION_APPROVED_OR_MERGED = "approved_or_merged"
 CONDITION_MERGED = "merged"
@@ -696,24 +711,42 @@ def sweep_stale_claims(max_age_seconds: int = 86400) -> int:
 # ── storage ──────────────────────────────────────────────────────────────────
 
 
+def _check_schema_version(data: dict[str, Any], expected: int, filename: str) -> None:
+    """Log a warning if the file's schema_version is newer than expected."""
+    raw = data.get("schema_version", 0)
+    file_version = raw if isinstance(raw, int) else 0
+    if not isinstance(raw, int) and raw is not None:
+        logger.warning("%s has non-integer schema_version: %r — treating as 0", filename, raw)
+    if file_version > expected:
+        logger.warning("%s schema_version %d > expected %d", filename, file_version, expected)
+
+
 def load_items() -> list[SchedulerItem]:
     data = _locked_read(_scheduler_file())
-    return data.get("items", []) if data else []
+    if not data:
+        return []
+    _check_schema_version(data, SCHEDULER_SCHEMA_VERSION, "scheduler.json")
+    items = data.get("items", [])
+    return cast(list[SchedulerItem], items if isinstance(items, list) else [])
 
 
 def save_items(items: list[SchedulerItem]) -> None:
     with _file_lock():
-        _atomic_write(_scheduler_file(), {"items": items})
+        _atomic_write(_scheduler_file(), _scheduler_data(items))
 
 
 def load_alerts() -> list[AlertItem]:
     data = _locked_read(_alerts_file())
-    return data.get("alerts", []) if data else []
+    if not data:
+        return []
+    _check_schema_version(data, ALERTS_SCHEMA_VERSION, "alerts.json")
+    alerts = data.get("alerts", [])
+    return cast(list[AlertItem], alerts if isinstance(alerts, list) else [])
 
 
 def save_alerts(alerts: list[AlertItem]) -> None:
     with _file_lock():
-        _atomic_write(_alerts_file(), {"alerts": alerts})
+        _atomic_write(_alerts_file(), _alerts_data(alerts))
 
 
 # ── filter helpers ───────────────────────────────────────────────────────────
@@ -767,7 +800,7 @@ def add_seed_alert(
     with _file_lock():
         alerts = _load_alerts_unlocked()
         alerts.append(alert)
-        _atomic_write(_alerts_file(), {"alerts": alerts})
+        _atomic_write(_alerts_file(), _alerts_data(alerts))
     return alert
 
 
@@ -803,7 +836,15 @@ def _load_collection_unlocked(path: Path, key: str) -> list[dict[str, Any]]:
         data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
         return []
-    return data.get(key, []) if isinstance(data, dict) else []
+    if not isinstance(data, dict):
+        return []
+    # Forward compatibility: warn if schema is newer than expected
+    if key == "items":
+        _check_schema_version(data, SCHEDULER_SCHEMA_VERSION, "scheduler.json")
+    elif key == "alerts":
+        _check_schema_version(data, ALERTS_SCHEMA_VERSION, "alerts.json")
+    result = data.get(key, [])
+    return result if isinstance(result, list) else []
 
 
 def _create_alert(
@@ -1066,7 +1107,7 @@ def add_reminder(message: str, due_text: str, tags: str = "") -> SchedulerItem:
     with _file_lock():
         items = _load_items_unlocked()
         items.append(item)
-        _atomic_write(_scheduler_file(), {"items": items})
+        _atomic_write(_scheduler_file(), _scheduler_data(items))
     return item
 
 
@@ -1119,7 +1160,7 @@ def add_watch(
     with _file_lock():
         items = _load_items_unlocked()
         items.append(item)
-        _atomic_write(_scheduler_file(), {"items": items})
+        _atomic_write(_scheduler_file(), _scheduler_data(items))
     return item
 
 
@@ -1170,7 +1211,7 @@ def add_recurring(
     with _file_lock():
         items = _load_items_unlocked()
         items.append(item)
-        _atomic_write(_scheduler_file(), {"items": items})
+        _atomic_write(_scheduler_file(), _scheduler_data(items))
     return item
 
 
@@ -1217,7 +1258,7 @@ def check_due() -> tuple[list[SchedulerItem], list[AlertItem]]:
                 due_items.append(item)
 
         if modified:
-            _atomic_write(_scheduler_file(), {"items": items})
+            _atomic_write(_scheduler_file(), _scheduler_data(items))
 
         unseen = [a for a in _load_alerts_unlocked() if not a.get("seen")]
     return due_items, unseen
@@ -1233,7 +1274,7 @@ def dismiss_item(item_id: str) -> SchedulerItem:
         item["status"] = "dismissed"
         if item["type"] == "reminder":
             item["delivered_at"] = datetime.now(_get_local_tz()).isoformat()
-        _atomic_write(_scheduler_file(), {"items": items})
+        _atomic_write(_scheduler_file(), _scheduler_data(items))
     return item
 
 
@@ -1245,7 +1286,7 @@ def dismiss_alert(alert_id: str) -> AlertItem:
         if not alert:
             raise ValueError(f"Alert {alert_id} not found.")
         alert["seen"] = True
-        _atomic_write(_alerts_file(), {"alerts": alerts})
+        _atomic_write(_alerts_file(), _alerts_data(alerts))
     return alert
 
 
@@ -1260,7 +1301,7 @@ def snooze_item(item_id: str, until_text: str) -> tuple[SchedulerItem, datetime]
         snooze_until = parse_due(until_text, now)
         item["status"] = "snoozed"
         item["snoozed_until"] = snooze_until.isoformat()
-        _atomic_write(_scheduler_file(), {"items": items})
+        _atomic_write(_scheduler_file(), _scheduler_data(items))
     return item, snooze_until
 
 
@@ -1371,9 +1412,9 @@ def run_poll(quiet: bool = False) -> None:
             logger.info("poll: %d due reminders found", len(due_reminders))
 
         if items_modified:
-            _atomic_write(_scheduler_file(), {"items": items})
+            _atomic_write(_scheduler_file(), _scheduler_data(items))
         if alerts_modified:
-            _atomic_write(_alerts_file(), {"alerts": alerts})
+            _atomic_write(_alerts_file(), _alerts_data(alerts))
 
 
 def show_alerts(mark_seen: bool = False) -> list[AlertItem]:
@@ -1385,7 +1426,7 @@ def show_alerts(mark_seen: bool = False) -> list[AlertItem]:
             if unseen:
                 for a in alerts:
                     a["seen"] = True
-                _atomic_write(_alerts_file(), {"alerts": alerts})
+                _atomic_write(_alerts_file(), _alerts_data(alerts))
         return unseen
 
     alerts = load_alerts()
@@ -1514,7 +1555,7 @@ def expire_old_alerts(max_age_days: int = _ALERT_MAX_AGE_DAYS) -> int:
         alerts = [a for a in alerts if datetime.fromisoformat(a["created_at"]) > cutoff]
         removed = original_count - len(alerts)
         if removed > 0:
-            _atomic_write(_alerts_file(), {"alerts": alerts})
+            _atomic_write(_alerts_file(), _alerts_data(alerts))
         return removed
 
 
@@ -1562,7 +1603,7 @@ def get_pending(instance_id: str | None = None) -> PendingResult:
                 if a["id"] in claimed_ids:
                     a["delivered_at"] = now.isoformat()
                     a["delivered_by"] = instance_id
-            _atomic_write(_alerts_file(), {"alerts": alerts})
+            _atomic_write(_alerts_file(), _alerts_data(alerts))
 
     session_crons, suppressed_crons = get_session_crons()
     logger.debug(
