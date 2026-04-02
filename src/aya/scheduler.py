@@ -63,12 +63,12 @@ SCHEDULER_SCHEMA_VERSION = 1
 ALERTS_SCHEMA_VERSION = 1
 
 
-def _scheduler_data(items: list) -> dict[str, Any]:
+def _scheduler_data(items: list[SchedulerItem]) -> dict[str, Any]:
     """Build the top-level dict for scheduler.json writes."""
     return {"schema_version": SCHEDULER_SCHEMA_VERSION, "items": items}
 
 
-def _alerts_data(alerts: list) -> dict[str, Any]:
+def _alerts_data(alerts: list[AlertItem]) -> dict[str, Any]:
     """Build the top-level dict for alerts.json writes."""
     return {"schema_version": ALERTS_SCHEMA_VERSION, "alerts": alerts}
 
@@ -722,7 +722,7 @@ def load_items() -> list[SchedulerItem]:
             file_version,
             SCHEDULER_SCHEMA_VERSION,
         )
-    return data.get("items", [])
+    return cast(list[SchedulerItem], data.get("items", []))
 
 
 def save_items(items: list[SchedulerItem]) -> None:
@@ -741,7 +741,7 @@ def load_alerts() -> list[AlertItem]:
             file_version,
             ALERTS_SCHEMA_VERSION,
         )
-    return data.get("alerts", [])
+    return cast(list[AlertItem], data.get("alerts", []))
 
 
 def save_alerts(alerts: list[AlertItem]) -> None:
@@ -852,7 +852,8 @@ def _load_collection_unlocked(path: Path, key: str) -> list[dict[str, Any]]:
             file_version,
             ALERTS_SCHEMA_VERSION,
         )
-    return data.get(key, [])
+    result = data.get(key, [])
+    return result if isinstance(result, list) else []
 
 
 def _create_alert(
