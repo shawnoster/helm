@@ -127,8 +127,8 @@ class TestInboxContract:
     without network I/O.
     """
 
-    def test_empty_inbox_is_list(self, tmp_path, monkeypatch):
-        """An inbox with no packets returns an empty JSON list."""
+    def test_empty_inbox_is_wrapped_object(self, tmp_path, monkeypatch):
+        """An inbox with no packets returns {"packets": []}."""
         from aya.identity import Identity, Profile
 
         profile_path = tmp_path / "profile.json"
@@ -149,7 +149,10 @@ class TestInboxContract:
         )
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
-        assert isinstance(data, list)
+        assert isinstance(data, dict)
+        assert "packets" in data
+        assert isinstance(data["packets"], list)
+        assert data["packets"] == []
 
     def test_packet_shape(self, tmp_path, monkeypatch):
         """Each packet dict must have id, intent, from_did, trusted."""
@@ -179,21 +182,60 @@ class TestInboxContract:
         )
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
-        assert isinstance(data, list)
-        assert len(data) == 1
-        pkt = data[0]
+        assert isinstance(data, dict)
+        assert "packets" in data
+        packets = data["packets"]
+        assert isinstance(packets, list)
+        assert len(packets) == 1
+        pkt = packets[0]
         for key in ("id", "intent", "from_did", "trusted"):
             assert key in pkt, f"missing packet key: {key}"
+
+
+# ── receive ─────────────────────────────────────────────────────────────────
+
+
+class TestReceiveContract:
+    def test_empty_receive_is_wrapped_object(self, tmp_path, monkeypatch):
+        """receive --format json returns {"packets": []} when relay yields nothing."""
+        from unittest.mock import patch
+
+        from aya.identity import Identity, Profile
+
+        local = Identity.generate("default")
+        profile = Profile(alias="Ace", ship_mind_name="", user_name="Shawn")
+        profile.instances["default"] = local
+        profile_path = tmp_path / "profile.json"
+        profile.save(profile_path)
+
+        async def mock_fetch(*args, **kwargs):
+            if False:  # pragma: no cover
+                yield
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["receive", "--quiet", "--format", "json", "--profile", str(profile_path)],
+            )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert isinstance(data, dict)
+        assert "packets" in data
+        assert isinstance(data["packets"], list)
 
 
 # ── schedule list ────────────────────────────────────────────────────────────
 
 
 class TestScheduleListContract:
-    def test_empty_list_is_json_array(self):
-        """schedule list --format json returns a JSON array."""
+    def test_empty_list_is_wrapped_object(self):
+        """schedule list --format json returns {"items": []}."""
         data = _invoke_json("schedule", "list")
-        assert isinstance(data, list)
+        assert isinstance(data, dict)
+        assert "items" in data
+        assert isinstance(data["items"], list)
+        assert data["items"] == []
 
     def test_item_shape_when_populated(self):
         """Each item has id, type, and status keys."""
@@ -203,9 +245,12 @@ class TestScheduleListContract:
         add_recurring("Test cron", "0 * * * *", prompt="run thing")
 
         data = _invoke_json("schedule", "list")
-        assert isinstance(data, list)
-        assert len(data) >= 2
-        for item in data:
+        assert isinstance(data, dict)
+        assert "items" in data
+        items = data["items"]
+        assert isinstance(items, list)
+        assert len(items) >= 2
+        for item in items:
             assert "id" in item
             assert "type" in item
 
@@ -269,10 +314,13 @@ class TestScheduleStatusContract:
 
 
 class TestScheduleAlertsContract:
-    def test_empty_alerts_is_list(self):
-        """schedule alerts --format json returns a JSON list."""
+    def test_empty_alerts_is_wrapped_object(self):
+        """schedule alerts --format json returns {"alerts": []}."""
         data = _invoke_json("schedule", "alerts")
-        assert isinstance(data, list)
+        assert isinstance(data, dict)
+        assert "alerts" in data
+        assert isinstance(data["alerts"], list)
+        assert data["alerts"] == []
 
     def test_alert_shape_when_populated(self, tmp_path, monkeypatch):
         """Each alert has id, source_item_id, message, seen."""
@@ -290,9 +338,12 @@ class TestScheduleAlertsContract:
         scheduler.ALERTS_FILE.write_text(json.dumps({"alerts": alerts}))
 
         data = _invoke_json("schedule", "alerts")
-        assert isinstance(data, list)
-        assert len(data) == 1
-        alert = data[0]
+        assert isinstance(data, dict)
+        assert "alerts" in data
+        alerts_list = data["alerts"]
+        assert isinstance(alerts_list, list)
+        assert len(alerts_list) == 1
+        alert = alerts_list[0]
         for key in ("id", "source_item_id", "message", "seen"):
             assert key in alert, f"missing alert key: {key}"
 
