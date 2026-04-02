@@ -1763,6 +1763,113 @@ class TestDeprecationWarnings:
         assert "deprecated" in stderr
         assert "--as" in stderr
 
+    def test_send_instance_warns(self, profile_with_trusted: Path, tmp_path: Path) -> None:
+        """--instance on send emits a deprecation warning to stderr."""
+        # Create a packet file to send
+        p = Profile.load(profile_with_trusted)
+        local = p.instances["default"]
+        home_key = p.trusted_keys["home"]
+        pkt = Packet(
+            **{"from": local.did, "to": home_key.did},
+            intent="deprecation test",
+            content="test",
+        )
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        mock_publish = AsyncMock(return_value="a" * 64)
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.publish = mock_publish
+            result = runner.invoke(
+                app,
+                [
+                    "send",
+                    str(packet_file),
+                    "--instance",
+                    "default",
+                    "--profile",
+                    str(profile_with_trusted),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        stderr = result.stderr or ""
+        assert "deprecated" in stderr
+        assert "--as" in stderr
+
+    def test_dispatch_instance_warns(self, profile_with_trusted: Path) -> None:
+        """--instance on dispatch emits a deprecation warning to stderr."""
+        mock_publish = AsyncMock(return_value="b" * 64)
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.publish = mock_publish
+            result = runner.invoke(
+                app,
+                [
+                    "dispatch",
+                    "--to",
+                    "home",
+                    "--intent",
+                    "deprecation test",
+                    "--instance",
+                    "default",
+                    "--profile",
+                    str(profile_with_trusted),
+                ],
+                input="test content\n",
+            )
+        assert result.exit_code == 0, result.output
+        stderr = result.stderr or ""
+        assert "deprecated" in stderr
+        assert "--as" in stderr
+
+    def test_receive_instance_warns(self, profile_with_instance: Path) -> None:
+        """--instance on receive emits a deprecation warning to stderr."""
+
+        async def mock_fetch(*args, **kwargs):
+            if False:  # pragma: no cover
+                yield
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                [
+                    "receive",
+                    "--quiet",
+                    "--instance",
+                    "default",
+                    "--profile",
+                    str(profile_with_instance),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        stderr = result.stderr or ""
+        assert "deprecated" in stderr
+        assert "--as" in stderr
+
+    def test_inbox_instance_warns(self, profile_with_instance: Path) -> None:
+        """--instance on inbox emits a deprecation warning to stderr."""
+
+        async def mock_fetch(*args, **kwargs):
+            if False:  # pragma: no cover
+                yield
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                [
+                    "inbox",
+                    "--instance",
+                    "default",
+                    "--profile",
+                    str(profile_with_instance),
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        stderr = result.stderr or ""
+        assert "deprecated" in stderr
+        assert "--as" in stderr
+
 
 # ── ack ───────────────────────────────────────────────────────────────────────
 
