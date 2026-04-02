@@ -195,8 +195,6 @@ def _resolve_instance(profile: Any, instance: str) -> Any:
 
 def _resolve_did(to: str, profile: Any) -> tuple[str, str]:
     if to.startswith("did:"):
-        if not profile.is_trusted(to):
-            raise ValueError(f"DID '{to}' is not in trusted_keys. Use a label or pair first.")
         return to, to
     key = profile.trusted_keys.get(to)
     if key:
@@ -307,7 +305,9 @@ async def _handle_receive(arguments: dict[str, Any]) -> list[types.TextContent]:
     since: datetime | None = None
     if profile.last_checked:
         now = datetime.now(UTC)
-        oldest = min(datetime.fromisoformat(v) for v in profile.last_checked.values())
+        oldest = min(
+            datetime.fromisoformat(v.replace("Z", "+00:00")) for v in profile.last_checked.values()
+        )
         since = max(oldest - timedelta(seconds=60), now - timedelta(days=7))
 
     packets: list[Packet] = []
@@ -418,6 +418,7 @@ async def _handle_ack(arguments: dict[str, Any]) -> list[types.TextContent]:
         content={"in_reply_to": full_packet_id, "message": message, "dismiss": False},
         in_reply_to=full_packet_id,
     )
+    ack_packet.encrypted = True
     signed = ack_packet.sign(local)
 
     if recipient_nostr_pub is None:
