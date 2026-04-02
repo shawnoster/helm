@@ -512,10 +512,10 @@ def is_idle(threshold_str: str, now: datetime | None = None) -> bool:
 def _lock_file() -> Path:
     """Return the advisory lock file path, co-located with scheduler.json."""
     if "LOCK_FILE" in globals():
-        return globals()["LOCK_FILE"]
+        return cast(Path, globals()["LOCK_FILE"])
     # Derive from scheduler file parent so test isolation via SCHEDULER_FILE works.
     if "SCHEDULER_FILE" in globals():
-        return globals()["SCHEDULER_FILE"].parent / ".scheduler.lock"
+        return cast(Path, globals()["SCHEDULER_FILE"]).parent / ".scheduler.lock"
     return _paths.LOCK_FILE
 
 
@@ -612,10 +612,10 @@ _CLAIM_TTL_SECONDS = 300  # 5 minutes — if a session crashes, claim expires
 def _claims_dir() -> Path:
     """Return the claims directory, co-located with scheduler.json."""
     if "CLAIMS_DIR" in globals():
-        return globals()["CLAIMS_DIR"]
+        return cast(Path, globals()["CLAIMS_DIR"])
     # Derive from scheduler file parent so test isolation via SCHEDULER_FILE works.
     if "SCHEDULER_FILE" in globals():
-        return globals()["SCHEDULER_FILE"].parent / "claims"
+        return cast(Path, globals()["SCHEDULER_FILE"]).parent / "claims"
     return _paths.CLAIMS_DIR
 
 
@@ -820,7 +820,7 @@ def _get_jira_credentials() -> tuple[str, str, str]:
 # ── watch providers ──────────────────────────────────────────────────────────
 
 
-def _run_gh(args: list[str], timeout: int = 15) -> dict[str, Any] | list | None:
+def _run_gh(args: list[str], timeout: int = 15) -> dict[str, Any] | list[Any] | None:
     """Run gh CLI and parse JSON output."""
     try:
         result = subprocess.run(
@@ -852,10 +852,10 @@ def _check_github_pr(config: GithubPrConfig) -> GithubPrState | None:
             "{ state: .state, merged: .merged, draft: .draft, title: .title }",
         ]
     )
-    if not pr_data:
+    if not pr_data or not isinstance(pr_data, dict):
         return None
 
-    reviews = _run_gh(
+    reviews_raw = _run_gh(
         [
             "api",
             f"/repos/{owner}/{repo}/pulls/{pr}/reviews",
@@ -863,15 +863,16 @@ def _check_github_pr(config: GithubPrConfig) -> GithubPrState | None:
             "[.[] | { user: .user.login, state: .state }]",
         ]
     )
+    reviews: list[dict[str, Any]] = reviews_raw if isinstance(reviews_raw, list) else []
 
-    return {
-        "pr_state": pr_data.get("state"),
-        "merged": pr_data.get("merged", False),
-        "draft": pr_data.get("draft", False),
-        "title": pr_data.get("title", ""),
-        "reviews": reviews or [],
-        "has_approval": any(r.get("state") == "APPROVED" for r in (reviews or [])),
-    }
+    return GithubPrState(
+        pr_state=pr_data.get("state"),
+        merged=pr_data.get("merged", False),
+        draft=pr_data.get("draft", False),
+        title=pr_data.get("title", ""),
+        reviews=reviews,
+        has_approval=any(r.get("state") == "APPROVED" for r in reviews),
+    )
 
 
 def _check_jira_query(config: JiraQueryConfig) -> JiraQueryState | None:
@@ -1027,7 +1028,8 @@ def _evaluate_auto_remove(item: SchedulerItem, state: WatchState) -> bool:
     if not remove_when:
         return False
     if remove_when == "merged_or_closed" and item.get("provider") == "github-pr":
-        return state.get("merged", False) or state.get("pr_state") == "closed"
+        gh_state = cast(GithubPrState, state)
+        return gh_state["merged"] or gh_state["pr_state"] == "closed"
     return False
 
 
@@ -1038,7 +1040,7 @@ def add_reminder(message: str, due_text: str, tags: str = "") -> SchedulerItem:
     """Add a one-shot reminder. Returns the created item."""
     now = datetime.now(_get_local_tz())
     due = parse_due(due_text, now)
-    item = {
+    item: SchedulerItem = {
         "id": _new_id(),
         "type": "reminder",
         "status": "pending",
@@ -1087,7 +1089,7 @@ def add_watch(
     else:
         raise ValueError(f"Unknown provider: {provider}")
 
-    item = {
+    item: SchedulerItem = {
         "id": _new_id(),
         "type": "watch",
         "status": "active",
@@ -1188,14 +1190,18 @@ def check_due() -> tuple[list[SchedulerItem], list[AlertItem]]:
         for item in items:
             if item.get("type") != "reminder" or item.get("status") not in ("pending", "snoozed"):
                 continue
-            if item.get("status") == "snoozed" and item.get("snoozed_until"):
-                snooze_end = datetime.fromisoformat(item["snoozed_until"])
+            snoozed_until = item.get("snoozed_until")
+            if item.get("status") == "snoozed" and snoozed_until:
+                snooze_end = datetime.fromisoformat(snoozed_until)
                 if snooze_end > now:
                     continue
                 item["status"] = "pending"
                 item["snoozed_until"] = None
                 modified = True
-            due = datetime.fromisoformat(item["due_at"])
+            due_at = item.get("due_at", "")
+            if not due_at:
+                continue
+            due = datetime.fromisoformat(due_at)
             if due <= now:
                 due_items.append(item)
 
@@ -1294,7 +1300,9 @@ def run_poll(quiet: bool = False) -> None:
                         alert = _create_alert(
                             source_item_id=item["id"],
                             message=_format_watch_alert(item, new_state),
-                            details=new_state,
+                            # WatchState fields overlap with AlertDetails (total=False);
+                            # safe because AlertDetails accepts any subset of its keys.
+                            details=cast(AlertDetails, new_state),
                             now=now,
                         )
                         alerts.append(alert)
@@ -1358,20 +1366,23 @@ def _format_watch_alert(item: SchedulerItem, state: WatchState) -> str:
     base = item.get("message", "Watch triggered")
 
     if provider == "github-pr":
-        if state.get("merged"):
+        gh_state = cast(GithubPrState, state)
+        if gh_state["merged"]:
             return f"{base} — MERGED"
-        if state.get("has_approval"):
-            approvers = [r["user"] for r in state.get("reviews", []) if r["state"] == "APPROVED"]
+        if gh_state["has_approval"]:
+            approvers = [r["user"] for r in gh_state["reviews"] if r["state"] == "APPROVED"]
             return f"{base} — APPROVED by {', '.join(approvers)}"
         return f"{base} — state changed"
 
     if provider == "jira-query":
-        new_issues = state.get("issues", [])[:3]
+        jq_state = cast(JiraQueryState, state)
+        new_issues = jq_state["issues"][:3]
         keys = ", ".join(i["key"] for i in new_issues)
         return f"{base} — new: {keys}" if keys else f"{base} — results changed"
 
     if provider == "jira-ticket":
-        return f"{base} — now: {state.get('status', '?')}"
+        jt_state = cast(JiraTicketState, state)
+        return f"{base} — now: {jt_state['status']}"
 
     return base
 
@@ -1389,10 +1400,12 @@ def get_due_reminders(now: datetime | None = None) -> list[SchedulerItem]:
         if item.get("type") != "reminder" or item.get("status") not in ("pending", "snoozed"):
             continue
         try:
-            if item.get("status") == "snoozed" and item.get("snoozed_until"):
-                if datetime.fromisoformat(item["snoozed_until"]) > now:
+            snoozed_until = item.get("snoozed_until")
+            if item.get("status") == "snoozed" and snoozed_until:
+                if datetime.fromisoformat(snoozed_until) > now:
                     continue
-            if datetime.fromisoformat(item["due_at"]) <= now:
+            due_at = item.get("due_at", "")
+            if due_at and datetime.fromisoformat(due_at) <= now:
                 due.append(item)
         except ValueError:
             # Skip items with malformed timestamps
@@ -1531,17 +1544,17 @@ def get_session_crons() -> tuple[list[SchedulerItem], list[SuppressedCron]]:
         and i.get("status", "active") == "active"
         and i.get("session_required")
     ]
-    session_crons = []
-    suppressed_crons = []
+    session_crons: list[SchedulerItem] = []
+    suppressed_crons: list[SuppressedCron] = []
     for item in active:
         only_during = item.get("only_during", "")
         idle_back_off_str = item.get("idle_back_off", "")
         if only_during and not is_within_work_hours(only_during, now):
             reason = f"outside work hours ({only_during})"
-            suppressed_crons.append({"item": item, "reason": reason})
+            suppressed_crons.append(SuppressedCron(item=item, reason=reason))
         elif idle_back_off_str and is_idle(idle_back_off_str, now):
             reason = f"session idle (threshold: {idle_back_off_str})"
-            suppressed_crons.append({"item": item, "reason": reason})
+            suppressed_crons.append(SuppressedCron(item=item, reason=reason))
         else:
             session_crons.append(item)
     return session_crons, suppressed_crons
