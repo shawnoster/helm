@@ -2236,7 +2236,11 @@ class TestDryRun:
         output_data = json.loads(result.output)
         assert output_data["type"] == "watch"
         assert output_data["provider"] == "github-pr"
+        assert output_data["target"] == "owner/repo#42"
         assert output_data["condition"] == "approved_or_merged"
+        assert output_data["message"] == "PR ready"
+        assert output_data["status"] == "active"
+        assert output_data["poll_interval_minutes"] == 30
         data = json.loads(scheduler_file.read_text())
         assert len(data["items"]) == 0
 
@@ -2275,6 +2279,10 @@ class TestDryRun:
         output_data = json.loads(result.output)
         assert output_data["type"] == "recurring"
         assert output_data["cron"] == "*/15 * * * *"
+        assert output_data["prompt"] == "Take a break"
+        assert output_data["message"] == "health check"
+        assert output_data["status"] == "active"
+        assert output_data["session_required"] is True
         data = json.loads(scheduler_file.read_text())
         assert len(data["items"]) == 0
 

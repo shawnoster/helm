@@ -395,7 +395,7 @@ def send(
     packet = Packet.from_json(packet_file.read_text())
 
     if dry_run:
-        console.print_json(data=json.loads(packet.to_json()))
+        _output_json(json.loads(packet.to_json()))
         raise typer.Exit(0)
 
     client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
@@ -489,7 +489,7 @@ def dispatch(
         signed = packet.sign(local)
 
         if dry_run:
-            console.print_json(data=json.loads(signed.to_json()))
+            _output_json(json.loads(signed.to_json()))
             return
 
         relay_urls = [relay] if relay else p.default_relays
@@ -641,7 +641,7 @@ def ack(
         signed = ack_packet.sign(local)
 
         if dry_run:
-            console.print_json(data=json.loads(signed.to_json()))
+            _output_json(json.loads(signed.to_json()))
             return
 
         relay_urls = [relay] if relay else p.default_relays
@@ -920,7 +920,7 @@ def pair(
         }
         if code:
             summary["code"] = code
-        console.print_json(data=summary)
+        _output_json(summary)
         raise typer.Exit(0)
 
     if code:
@@ -1010,7 +1010,7 @@ def schedule_remind(
             "tags": [t.strip() for t in tag.split(",") if t.strip()] if tag else [],
             "due_at": due_dt.isoformat(),
         }
-        console.print_json(data=preview)
+        _output_json(preview)
         raise typer.Exit(0)
     item = add_reminder(message, due, tag)
     due_dt = parse_due(due)
@@ -1060,7 +1060,7 @@ def schedule_watch(
             "poll_interval_minutes": interval,
             "remove_when": remove_when,
         }
-        console.print_json(data=preview)
+        _output_json(preview)
         raise typer.Exit(0)
     try:
         item = add_watch(provider, target, message, tag, condition, interval, remove_when)
@@ -1109,7 +1109,7 @@ def schedule_recurring(
             "idle_back_off": idle_back_off,
             "only_during": only_during,
         }
-        console.print_json(data=preview)
+        _output_json(preview)
         raise typer.Exit(0)
     try:
         item = add_recurring(message, cron, prompt, tag, idle_back_off, only_during)
