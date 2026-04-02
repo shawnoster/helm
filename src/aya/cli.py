@@ -165,18 +165,28 @@ class ErrorCode:
     DISPATCH_FAILED = "DISPATCH_FAILED"
 
 
+def _want_json_errors() -> bool:
+    """True when errors should be emitted as structured JSON."""
+    env = os.environ.get("AYA_FORMAT", "").strip().lower()
+    if env == "json":
+        return True
+    if env == "text":
+        return False
+    return not sys.stderr.isatty()
+
+
 def _emit_error(
     code: str,
     message: str,
     context: dict[str, object] | None = None,
     exit_code: int = 1,
 ) -> NoReturn:
-    """Emit an error — structured JSON on stderr in non-TTY mode, Rich-formatted otherwise."""
-    if not sys.stderr.isatty():
+    """Emit an error — structured JSON on stderr in JSON mode, Rich-formatted otherwise."""
+    if _want_json_errors():
         payload: dict[str, object] = {"error": {"code": code, "message": message}}
         if context:
             payload["error"]["context"] = context  # type: ignore[index]
-        err.out(json.dumps(payload))
+        err.out(json.dumps(payload, default=str))
     else:
         err.print(f"[red]{message}[/red]")
     raise typer.Exit(exit_code)
