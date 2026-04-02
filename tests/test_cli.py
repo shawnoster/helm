@@ -2212,3 +2212,86 @@ class TestDryRun:
         # Scheduler file should still be empty
         data = json.loads(scheduler_file.read_text())
         assert len(data["items"]) == 0
+
+    def test_schedule_watch_dry_run(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """--dry-run prints watch preview and does not write to scheduler file."""
+        scheduler_file = tmp_path / "assistant" / "memory" / "scheduler.json"
+        scheduler_file.parent.mkdir(parents=True)
+        scheduler_file.write_text(json.dumps({"items": []}))
+        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+
+        result = runner.invoke(
+            app,
+            [
+                "schedule",
+                "watch",
+                "github-pr",
+                "owner/repo#42",
+                "--message",
+                "PR ready",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        output_data = json.loads(result.output)
+        assert output_data["type"] == "watch"
+        assert output_data["provider"] == "github-pr"
+        assert output_data["condition"] == "approved_or_merged"
+        data = json.loads(scheduler_file.read_text())
+        assert len(data["items"]) == 0
+
+    def test_schedule_watch_dry_run_invalid_target(self) -> None:
+        """--dry-run with invalid github-pr target exits 1."""
+        result = runner.invoke(
+            app,
+            ["schedule", "watch", "github-pr", "bad-format", "-m", "test", "--dry-run"],
+        )
+        assert result.exit_code == 1
+
+    def test_schedule_recurring_dry_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """--dry-run prints cron preview and does not write to scheduler file."""
+        scheduler_file = tmp_path / "assistant" / "memory" / "scheduler.json"
+        scheduler_file.parent.mkdir(parents=True)
+        scheduler_file.write_text(json.dumps({"items": []}))
+        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+
+        result = runner.invoke(
+            app,
+            [
+                "schedule",
+                "recurring",
+                "--message",
+                "health check",
+                "--cron",
+                "*/15 * * * *",
+                "--prompt",
+                "Take a break",
+                "--dry-run",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        output_data = json.loads(result.output)
+        assert output_data["type"] == "recurring"
+        assert output_data["cron"] == "*/15 * * * *"
+        data = json.loads(scheduler_file.read_text())
+        assert len(data["items"]) == 0
+
+    def test_pair_dry_run(self, profile_with_instance: Path) -> None:
+        """--dry-run prints pairing intent JSON without relay interaction."""
+        result = runner.invoke(
+            app,
+            [
+                "pair",
+                "--peer",
+                "work",
+                "--dry-run",
+                "--profile",
+                str(profile_with_instance),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        output_data = json.loads(result.output)
+        assert output_data["action"] == "initiate_pairing"
+        assert output_data["peer_label"] == "work"

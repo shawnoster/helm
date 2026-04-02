@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -1033,6 +1034,15 @@ def schedule_watch(
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show watch without saving"),
 ) -> None:
     """Add a condition-based watch."""
+    # Validate provider/target before dry-run output
+    if provider == "github-pr":
+        if not re.match(r"([^/]+)/([^#]+)#(\d+)", target):
+            err.print("[red]Format: owner/repo#123[/red]")
+            raise typer.Exit(1)
+    elif provider not in ("jira-query", "jira-ticket"):
+        err.print(f"[red]Unknown provider: {provider}[/red]")
+        raise typer.Exit(1)
+
     if dry_run:
         preview = {
             "type": "watch",
@@ -1041,7 +1051,12 @@ def schedule_watch(
             "tags": [t.strip() for t in tag.split(",") if t.strip()] if tag else [],
             "provider": provider,
             "target": target,
-            "condition": condition,
+            "condition": condition
+            or {
+                "github-pr": "approved_or_merged",
+                "jira-query": "new_results",
+                "jira-ticket": "status_changed",
+            }.get(provider, ""),
             "poll_interval_minutes": interval,
             "remove_when": remove_when,
         }
@@ -1076,6 +1091,12 @@ def schedule_recurring(
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show cron without saving"),
 ) -> None:
     """Add a persistent recurring session job (session_required cron)."""
+    # Validate cron expression before dry-run output
+    parts = cron.strip().split()
+    if len(parts) != 5:
+        err.print(f"[red]Invalid cron expression (expected 5 fields): {cron}[/red]")
+        raise typer.Exit(1)
+
     if dry_run:
         preview = {
             "type": "recurring",
