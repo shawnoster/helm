@@ -881,7 +881,7 @@ def receive(
             if not quiet:
                 err.print("[yellow]Could not reach relay — skipping relay fetch.[/yellow]")
             if format_ == OutputFormat.JSON:
-                _output_json([])
+                _output_json({"packets": []})
             return
 
         # Record that we checked these relays — persist even when inbox is empty
@@ -892,7 +892,7 @@ def receive(
 
         if not packets:
             if format_ == OutputFormat.JSON:
-                _output_json([])
+                _output_json({"packets": []})
             elif not quiet:
                 console.print("[dim]No pending packets.[/dim]")
             p.save(profile)
@@ -915,7 +915,7 @@ def receive(
 
         if not verified:
             if format_ == OutputFormat.JSON:
-                _output_json([])
+                _output_json({"packets": []})
             elif not quiet:
                 console.print("[dim]No valid packets.[/dim]")
             p.save(profile)
@@ -986,7 +986,7 @@ def receive(
                 )
 
         if format_ == OutputFormat.JSON:
-            _output_json(received_summaries)
+            _output_json({"packets": received_summaries})
 
         # Persist updated ingested_ids and last_checked.
         p.save(profile)
@@ -1039,7 +1039,8 @@ def inbox(
 
         if format_ == OutputFormat.JSON:
             ingested_for_json = ingested_set if show_all else None
-            _output_json([_packet_to_dict(pkt, p, ingested_for_json) for pkt in display_packets])
+            packet_dicts = [_packet_to_dict(pkt, p, ingested_for_json) for pkt in display_packets]
+            _output_json({"packets": packet_dicts})
         elif not display_packets:
             console.print("[dim]Inbox empty.[/dim]")
         else:
@@ -1231,11 +1232,11 @@ def schedule_remind(
             "tags": [t.strip() for t in tag.split(",") if t.strip()] if tag else [],
             "due_at": due_dt.isoformat(),
         }
-        _output_json(preview)
+        _output_json({"item": preview})
         raise typer.Exit(0)
     item = add_reminder(message, due, tag)
     if format_ == OutputFormat.JSON:
-        _output_json(item)
+        _output_json({"item": item})
         raise typer.Exit(0)
     due_dt = parse_due(due)
     console.print(
@@ -1288,7 +1289,7 @@ def schedule_watch(
             "poll_interval_minutes": interval,
             "remove_when": remove_when,
         }
-        _output_json(preview)
+        _output_json({"item": preview})
         raise typer.Exit(0)
     try:
         item = add_watch(provider, target, message, tag, condition, interval, remove_when)
@@ -1296,7 +1297,7 @@ def schedule_watch(
         err.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
     if format_ == OutputFormat.JSON:
-        _output_json(item)
+        _output_json({"item": item})
         raise typer.Exit(0)
     console.print(f"[green]✓[/green] Watch {item['id'][:8]} ({provider})")
     console.print(f"  {message}")
@@ -1344,7 +1345,7 @@ def schedule_recurring(
             "idle_back_off": idle_back_off,
             "only_during": only_during,
         }
-        _output_json(preview)
+        _output_json({"item": preview})
         raise typer.Exit(0)
     try:
         item = add_recurring(message, cron, prompt, tag, idle_back_off, only_during)
@@ -1352,7 +1353,7 @@ def schedule_recurring(
         err.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc
     if format_ == OutputFormat.JSON:
-        _output_json(item)
+        _output_json({"item": item})
         raise typer.Exit(0)
     console.print(f"[green]✓[/green] Recurring {item['id'][:8]} — {cron}")
     console.print(f"  {message}")
@@ -1407,7 +1408,7 @@ def schedule_list(
     format_ = resolve_format(format_)
     items = list_items(show_all=all_items, item_type=item_type)
     if format_ == OutputFormat.JSON:
-        _output_json(items)
+        _output_json({"items": items})
     else:
         _display_items(items)
 
@@ -1567,7 +1568,7 @@ def schedule_alerts(
     unseen = show_alerts(mark_seen=mark_seen)
 
     if format_ == OutputFormat.JSON:
-        _output_json(unseen)
+        _output_json({"alerts": unseen})
         return
 
     if not unseen:

@@ -1448,8 +1448,9 @@ class TestInbox:
 
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
-        assert len(data) == 1
-        assert data[0]["ingested"] is True
+        assert "packets" in data
+        assert len(data["packets"]) == 1
+        assert data["packets"][0]["ingested"] is True
 
     def test_json_output_no_ingested_field_without_all_flag(
         self, profile_with_sender: Path, sender: Identity
@@ -1470,8 +1471,9 @@ class TestInbox:
 
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
-        assert len(data) == 1
-        assert "ingested" not in data[0]
+        assert "packets" in data
+        assert len(data["packets"]) == 1
+        assert "ingested" not in data["packets"][0]
 
 
 class TestAutoFormat:
@@ -2237,6 +2239,8 @@ class TestDryRun:
         )
         assert result.exit_code == 0, result.output
         output_data = json.loads(result.output)
+        assert "item" in output_data
+        output_data = output_data["item"]
         assert output_data["type"] == "reminder"
         assert output_data["message"] == "Stand up and stretch"
         # Scheduler file should still be empty
@@ -2264,6 +2268,8 @@ class TestDryRun:
         )
         assert result.exit_code == 0, result.output
         output_data = json.loads(result.output)
+        assert "item" in output_data
+        output_data = output_data["item"]
         assert output_data["type"] == "watch"
         assert output_data["provider"] == "github-pr"
         assert output_data["target"] == "owner/repo#42"
@@ -2307,6 +2313,8 @@ class TestDryRun:
         )
         assert result.exit_code == 0, result.output
         output_data = json.loads(result.output)
+        assert "item" in output_data
+        output_data = output_data["item"]
         assert output_data["type"] == "recurring"
         assert output_data["cron"] == "*/15 * * * *"
         assert output_data["prompt"] == "Take a break"
@@ -2526,6 +2534,8 @@ class TestJsonFormat:
         )
         assert result.exit_code == 0, result.output
         data = json.loads(result.output)
+        assert "item" in data
+        data = data["item"]
         assert data["message"] == "Test reminder"
         assert data["type"] == "reminder"
         assert "id" in data
