@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import sys
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from pathlib import Path
@@ -163,6 +164,7 @@ class ErrorCode:
     INVALID_ARGUMENT = "INVALID_ARGUMENT"
     AMBIGUOUS_PREFIX = "AMBIGUOUS_PREFIX"
     DISPATCH_FAILED = "DISPATCH_FAILED"
+    PAIR_TIMEOUT = "PAIR_TIMEOUT"
 
 
 def _want_json_errors() -> bool:
@@ -272,8 +274,12 @@ def init(
     relay: str | None = typer.Option(
         None, help="Override the default relay URL (omit to use the built-in two-relay default)"
     ),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Generate a keypair for this instance and register it in your profile."""
+    format_ = resolve_format(format_)
     identity = Identity.generate(label)
 
     if profile.exists():
@@ -286,6 +292,10 @@ def init(
     if relay is not None:
         p.default_relay = relay  # sets default_relays = [relay]
     p.save(profile)
+
+    if format_ == OutputFormat.JSON:
+        _output_json({"profile_path": str(profile), "did": identity.did, "instance": label})
+        raise typer.Exit(0)
 
     relay_display = relay or ", ".join(p.default_relays)
     console.print(
@@ -313,6 +323,9 @@ def trust(
         help="Nostr pubkey hex (required for send/receive; pairing fills this automatically)",
     ),
     profile: Path = typer.Option(DEFAULT_PROFILE),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Add a DID to your trusted keys list."""
     if label is not None and peer is not None:
@@ -326,6 +339,7 @@ def trust(
         peer = label
     if peer is None:
         _emit_error(ErrorCode.INVALID_ARGUMENT, "Missing option '--peer'.", exit_code=2)
+    format_ = resolve_format(format_)
     p = _load_profile(profile)
     p.trusted_keys[peer] = TrustedKey(
         did=did,
@@ -333,6 +347,11 @@ def trust(
         nostr_pubkey=nostr_pubkey,
     )
     p.save(profile)
+
+    if format_ == OutputFormat.JSON:
+        _output_json({"did": did, "label": peer, "nostr_pubkey": nostr_pubkey or None})
+        raise typer.Exit(0)
+
     console.print(f"[green]✓[/green] Trusted: [cyan]{peer}[/cyan]  [dim]{did}[/dim]")
     if not nostr_pubkey:
         console.print(
@@ -361,6 +380,9 @@ def pack(
         ConflictStrategy.LAST_WRITE_WINS, help="Conflict resolution strategy"
     ),
     profile: Path = typer.Option(DEFAULT_PROFILE),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Pack a knowledge packet ready to send."""
     if instance is not None and as_ != "default":
@@ -372,6 +394,7 @@ def pack(
     if instance is not None:
         err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
         as_ = instance
+    format_ = resolve_format(format_)
     p = _load_profile(profile)
     local = _resolve_instance(p, as_)
 
@@ -412,9 +435,15 @@ def pack(
 
     if out:
         out.write_text(json_output)
-        console.print(f"[green]✓[/green] Packet written to [cyan]{out}[/cyan]")
-    else:
+
+    if format_ == OutputFormat.JSON:
+        _output_json(json.loads(json_output))
+        raise typer.Exit(0)
+
+    if not out:
         sys.stdout.write(json_output)
+    else:
+        console.print(f"[green]✓[/green] Packet written to [cyan]{out}[/cyan]")
 
 
 # ── send ──────────────────────────────────────────────────────────────────────
@@ -430,6 +459,9 @@ def send(
     ),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show packet without publishing"),
     profile: Path = typer.Option(DEFAULT_PROFILE),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Send a packet to a Nostr relay."""
     if instance is not None and as_ != "default":
@@ -441,6 +473,7 @@ def send(
     if instance is not None:
         err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
         as_ = instance
+    format_ = resolve_format(format_)
     p = _load_profile(profile)
     local = _resolve_instance(p, as_)
 
@@ -458,6 +491,11 @@ def send(
     event_id = asyncio.run(client.publish(packet, recipient_nostr_pub, encrypt=packet.encrypted))
     relay_count = len(relay_urls)
     relay_display = relay_urls[0] if relay_count == 1 else f"{relay_urls[0]} (+{relay_count - 1})"
+
+    if format_ == OutputFormat.JSON:
+        _output_json({"packet_id": packet.id, "event_id": event_id, "relay": relay_display})
+        raise typer.Exit(0)
+
     console.print(
         f"[green]✓[/green] Sent [cyan]{packet.intent}[/cyan]\n"
         f"  Packet: [dim]{packet.id[:8]}[/dim]  "
@@ -490,6 +528,9 @@ def dispatch(
     ),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show packet without publishing"),
     profile: Path = typer.Option(DEFAULT_PROFILE),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Pack and send in one step — the natural 'pack for home' flow."""
     if instance is not None and as_ != "default":
@@ -501,6 +542,7 @@ def dispatch(
     if instance is not None:
         err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
         as_ = instance
+    format_ = resolve_format(format_)
 
     async def _run() -> None:
         p = _load_profile(profile)
@@ -572,6 +614,18 @@ def dispatch(
         relay_display = (
             relay_urls[0] if relay_count == 1 else f"{relay_urls[0]} (+{relay_count - 1})"
         )
+
+        if format_ == OutputFormat.JSON:
+            _output_json(
+                {
+                    "packet_id": signed.id,
+                    "event_id": event_id,
+                    "relay": relay_display,
+                    "intent": signed.intent,
+                }
+            )
+            return
+
         console.print(
             Panel.fit(
                 f"[bold green]✓ Dispatched[/bold green]\n\n"
@@ -607,8 +661,12 @@ def ack(
         False, "--dry-run", "-n", help="Show ACK packet without publishing"
     ),
     profile: Path = typer.Option(DEFAULT_PROFILE),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Acknowledge a received seed packet — sends a reply back to the sender."""
+    format_ = resolve_format(format_)
 
     async def _run() -> None:
         p = _load_profile(profile)
@@ -725,6 +783,18 @@ def ack(
         relay_display = (
             relay_urls[0] if relay_count == 1 else f"{relay_urls[0]} (+{relay_count - 1})"
         )
+
+        if format_ == OutputFormat.JSON:
+            _output_json(
+                {
+                    "ack_packet_id": signed.id,
+                    "event_id": event_id,
+                    "in_reply_to": full_packet_id,
+                    "to": to_label,
+                }
+            )
+            return
+
         console.print(
             Panel.fit(
                 f"[bold green]✓ ACK sent[/bold green]\n\n"
@@ -758,6 +828,9 @@ def receive(
         False, "--quiet", "-q", help="Suppress output when inbox is empty (for startup hooks)"
     ),
     profile: Path = typer.Option(DEFAULT_PROFILE),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Poll for pending packets and surface them for review."""
     if instance is not None and as_ != "default":
@@ -769,6 +842,7 @@ def receive(
     if instance is not None:
         err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
         as_ = instance
+    format_ = resolve_format(format_)
 
     async def _run() -> None:
         p = _load_profile(profile)
@@ -798,6 +872,8 @@ def receive(
             logger.exception("Relay fetch failed during receive")
             if not quiet:
                 err.print("[yellow]Could not reach relay — skipping relay fetch.[/yellow]")
+            if format_ == OutputFormat.JSON:
+                _output_json([])
             return
 
         # Record that we checked these relays — persist even when inbox is empty
@@ -807,7 +883,9 @@ def receive(
             p.last_checked[url] = now_check_iso
 
         if not packets:
-            if not quiet:
+            if format_ == OutputFormat.JSON:
+                _output_json([])
+            elif not quiet:
                 console.print("[dim]No pending packets.[/dim]")
             p.save(profile)
             return
@@ -828,13 +906,17 @@ def receive(
                     )
 
         if not verified:
-            if not quiet:
+            if format_ == OutputFormat.JSON:
+                _output_json([])
+            elif not quiet:
                 console.print("[dim]No valid packets.[/dim]")
             p.save(profile)
             return
 
-        _show_inbox(verified, p)
+        if format_ != OutputFormat.JSON:
+            _show_inbox(verified, p)
 
+        received_summaries: list[dict[str, object]] = []
         for packet in verified:
             trusted = p.is_trusted(packet.from_did)
             trust_label = "[green]trusted[/green]" if trusted else "[yellow]unknown sender[/yellow]"
@@ -842,12 +924,20 @@ def receive(
             now_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
             if auto_ingest and trusted:
                 _assert_valid_ulid(packet.id)
-                _ingest(packet)
+                _ingest(packet, quiet=format_ == OutputFormat.JSON)
                 p.ingested_ids.append(
                     {
                         "id": packet.id,
                         "ingested_at": now_iso,
                         "from_did": packet.from_did,
+                    }
+                )
+                received_summaries.append(
+                    {
+                        "id": packet.id,
+                        "intent": packet.intent,
+                        "from": packet.from_did,
+                        "ingested": True,
                     }
                 )
                 continue
@@ -858,7 +948,7 @@ def receive(
             )
             if ingest:
                 _assert_valid_ulid(packet.id)
-                _ingest(packet)
+                _ingest(packet, quiet=format_ == OutputFormat.JSON)
                 p.ingested_ids.append(
                     {
                         "id": packet.id,
@@ -869,6 +959,26 @@ def receive(
                 sender_nostr_pub = _resolve_nostr_pubkey(packet.from_did, p)
                 if sender_nostr_pub:
                     await client.send_receipt(packet, sender_nostr_pub)
+                received_summaries.append(
+                    {
+                        "id": packet.id,
+                        "intent": packet.intent,
+                        "from": packet.from_did,
+                        "ingested": True,
+                    }
+                )
+            else:
+                received_summaries.append(
+                    {
+                        "id": packet.id,
+                        "intent": packet.intent,
+                        "from": packet.from_did,
+                        "ingested": False,
+                    }
+                )
+
+        if format_ == OutputFormat.JSON:
+            _output_json(received_summaries)
 
         # Persist updated ingested_ids and last_checked.
         p.save(profile)
@@ -951,6 +1061,9 @@ def pair(
         False, "--dry-run", "-n", help="Show pairing intent without publishing"
     ),
     profile: Path = typer.Option(DEFAULT_PROFILE),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Pair two instances with a short-lived code — no manual DID exchange."""
     if label is not None and peer is not None:
@@ -973,6 +1086,7 @@ def pair(
         as_ = instance
     if peer is None:
         _emit_error(ErrorCode.INVALID_ARGUMENT, "Missing option '--peer'.", exit_code=2)
+    format_ = resolve_format(format_)
     p = _load_profile(profile)
     local = _resolve_instance(p, as_)
 
@@ -1001,6 +1115,11 @@ def pair(
         trusted.label = peer
         p.trusted_keys[peer] = trusted
         p.save(profile)
+
+        if format_ == OutputFormat.JSON:
+            _output_json({"status": "paired", "peer_label": peer, "peer_did": trusted.did})
+            raise typer.Exit(0)
+
         console.print(
             Panel.fit(
                 f"[bold green]✓ Paired![/bold green]\n\n"
@@ -1016,28 +1135,46 @@ def pair(
         code_h = hash_code(pairing_code)
 
         # Publish the request — embed our own label so the joiner knows what to call us
-        console.print("[dim]Publishing pairing request…[/dim]")
+        if format_ != OutputFormat.JSON:
+            console.print("[dim]Publishing pairing request…[/dim]")
         request_event_id = asyncio.run(publish_pair_request(local, local.label, code_h, relay_urls))
 
         # Show the code — user reads this aloud or types it on the other machine
-        console.print(
-            Panel.fit(
-                f"[bold]Pairing code:[/bold]  [bold cyan]{pairing_code}[/bold cyan]\n\n"
-                "Enter this on your other machine:\n"
-                f"  [dim]aya pair --code {pairing_code}"
-                " --peer <their-name> --as <local-identity>[/dim]\n\n"
-                "[dim]Expires in 10 minutes.[/dim]",
-                title="aya — pair",
+        if format_ == OutputFormat.JSON:
+            _output_json(
+                {
+                    "status": "awaiting_peer",
+                    "pairing_code": pairing_code,
+                    "local_did": local.did,
+                    "peer_label": peer,
+                    "relay": relay_urls[0] if relay_urls else None,
+                }
             )
-        )
+        if format_ != OutputFormat.JSON:
+            console.print(
+                Panel.fit(
+                    f"[bold]Pairing code:[/bold]  [bold cyan]{pairing_code}[/bold cyan]\n\n"
+                    "Enter this on your other machine:\n"
+                    f"  [dim]aya pair --code {pairing_code}"
+                    " --peer <their-name> --as <local-identity>[/dim]\n\n"
+                    "[dim]Expires in 10 minutes.[/dim]",
+                    title="aya — pair",
+                )
+            )
 
         # Poll for response
-        with console.status("[bold cyan]Waiting for the other peer…[/bold cyan]"):
+        if format_ != OutputFormat.JSON:
+            ctx_mgr = console.status("[bold cyan]Waiting for the other peer…[/bold cyan]")
+        else:
+            ctx_mgr = nullcontext()
+        with ctx_mgr:
             trusted = asyncio.run(
                 poll_for_pair_response(relay_urls, local.nostr_public_hex, request_event_id)
             )
 
         if trusted is None:
+            if format_ == OutputFormat.JSON:
+                _emit_error(ErrorCode.PAIR_TIMEOUT, "Pairing timed out")
             console.print(
                 "[bold yellow]Pairing timed out.[/bold yellow] "
                 "Run [bold]aya pair[/bold] again for a new code."
@@ -1047,6 +1184,11 @@ def pair(
         trusted.label = peer
         p.trusted_keys[peer] = trusted
         p.save(profile)
+
+        if format_ == OutputFormat.JSON:
+            _output_json({"status": "paired", "peer_label": peer, "peer_did": trusted.did})
+            raise typer.Exit(0)
+
         console.print(
             Panel.fit(
                 f"[bold green]✓ Paired![/bold green]\n\n"
@@ -1066,8 +1208,12 @@ def schedule_remind(
     due: str = typer.Option(..., "--due", "-d", help="When: 'tomorrow 9am', 'in 2 hours', ISO8601"),
     tag: str = typer.Option("", "--tags", "-t", help="Comma-separated tags"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show reminder without saving"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Add a one-shot reminder."""
+    format_ = resolve_format(format_)
     if dry_run:
         due_dt = parse_due(due)
         preview = {
@@ -1080,6 +1226,9 @@ def schedule_remind(
         _output_json(preview)
         raise typer.Exit(0)
     item = add_reminder(message, due, tag)
+    if format_ == OutputFormat.JSON:
+        _output_json(item)
+        raise typer.Exit(0)
     due_dt = parse_due(due)
     console.print(
         f"[green]✓[/green] Reminder {item['id'][:8]} — {due_dt.strftime('%a %b %d, %I:%M %p')}"
@@ -1099,8 +1248,12 @@ def schedule_watch(
     interval: int = typer.Option(30, "--interval", "-i", help="Poll interval minutes"),
     remove_when: str = typer.Option("", help="Auto-remove: merged_or_closed"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show watch without saving"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Add a condition-based watch."""
+    format_ = resolve_format(format_)
     # Validate provider/target before dry-run output
     if provider == "github-pr":
         if not re.match(r"([^/]+)/([^#]+)#(\d+)", target):
@@ -1134,6 +1287,9 @@ def schedule_watch(
     except ValueError as exc:
         err.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
+    if format_ == OutputFormat.JSON:
+        _output_json(item)
+        raise typer.Exit(0)
     console.print(f"[green]✓[/green] Watch {item['id'][:8]} ({provider})")
     console.print(f"  {message}")
     console.print(f"  Condition: {item['condition']}, poll every {item['poll_interval_minutes']}m")
@@ -1156,8 +1312,12 @@ def schedule_recurring(
         help="Only fire within this time window, e.g. '08:00-18:00'",
     ),
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Show cron without saving"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Add a persistent recurring session job (session_required cron)."""
+    format_ = resolve_format(format_)
     # Validate cron expression before dry-run output
     parts = cron.strip().split()
     if len(parts) != 5:
@@ -1183,6 +1343,9 @@ def schedule_recurring(
     except ValueError as exc:
         err.print(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc
+    if format_ == OutputFormat.JSON:
+        _output_json(item)
+        raise typer.Exit(0)
     console.print(f"[green]✓[/green] Recurring {item['id'][:8]} — {cron}")
     console.print(f"  {message}")
     if idle_back_off:
@@ -1276,8 +1439,12 @@ def schedule_check(
 @schedule_app.command("dismiss")
 def schedule_dismiss(
     item_id: str = typer.Argument(help="Item ID (prefix match ok)"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Dismiss a scheduled item or alert."""
+    format_ = resolve_format(format_)
     try:
         item = dismiss_item(item_id)
     except ValueError:
@@ -1286,6 +1453,9 @@ def schedule_dismiss(
         except ValueError as exc:
             err.print(f"[red]{exc}[/red]")
             raise typer.Exit(1) from exc
+    if format_ == OutputFormat.JSON:
+        _output_json({"dismissed": item["id"], "status": "dismissed"})
+        raise typer.Exit(0)
     console.print(f"[green]✓[/green] Dismissed {item['id'][:8]} — {item['message'][:60]}")
 
 
@@ -1295,13 +1465,20 @@ def schedule_snooze(
     until: str = typer.Option(
         ..., "--until", "-u", help="Snooze until: 'in 1 hour', 'tomorrow 9am'"
     ),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Snooze a reminder."""
+    format_ = resolve_format(format_)
     try:
         item, snooze_until = snooze_item(item_id, until)
     except ValueError as exc:
         err.print(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
+    if format_ == OutputFormat.JSON:
+        _output_json({"snoozed": item["id"], "until": snooze_until.isoformat()})
+        raise typer.Exit(0)
     console.print(
         f"💤 Snoozed {item['id'][:8]} until {snooze_until.strftime('%a %b %d, %I:%M %p')}"
     )
@@ -1310,9 +1487,16 @@ def schedule_snooze(
 @schedule_app.command("poll")
 def schedule_poll(
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress output on no changes"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
 ) -> None:
     """Run one poll cycle (legacy — use 'tick' instead)."""
+    format_ = resolve_format(format_)
     run_poll(quiet=quiet)
+    if format_ == OutputFormat.JSON:
+        _output_json({"status": "ok"})
+        raise typer.Exit(0)
 
 
 @schedule_app.command("tick")
@@ -1666,30 +1850,33 @@ def _resolve_nostr_pubkey(did: str, profile: Profile) -> str | None:
     return None
 
 
-def _ingest(packet: Packet) -> None:
+def _ingest(packet: Packet, *, quiet: bool = False) -> None:
     """
     Ingest a packet into the active assistant context.
     In Phase 1 this prints to stdout for the assistant to pick up.
     Phase 3+ will pipe directly into the Claude session context.
+    When quiet=True, side effects run but console output is suppressed.
     """
-    console.print(f"\n[bold]Ingesting:[/bold] {packet.intent}")
+    if not quiet:
+        console.print(f"\n[bold]Ingesting:[/bold] {packet.intent}")
 
     if packet.content_type == "application/aya-seed":
         seed = packet.content if isinstance(packet.content, dict) else {}
-        console.print(
-            Panel(
-                f"[bold]Opening question:[/bold]\n{seed.get('opener', '')}\n\n"
-                f"[bold]Context:[/bold]\n{seed.get('context_summary', '')}\n\n"
-                + (
-                    "[bold]Open questions:[/bold]\n"
-                    + "\n".join(f"  • {q}" for q in seed.get("open_questions", []))
-                    if seed.get("open_questions")
-                    else ""
-                ),
-                title="Conversation Seed",
-                border_style="cyan",
+        if not quiet:
+            console.print(
+                Panel(
+                    f"[bold]Opening question:[/bold]\n{seed.get('opener', '')}\n\n"
+                    f"[bold]Context:[/bold]\n{seed.get('context_summary', '')}\n\n"
+                    + (
+                        "[bold]Open questions:[/bold]\n"
+                        + "\n".join(f"  • {q}" for q in seed.get("open_questions", []))
+                        if seed.get("open_questions")
+                        else ""
+                    ),
+                    title="Conversation Seed",
+                    border_style="cyan",
+                )
             )
-        )
         # Persist seed as an unseen alert so it surfaces via `aya schedule pending`
         # on the next session start, even if ingested via the async SessionStart hook
         # (where stdout is not captured by Claude).
@@ -1703,13 +1890,14 @@ def _ingest(packet: Packet) -> None:
             packet_id=packet.id,
         )
     else:
-        console.print(
-            Panel(
-                str(packet.content),
-                title=packet.intent,
-                subtitle=f"[dim]{packet.id[:8]} · {packet.sent_at[:10]}[/dim]",
+        if not quiet:
+            console.print(
+                Panel(
+                    str(packet.content),
+                    title=packet.intent,
+                    subtitle=f"[dim]{packet.id[:8]} · {packet.sent_at[:10]}[/dim]",
+                )
             )
-        )
 
 
 # ── Config commands ───────────────────────────────────────────────────────────

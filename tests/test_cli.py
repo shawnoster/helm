@@ -198,6 +198,8 @@ class TestTrust:
                 "home",
                 "--profile",
                 str(profile_with_instance),
+                "--format",
+                "text",
             ],
         )
         assert result.exit_code == 0
@@ -344,6 +346,8 @@ class TestPack:
                 str(out_file),
                 "--profile",
                 str(profile_with_trusted),
+                "--format",
+                "text",
             ],
             input="Some content\n",
         )
@@ -368,6 +372,8 @@ class TestPack:
                 str(out_file),
                 "--profile",
                 str(profile_with_trusted),
+                "--format",
+                "text",
             ],
             input="data\n",
         )
@@ -453,6 +459,8 @@ class TestPack:
                 "default",  # no 'default' instance — only 'work' exists
                 "--profile",
                 str(profile_with_named_instance),
+                "--format",
+                "text",
             ],
             input="hello\n",
         )
@@ -574,7 +582,7 @@ class TestScheduleDismiss:
         item = add_reminder("Dismiss me via CLI", "in 1 hour")
         prefix = item["id"][:8]
 
-        result = runner.invoke(app, ["schedule", "dismiss", prefix])
+        result = runner.invoke(app, ["schedule", "dismiss", prefix, "--format", "text"])
         assert result.exit_code == 0, result.output
         assert "Dismissed" in result.output
 
@@ -617,6 +625,8 @@ class TestDispatch:
                     "End of day notes",
                     "--profile",
                     str(profile_with_trusted),
+                    "--format",
+                    "text",
                 ],
                 input="Today I worked on useAlgolia error handling.\n",
             )
@@ -644,6 +654,8 @@ class TestDispatch:
                     "Ask about the guest count decision",
                     "--profile",
                     str(profile_with_trusted),
+                    "--format",
+                    "text",
                 ],
             )
         assert result.exit_code == 0, result.output
@@ -1913,7 +1925,15 @@ class TestAck:
             mock_cls.return_value.publish = mock_publish
             result = runner.invoke(
                 app,
-                ["ack", packet_id, "looks good", "--profile", str(profile_path)],
+                [
+                    "ack",
+                    packet_id,
+                    "looks good",
+                    "--profile",
+                    str(profile_path),
+                    "--format",
+                    "text",
+                ],
             )
         assert result.exit_code == 0, result.output
         assert "ACK sent" in result.output
@@ -1929,7 +1949,7 @@ class TestAck:
             mock_cls.return_value.publish = mock_publish
             result = runner.invoke(
                 app,
-                ["ack", prefix, "--profile", str(profile_path)],
+                ["ack", prefix, "--profile", str(profile_path), "--format", "text"],
             )
         assert result.exit_code == 0, result.output
         assert "ACK sent" in result.output
@@ -1942,7 +1962,15 @@ class TestAck:
             mock_cls.return_value.publish = mock_publish
             result = runner.invoke(
                 app,
-                ["ack", packet_id, "--dismiss", "--profile", str(profile_path)],
+                [
+                    "ack",
+                    packet_id,
+                    "--dismiss",
+                    "--profile",
+                    str(profile_path),
+                    "--format",
+                    "text",
+                ],
             )
         assert result.exit_code == 0, result.output
         assert "ACK sent" in result.output
@@ -2394,3 +2422,110 @@ class TestStructuredErrors:
         payload = json.loads(result.output)
         assert payload["error"]["code"] == "INVALID_ARGUMENT"
         assert "--as and --instance" in payload["error"]["message"]
+
+
+# ── JSON format for mutating commands ────────────────────────────────────────
+
+
+class TestJsonFormat:
+    """Tests for --format json on mutating CLI commands (#137)."""
+
+    def test_init_json_format(self, tmp_path: Path) -> None:
+        """init --format json outputs JSON with profile_path and did."""
+        path = tmp_path / "profile.json"
+        result = runner.invoke(
+            app, ["init", "--profile", str(path), "--label", "test", "--format", "json"]
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["profile_path"] == str(path)
+        assert data["did"].startswith("did:key:")
+        assert data["instance"] == "test"
+
+    def test_trust_json_format(self, profile_with_instance: Path) -> None:
+        """trust --format json outputs JSON with did and label."""
+        home = Identity.generate("home")
+        result = runner.invoke(
+            app,
+            [
+                "trust",
+                home.did,
+                "--peer",
+                "home",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["did"] == home.did
+        assert data["label"] == "home"
+        assert data["nostr_pubkey"] is None
+
+    def test_send_json_format(self, profile_with_trusted: Path, tmp_path: Path) -> None:
+        """send --format json outputs JSON with packet_id and event_id."""
+        p = Profile.load(profile_with_trusted)
+        local = p.instances["default"]
+        home_key = p.trusted_keys["home"]
+        pkt = Packet(
+            **{"from": local.did, "to": home_key.did},
+            intent="json format test",
+            content="hello",
+        )
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        mock_event_id = "e" * 64
+        mock_publish = AsyncMock(return_value=mock_event_id)
+        with patch("aya.cli.RelayClient") as mock_client_cls:
+            mock_client_cls.return_value.publish = mock_publish
+            result = runner.invoke(
+                app,
+                [
+                    "send",
+                    str(packet_file),
+                    "--profile",
+                    str(profile_with_trusted),
+                    "--format",
+                    "json",
+                ],
+            )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["packet_id"] == pkt.id
+        assert data["event_id"] == mock_event_id
+        assert "relay" in data
+
+    def test_schedule_remind_json_format(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """schedule remind --format json outputs the item dict."""
+        scheduler_file = tmp_path / "assistant" / "memory" / "scheduler.json"
+        alerts_file = tmp_path / "assistant" / "memory" / "alerts.json"
+        scheduler_file.parent.mkdir(parents=True)
+        scheduler_file.write_text(json.dumps({"items": []}))
+        alerts_file.write_text(json.dumps({"alerts": []}))
+
+        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+
+        result = runner.invoke(
+            app,
+            [
+                "schedule",
+                "remind",
+                "--message",
+                "Test reminder",
+                "--due",
+                "in 1 hour",
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["message"] == "Test reminder"
+        assert data["type"] == "reminder"
+        assert "id" in data
