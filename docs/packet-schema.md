@@ -164,7 +164,7 @@ All other fields use their declared names as JSON keys.
 The version string follows the format `aya/<major>.<minor>`.
 
 - **Unknown minor version:** log a warning but accept the packet.
-- **Unknown major version:** reject the packet.
+- **Unknown major version:** log a warning. The packet is still accepted (future versions may reject).
 
 Current version: `aya/0.2`.
 
