@@ -9,7 +9,14 @@ from pathlib import Path
 import pytest
 from ulid import ULID
 
-from aya.identity import Identity, Profile, TrustedKey, _assert_valid_ulid, _normalize_ingested_ids
+from aya.identity import (
+    PROFILE_SCHEMA_VERSION,
+    Identity,
+    Profile,
+    TrustedKey,
+    _assert_valid_ulid,
+    _normalize_ingested_ids,
+)
 
 
 class TestIdentityGeneration:
@@ -346,3 +353,36 @@ class TestNormalizeIngestedIdsFromDid:
         result = _normalize_ingested_ids(raw)
         assert len(result) == 1
         assert "from_did" not in result[0]
+
+
+# ── Profile schema_version ──────────────────────────────────────────────────
+
+
+class TestProfileSchemaVersion:
+    def test_save_includes_schema_version(self, tmp_path: Path) -> None:
+        """Profile.save() writes schema_version into the aya section."""
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text("{}")
+
+        p = Profile.load(profile_path)
+        p.save(profile_path)
+
+        data = json.loads(profile_path.read_text())
+        assert data["aya"]["schema_version"] == PROFILE_SCHEMA_VERSION
+
+    def test_load_without_schema_version_backward_compat(self, tmp_path: Path) -> None:
+        """Profiles without schema_version load successfully (treated as v0)."""
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text(json.dumps({"aya": {"instances": {}}}))
+
+        p = Profile.load(profile_path)
+        assert isinstance(p, Profile)
+
+    def test_load_future_schema_version_warns(self, tmp_path: Path, caplog) -> None:
+        """Loading a profile with a higher schema_version logs a warning."""
+        profile_path = tmp_path / "profile.json"
+        profile_path.write_text(json.dumps({"aya": {"schema_version": 999, "instances": {}}}))
+
+        p = Profile.load(profile_path)
+        assert isinstance(p, Profile)
+        assert "schema_version 999" in caplog.text
