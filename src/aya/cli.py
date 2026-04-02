@@ -264,6 +264,14 @@ def version(
         console.print(f"aya {__version__}")
 
 
+@app.command("mcp-server")
+def mcp_server_cmd() -> None:
+    """Start the MCP server (stdio transport) for AI tool integration."""
+    from aya.mcp_server import main as mcp_main
+
+    asyncio.run(mcp_main())
+
+
 # ── init ─────────────────────────────────────────────────────────────────────
 
 

@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "aya": {
+      "command": "aya",
+      "args": ["mcp-server"]
+    }
+  }
+}
