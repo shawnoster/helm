@@ -192,6 +192,39 @@ class TestInboxContract:
             assert key in pkt, f"missing packet key: {key}"
 
 
+# ── receive ─────────────────────────────────────────────────────────────────
+
+
+class TestReceiveContract:
+    def test_empty_receive_is_wrapped_object(self, tmp_path, monkeypatch):
+        """receive --format json returns {"packets": []} when relay yields nothing."""
+        from unittest.mock import patch
+
+        from aya.identity import Identity, Profile
+
+        local = Identity.generate("default")
+        profile = Profile(alias="Ace", ship_mind_name="", user_name="Shawn")
+        profile.instances["default"] = local
+        profile_path = tmp_path / "profile.json"
+        profile.save(profile_path)
+
+        async def mock_fetch(*args, **kwargs):
+            if False:  # pragma: no cover
+                yield
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["receive", "--quiet", "--format", "json", "--profile", str(profile_path)],
+            )
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert isinstance(data, dict)
+        assert "packets" in data
+        assert isinstance(data["packets"], list)
+
+
 # ── schedule list ────────────────────────────────────────────────────────────
 
 

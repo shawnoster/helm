@@ -2509,7 +2509,7 @@ class TestJsonFormat:
     def test_schedule_remind_json_format(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """schedule remind --format json outputs the item dict."""
+        """schedule remind --format json outputs {"item": ...} wrapper."""
         scheduler_file = tmp_path / "assistant" / "memory" / "scheduler.json"
         alerts_file = tmp_path / "assistant" / "memory" / "alerts.json"
         scheduler_file.parent.mkdir(parents=True)
