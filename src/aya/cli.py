@@ -309,9 +309,12 @@ def init(
     console.print(
         Panel.fit(
             f"[bold green]✓ Instance created[/bold green]\n\n"
-            f"Label:  [cyan]{label}[/cyan]\n"
-            f"DID:    [dim]{identity.did}[/dim]\n"
-            f"Relay:  [cyan]{relay_display}[/cyan]\n\n"
+            f"Instance: [cyan]{label}[/cyan]\n"
+            f"DID:      [dim]{identity.did}[/dim]  "
+            "[dim italic](ed25519 · identity & signing)[/dim italic]\n"
+            f"Nostr:    [dim]{identity.nostr_public_hex[:16]}…[/dim]  "
+            "[dim italic](secp256k1 · relay transport)[/dim italic]\n"
+            f"Relay:    [cyan]{relay_display}[/cyan]\n\n"
             "[dim]Share your DID with other instances you want to trust.[/dim]",
             title="aya — init",
         )
@@ -360,7 +363,10 @@ def trust(
         _output_json({"did": did, "label": peer, "nostr_pubkey": nostr_pubkey or None})
         raise typer.Exit(0)
 
-    console.print(f"[green]✓[/green] Trusted: [cyan]{peer}[/cyan]  [dim]{did}[/dim]")
+    console.print(
+        f"[green]✓[/green] Trusted: [cyan]{peer}[/cyan]  [dim]{did}[/dim]  "
+        f"[dim italic](ed25519 · identity & signing)[/dim italic]"
+    )
     if not nostr_pubkey:
         console.print(
             "[dim]Note: No Nostr pubkey provided. "
@@ -1129,11 +1135,20 @@ def pair(
             _output_json({"status": "paired", "peer_label": peer, "peer_did": trusted.did})
             raise typer.Exit(0)
 
+        lines = [
+            "[bold green]✓ Paired![/bold green]\n",
+            f"Trusted: [cyan]{peer}[/cyan]",
+            f"DID:     [dim]{trusted.did}[/dim]"
+            "  [dim italic](ed25519 · identity & signing)[/dim italic]",
+        ]
+        if trusted.nostr_pubkey:
+            lines.append(
+                f"Nostr:   [dim]{trusted.nostr_pubkey[:16]}…[/dim]  "
+                "[dim italic](secp256k1 · relay transport)[/dim italic]"
+            )
         console.print(
             Panel.fit(
-                f"[bold green]✓ Paired![/bold green]\n\n"
-                f"Trusted: [cyan]{peer}[/cyan]\n"
-                f"DID:     [dim]{trusted.did}[/dim]",
+                "\n".join(lines),
                 title="aya — pair (joined)",
             )
         )
@@ -1198,11 +1213,20 @@ def pair(
             _output_json({"status": "paired", "peer_label": peer, "peer_did": trusted.did})
             raise typer.Exit(0)
 
+        lines = [
+            "[bold green]✓ Paired![/bold green]\n",
+            f"Trusted: [cyan]{peer}[/cyan]",
+            f"DID:     [dim]{trusted.did}[/dim]"
+            "  [dim italic](ed25519 · identity & signing)[/dim italic]",
+        ]
+        if trusted.nostr_pubkey:
+            lines.append(
+                f"Nostr:   [dim]{trusted.nostr_pubkey[:16]}…[/dim]  "
+                "[dim italic](secp256k1 · relay transport)[/dim italic]"
+            )
         console.print(
             Panel.fit(
-                f"[bold green]✓ Paired![/bold green]\n\n"
-                f"Trusted: [cyan]{peer}[/cyan]\n"
-                f"DID:     [dim]{trusted.did}[/dim]",
+                "\n".join(lines),
                 title="aya — pair (complete)",
             )
         )
