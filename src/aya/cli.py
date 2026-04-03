@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import json
 import logging
 import os
@@ -204,7 +205,9 @@ def _check_idempotency(key: str) -> dict | None:
     if not SENT_CACHE.exists():
         return None
     try:
-        cache = json.loads(SENT_CACHE.read_text())
+        with SENT_CACHE.open() as f:
+            fcntl.flock(f, fcntl.LOCK_SH)
+            cache = json.loads(f.read())
     except (json.JSONDecodeError, OSError):
         return None
     entry = cache.get(key)
@@ -214,23 +217,50 @@ def _check_idempotency(key: str) -> dict | None:
 
 
 def _record_idempotency(key: str, packet_id: str, event_id: str) -> None:
-    """Record a sent packet for idempotency dedup."""
+    """Record a sent packet for idempotency dedup. Atomic write with file lock."""
+    import tempfile
+
     from aya.paths import SENT_CACHE
 
-    try:
-        cache = json.loads(SENT_CACHE.read_text()) if SENT_CACHE.exists() else {}
-    except (json.JSONDecodeError, OSError):
-        cache = {}
-    cache[key] = {
-        "packet_id": packet_id,
-        "event_id": event_id,
-        "sent_at": datetime.now(UTC).isoformat(),
-    }
-    # Prune entries older than 24 hours
-    cutoff = datetime.now(UTC) - timedelta(hours=24)
-    cache = {k: v for k, v in cache.items() if datetime.fromisoformat(v["sent_at"]) > cutoff}
     SENT_CACHE.parent.mkdir(parents=True, exist_ok=True)
-    SENT_CACHE.write_text(json.dumps(cache, indent=2))
+
+    try:
+        with SENT_CACHE.open("a+") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.seek(0)
+            try:
+                cache = json.loads(f.read() or "{}")
+            except json.JSONDecodeError:
+                cache = {}
+
+            cache[key] = {
+                "packet_id": packet_id,
+                "event_id": event_id,
+                "sent_at": datetime.now(UTC).isoformat(),
+            }
+            # Prune entries older than 24 hours
+            cutoff = datetime.now(UTC) - timedelta(hours=24)
+            cache = {
+                k: v for k, v in cache.items() if datetime.fromisoformat(v["sent_at"]) > cutoff
+            }
+
+            # Atomic write: temp file → os.replace
+            fd, tmp = tempfile.mkstemp(dir=str(SENT_CACHE.parent), suffix=".tmp")
+            try:
+                os.write(fd, json.dumps(cache, indent=2).encode())
+                os.fsync(fd)
+                os.close(fd)
+                Path(tmp).replace(SENT_CACHE)
+                with suppress(OSError):
+                    SENT_CACHE.chmod(0o600)
+            except Exception:
+                with suppress(OSError):
+                    os.close(fd)
+                with suppress(OSError):
+                    Path(tmp).unlink()
+                raise
+    except OSError:
+        logger.debug("Failed to record idempotency key %s", key, exc_info=True)
 
 
 DEFAULT_PROFILE = PROFILE_PATH
