@@ -2432,7 +2432,7 @@ def log_append(
         daily, entry = append_entry(message, tags=tags)
     except ValueError as exc:
         _emit_error(ErrorCode.INVALID_ARGUMENT, str(exc))
-    if fmt is OutputFormat.JSON:
+    if fmt == OutputFormat.JSON:
         _output_json({"entry": entry, "file": str(daily)})
     else:
         console.print(f"[green]✓[/green] {entry}")
@@ -2461,15 +2461,14 @@ def log_auto(
     except ValueError as exc:
         _emit_error(ErrorCode.INVALID_ARGUMENT, str(exc))
     if result is None:
-        if fmt is OutputFormat.JSON:
+        if fmt == OutputFormat.JSON:
             _output_json({"logged": False})
+        # Text mode: silent when nothing logged (per design spec)
         return
     daily, entry = result
-    if fmt is OutputFormat.JSON:
+    if fmt == OutputFormat.JSON:
         _output_json({"logged": True, "entry": entry, "file": str(daily)})
-    else:
-        console.print(f"[green]✓[/green] {entry}")
-        console.print(f"[dim]{daily}[/dim]")
+    # Text mode: silent by default — entry is in the daily note
 
 
 @log_app.command("show")
@@ -2509,7 +2508,7 @@ def log_show(
     except ValueError as exc:
         _emit_error(ErrorCode.INVALID_ARGUMENT, str(exc))
 
-    if fmt is OutputFormat.JSON:
+    if fmt == OutputFormat.JSON:
         _output_json({"date": date or "today", "entries": entries})
         return
 

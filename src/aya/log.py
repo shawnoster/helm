@@ -161,6 +161,9 @@ def show_entries(
     if not notebook:
         msg = "notebook_path not set. Run: aya config set notebook_path ~/notebook"
         raise ValueError(msg)
+    if not notebook.exists():
+        msg = f"Notebook path does not exist: {notebook}"
+        raise ValueError(msg)
 
     if date is None:
         date = datetime.now(_get_local_tz())
@@ -213,10 +216,13 @@ def auto_log(now: datetime | None = None) -> tuple[Path, str] | None:
     if last_raw:
         try:
             last = datetime.fromisoformat(last_raw)
-            if (now - last).total_seconds() < _DEDUP_SECONDS:
-                logger.debug("Skipping auto-log: last entry was %s ago", now - last)
+            if last.tzinfo is None:
+                last = last.replace(tzinfo=_get_local_tz())
+            elapsed = now - last
+            if elapsed.total_seconds() < _DEDUP_SECONDS:
+                logger.debug("Skipping auto-log: last entry was %s ago", elapsed)
                 return None
-        except ValueError:
+        except (ValueError, TypeError):
             pass
 
     # Gather signals
