@@ -7,16 +7,21 @@ prevents duplicate entries from ``aya log auto``.
 
 from __future__ import annotations
 
+import fcntl
 import json
 import logging
+import os
 import re
 import subprocess
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from aya.config import get_notebook_path
 from aya.paths import LOG_STATE_FILE, PACKETS_DIR
+from aya.scheduler.storage import _atomic_write
 from aya.scheduler.time_utils import _get_local_tz, get_last_activity
 
 logger = logging.getLogger(__name__)
@@ -28,19 +33,52 @@ _DEDUP_SECONDS = 300  # 5 minutes
 # ── state persistence ────────────────────────────────────────────────────────
 
 
-def _load_state() -> dict[str, Any]:
-    if not LOG_STATE_FILE.exists():
-        return {}
+def _log_lock_file() -> Path:
+    """Derive lock path from LOG_STATE_FILE at call time (monkeypatch-safe)."""
+    return LOG_STATE_FILE.parent / ".log.lock"
+
+
+@contextmanager
+def _log_lock(*, shared: bool = False) -> Iterator[int]:
+    """Acquire an advisory lock scoped to log state (not the scheduler)."""
+    lock_path = _log_lock_file()
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(str(lock_path), os.O_RDWR | os.O_CREAT)
     try:
-        data = json.loads(LOG_STATE_FILE.read_text())
-        return data if isinstance(data, dict) else {}
-    except (json.JSONDecodeError, OSError):
-        return {}
+        fcntl.flock(fd, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        yield fd
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
+
+def _load_state() -> dict[str, Any]:
+    """Read log state under a shared lock. Returns {} if missing or corrupt."""
+    with _log_lock(shared=True):
+        try:
+            data = json.loads(LOG_STATE_FILE.read_text())
+            return data if isinstance(data, dict) else {}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            return {}
 
 
 def _save_state(state: dict[str, Any]) -> None:
-    LOG_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    LOG_STATE_FILE.write_text(json.dumps(state, indent=2) + "\n")
+    """Write log state atomically under an exclusive lock."""
+    with _log_lock():
+        _atomic_write(LOG_STATE_FILE, state)
+
+
+def _update_state(updates: dict[str, Any]) -> None:
+    """Read-modify-write log state under a single exclusive lock."""
+    with _log_lock():
+        try:
+            data = json.loads(LOG_STATE_FILE.read_text())
+            if not isinstance(data, dict):
+                data = {}
+        except (FileNotFoundError, json.JSONDecodeError, OSError):
+            data = {}
+        data.update(updates)
+        _atomic_write(LOG_STATE_FILE, data)
 
 
 # ── daily note helpers ───────────────────────────────────────────────────────
@@ -142,10 +180,8 @@ def append_entry(
     entry = _format_entry(now, message, tags)
     _append_under_progress(daily, entry)
 
-    # Update state
-    state = _load_state()
-    state["last_logged_at"] = now.isoformat()
-    _save_state(state)
+    # Update state atomically
+    _update_state({"last_logged_at": now.isoformat()})
 
     return daily, entry
 
