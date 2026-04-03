@@ -389,6 +389,15 @@ def write_session_lock(instance_id: str | None = None) -> None:
 def clear_session_lock(instance_id: str | None = None) -> bool:
     """Remove session lock if it belongs to this instance.
 
+    The primary cleanup mechanism is stale detection: ``is_session_active()``
+    checks whether ``activity.json`` has been updated within the last 15
+    minutes, so crashed or abandoned sessions are automatically treated as
+    inactive without explicit cleanup.
+
+    This function exists for explicit cleanup in future SessionEnd hooks,
+    where the REPL can proactively clear the lock on graceful shutdown
+    rather than waiting for the staleness timeout.
+
     Returns True if lock was cleared, False if it didn't exist or
     belonged to another instance.
     """
