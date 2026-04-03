@@ -45,6 +45,7 @@ from aya.relay import RelayClient
 # Subcommand modules — imported at top-level; each is only invoked when its
 # subcommand is actually called, so startup cost is acceptable.
 from aya.scheduler import (
+    SEVERITY_HEARTBEAT,
     _display_items,
     add_recurring,
     add_reminder,
@@ -1774,11 +1775,18 @@ def schedule_tick(
     """
     result = run_tick(quiet=quiet)
     if not quiet:
-        console.print(f"[dim]Tick complete. Claims swept: {result['claims_swept']}[/dim]")
+        active = result.get("session_active")
+        session_note = " (session active — delivery deferred)" if active else ""
+        console.print(
+            f"[dim]Tick complete. Claims swept: {result['claims_swept']}{session_note}[/dim]"
+        )
 
 
 @schedule_app.command("pending")
 def schedule_pending(
+    all_severities: bool = typer.Option(
+        False, "--all", "-a", help="Show all alerts including info/heartbeat"
+    ),
     format_: OutputFormat = typer.Option(
         OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
@@ -1789,11 +1797,12 @@ def schedule_pending(
         aya scheduler pending --format text
     """
     format_ = resolve_format(format_)
-    pending = get_pending()
+    min_severity = SEVERITY_HEARTBEAT if all_severities else None
+    pending = get_pending(min_severity=min_severity) if min_severity else get_pending()
     if format_ == OutputFormat.JSON:
         _output_json(pending)
     else:
-        console.print(format_pending(pending))
+        console.print(format_pending(pending, show_all=all_severities))
 
 
 @schedule_app.command("status")

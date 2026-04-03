@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,16 @@ PROVIDER_JIRA_TICKET = "jira-ticket"
 # ── schema versions ──────────────────────────────────────────────────────────
 SCHEDULER_SCHEMA_VERSION = 1
 ALERTS_SCHEMA_VERSION = 1
+
+# ── alert severity ──────────────────────────────────────────────────────────
+SEVERITY_ACTIONABLE = "actionable"
+SEVERITY_INFO = "info"
+SEVERITY_HEARTBEAT = "heartbeat"
+
+# Ordered from highest to lowest priority
+SEVERITY_ORDER: list[str] = [SEVERITY_ACTIONABLE, SEVERITY_INFO, SEVERITY_HEARTBEAT]
+
+AlertSeverity = Literal["actionable", "info", "heartbeat"]
 
 # ── watch conditions ─────────────────────────────────────────────────────────
 CONDITION_APPROVED_OR_MERGED = "approved_or_merged"
@@ -111,6 +121,7 @@ class AlertItem(TypedDict):
     message: str
     details: AlertDetails
     seen: bool
+    severity: NotRequired[AlertSeverity]
     delivered_at: NotRequired[str]
     delivered_by: NotRequired[str]
 

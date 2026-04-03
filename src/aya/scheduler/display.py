@@ -17,6 +17,7 @@ from .storage import (
 )
 from .time_utils import _get_local_tz
 from .types import (
+    SEVERITY_ACTIONABLE,
     STATUS_ACTIVE,
     STATUS_DELIVERED,
     STATUS_DISMISSED,
@@ -28,6 +29,7 @@ from .types import (
     TYPE_WATCH,
     AlertDetails,
     AlertItem,
+    AlertSeverity,
     GithubPrState,
     JiraQueryState,
     JiraTicketState,
@@ -62,17 +64,23 @@ def _unseen(alerts: list[AlertItem]) -> list[AlertItem]:
 
 
 def _create_alert(
-    source_item_id: str, message: str, details: AlertDetails, now: datetime
+    source_item_id: str,
+    message: str,
+    details: AlertDetails,
+    now: datetime,
+    severity: AlertSeverity = SEVERITY_ACTIONABLE,
 ) -> AlertItem:
     """Create an alert dict with standard fields."""
-    return {
+    alert: AlertItem = {
         "id": _new_id(),
         "source_item_id": source_item_id,
         "created_at": now.isoformat(),
         "message": message,
         "details": details,
         "seen": False,
+        "severity": severity,
     }
+    return alert
 
 
 # ── watch alert formatting ──────────────────────────────────────────────────
@@ -108,26 +116,55 @@ def _format_watch_alert(item: SchedulerItem, state: WatchState) -> str:
 # ── formatting ───────────────────────────────────────────────────────────────
 
 
-def format_pending(pending: PendingResult) -> str:
-    """Format pending items as human-readable text for session injection."""
+def _format_ago(alert: AlertItem, now: datetime) -> str:
+    """Format a human-readable 'N ago' string for an alert's created_at."""
+    created = datetime.fromisoformat(alert["created_at"])
+    delta = now - created
+    if delta.total_seconds() < 3600:
+        return f"{int(delta.total_seconds() / 60)} min ago"
+    if delta.total_seconds() < 86400:
+        return f"{int(delta.total_seconds() / 3600)}h ago"
+    return f"{int(delta.total_seconds() / 86400)}d ago"
+
+
+def format_pending(pending: PendingResult, show_all: bool = False) -> str:
+    """Format pending items as human-readable text for session injection.
+
+    Args:
+        pending: The PendingResult to format.
+        show_all: If True, show all alerts including info/heartbeat.
+                  If False, show actionable alerts fully and summarize the rest.
+    """
     lines: list[str] = []
     alerts = pending.get("alerts", [])
     crons = pending.get("session_crons", [])
     suppressed = pending.get("suppressed_crons", [])
 
     if alerts:
-        lines.append(f"\U0001f4cb {len(alerts)} pending alert(s):")
-        now = datetime.now(_get_local_tz())
-        for a in alerts:
-            created = datetime.fromisoformat(a["created_at"])
-            delta = now - created
-            if delta.total_seconds() < 3600:
-                ago = f"{int(delta.total_seconds() / 60)} min ago"
-            elif delta.total_seconds() < 86400:
-                ago = f"{int(delta.total_seconds() / 3600)}h ago"
-            else:
-                ago = f"{int(delta.total_seconds() / 86400)}d ago"
-            lines.append(f"  \u2022 {a['message'][:70]} ({ago})")
+        actionable = [
+            a for a in alerts if a.get("severity", SEVERITY_ACTIONABLE) == SEVERITY_ACTIONABLE
+        ]
+        non_actionable = [
+            a for a in alerts if a.get("severity", SEVERITY_ACTIONABLE) != SEVERITY_ACTIONABLE
+        ]
+
+        if actionable:
+            lines.append(f"\U0001f4cb {len(actionable)} pending alert(s):")
+            now = datetime.now(_get_local_tz())
+            for a in actionable:
+                lines.append(f"  \u2022 {a['message'][:70]} ({_format_ago(a, now)})")
+
+        if non_actionable and show_all:
+            lines.append(f"\n\u2139\ufe0f {len(non_actionable)} info/heartbeat alert(s):")
+            now = datetime.now(_get_local_tz())
+            for a in non_actionable:
+                sev = a.get("severity", "info")
+                lines.append(f"  \u2022 [{sev}] {a['message'][:65]} ({_format_ago(a, now)})")
+        elif non_actionable:
+            lines.append(
+                f"\n\u2139\ufe0f {len(non_actionable)} info alert(s) queued"
+                " (use `aya schedule pending --all` to see)"
+            )
 
     if crons:
         lines.append(f"\n\u23f0 {len(crons)} session cron(s) to register:")
