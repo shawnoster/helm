@@ -31,14 +31,14 @@ SCHEDULER_SCHEMA_VERSION = 1
 ALERTS_SCHEMA_VERSION = 1
 
 # ── alert severity ──────────────────────────────────────────────────────────
-SEVERITY_ACTIONABLE = "actionable"
-SEVERITY_INFO = "info"
-SEVERITY_HEARTBEAT = "heartbeat"
+AlertSeverity = Literal["actionable", "info", "heartbeat"]
+
+SEVERITY_ACTIONABLE: AlertSeverity = "actionable"
+SEVERITY_INFO: AlertSeverity = "info"
+SEVERITY_HEARTBEAT: AlertSeverity = "heartbeat"
 
 # Ordered from highest to lowest priority
-SEVERITY_ORDER: list[str] = [SEVERITY_ACTIONABLE, SEVERITY_INFO, SEVERITY_HEARTBEAT]
-
-AlertSeverity = Literal["actionable", "info", "heartbeat"]
+SEVERITY_ORDER: list[AlertSeverity] = [SEVERITY_ACTIONABLE, SEVERITY_INFO, SEVERITY_HEARTBEAT]
 
 # ── watch conditions ─────────────────────────────────────────────────────────
 CONDITION_APPROVED_OR_MERGED = "approved_or_merged"
