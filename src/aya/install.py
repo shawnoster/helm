@@ -80,6 +80,34 @@ CANONICAL_HOOKS: dict[str, list[dict[str, Any]]] = {
                     "command": "aya ci watch 2>/dev/null || true",
                     "statusMessage": "Watching CI...",
                     "asyncRewake": True,
+                },
+                {
+                    "type": "command",
+                    "command": "aya log auto >/dev/null 2>&1 || true",
+                    "statusMessage": "",
+                    "async": True,
+                },
+            ],
+        },
+        {
+            "matcher": "Write",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "aya log auto >/dev/null 2>&1 || true",
+                    "statusMessage": "",
+                    "async": True,
+                }
+            ],
+        },
+        {
+            "matcher": "Edit",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": "aya log auto >/dev/null 2>&1 || true",
+                    "statusMessage": "",
+                    "async": True,
                 }
             ],
         },
