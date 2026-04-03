@@ -1799,11 +1799,14 @@ def schedule_pending(
         aya scheduler pending --format text
     """
     format_ = resolve_format(format_)
-    min_severity: AlertSeverity = SEVERITY_HEARTBEAT if all_severities else SEVERITY_ACTIONABLE
-    pending = get_pending(min_severity=min_severity)
     if format_ == OutputFormat.JSON:
+        min_severity: AlertSeverity = SEVERITY_HEARTBEAT if all_severities else SEVERITY_ACTIONABLE
+        pending = get_pending(min_severity=min_severity)
         _output_json(pending)
     else:
+        # Always fetch all severities for text output so format_pending
+        # can summarize queued non-actionable alerts without --all.
+        pending = get_pending(min_severity=SEVERITY_HEARTBEAT)
         console.print(format_pending(pending, show_all=all_severities))
 
 

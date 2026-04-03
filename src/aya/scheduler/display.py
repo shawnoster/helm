@@ -162,7 +162,7 @@ def format_pending(pending: PendingResult, show_all: bool = False) -> str:
                 lines.append(f"  \u2022 [{sev}] {a['message'][:65]} ({_format_ago(a, now)})")
         elif non_actionable:
             lines.append(
-                f"\n\u2139\ufe0f {len(non_actionable)} info alert(s) queued"
+                f"\n\u2139\ufe0f {len(non_actionable)} info/heartbeat alert(s) queued"
                 " (use `aya schedule pending --all` to see)"
             )
 
