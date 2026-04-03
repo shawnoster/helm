@@ -198,21 +198,36 @@ def _emit_error(
 # ── Idempotency helpers ────────────────────────────────────────────────────
 
 
+def _idempotency_key_hash(key: str) -> str:
+    """Hash the idempotency key so raw secrets aren't stored on disk."""
+    import hashlib
+
+    return hashlib.sha256(key.encode()).hexdigest()
+
+
 def _check_idempotency(key: str) -> dict | None:
     """Check if an idempotency key was already used. Returns cached result or None."""
     from aya.paths import SENT_CACHE
 
     if not SENT_CACHE.exists():
         return None
+    hashed = _idempotency_key_hash(key)
     try:
         with SENT_CACHE.open() as f:
             fcntl.flock(f, fcntl.LOCK_SH)
-            cache = json.loads(f.read())
+            raw = json.loads(f.read())
     except (json.JSONDecodeError, OSError):
         return None
-    entry = cache.get(key)
-    if entry and datetime.fromisoformat(entry["sent_at"]) > datetime.now(UTC) - timedelta(hours=24):
-        return entry
+    if not isinstance(raw, dict):
+        return None
+    entry = raw.get(hashed)
+    if not isinstance(entry, dict):
+        return None
+    try:
+        if datetime.fromisoformat(entry["sent_at"]) > datetime.now(UTC) - timedelta(hours=24):
+            return entry
+    except (KeyError, ValueError, TypeError):
+        return None
     return None
 
 
@@ -222,6 +237,7 @@ def _record_idempotency(key: str, packet_id: str, event_id: str) -> None:
 
     from aya.paths import SENT_CACHE
 
+    hashed = _idempotency_key_hash(key)
     SENT_CACHE.parent.mkdir(parents=True, exist_ok=True)
 
     try:
@@ -229,25 +245,37 @@ def _record_idempotency(key: str, packet_id: str, event_id: str) -> None:
             fcntl.flock(f, fcntl.LOCK_EX)
             f.seek(0)
             try:
-                cache = json.loads(f.read() or "{}")
+                raw = json.loads(f.read() or "{}")
+                cache = raw if isinstance(raw, dict) else {}
             except json.JSONDecodeError:
                 cache = {}
 
-            cache[key] = {
+            cache[hashed] = {
                 "packet_id": packet_id,
                 "event_id": event_id,
                 "sent_at": datetime.now(UTC).isoformat(),
             }
             # Prune entries older than 24 hours
             cutoff = datetime.now(UTC) - timedelta(hours=24)
-            cache = {
-                k: v for k, v in cache.items() if datetime.fromisoformat(v["sent_at"]) > cutoff
-            }
+            pruned: dict[str, object] = {}
+            for k, v in cache.items():
+                if not isinstance(v, dict):
+                    continue
+                try:
+                    if datetime.fromisoformat(str(v.get("sent_at", ""))) > cutoff:
+                        pruned[k] = v
+                except (ValueError, TypeError):
+                    continue
+            cache = pruned
 
-            # Atomic write: temp file → os.replace
+            # Atomic write: temp file → Path.replace
             fd, tmp = tempfile.mkstemp(dir=str(SENT_CACHE.parent), suffix=".tmp")
             try:
-                os.write(fd, json.dumps(cache, indent=2).encode())
+                encoded = json.dumps(cache, indent=2).encode()
+                total = 0
+                while total < len(encoded):
+                    written = os.write(fd, encoded[total:])
+                    total += written
                 os.fsync(fd)
                 os.close(fd)
                 Path(tmp).replace(SENT_CACHE)
@@ -563,25 +591,6 @@ def send(
         err.print("[yellow]Warning: --instance is deprecated, use --as instead[/yellow]")
         as_ = instance
     format_ = resolve_format(format_)
-
-    if idempotency_key:
-        cached = _check_idempotency(idempotency_key)
-        if cached:
-            if format_ == OutputFormat.JSON:
-                _output_json(
-                    {
-                        "packet_id": cached["packet_id"],
-                        "event_id": cached["event_id"],
-                        "cached": True,
-                    }
-                )
-                raise typer.Exit(0)
-            console.print(
-                f"[dim]Already sent (cached) — packet {cached['packet_id'][:8]},"
-                f" event {cached['event_id'][:8]}[/dim]"
-            )
-            return
-
     p = _load_profile(profile)
     local = _resolve_instance(p, as_)
 
@@ -591,6 +600,17 @@ def send(
     if dry_run:
         _output_json(json.loads(packet.to_json()))
         raise typer.Exit(0)
+
+    if idempotency_key:
+        cached = _check_idempotency(idempotency_key)
+        if cached:
+            if format_ == OutputFormat.JSON:
+                _output_json({**cached, "cached": True})
+                raise typer.Exit(0)
+            console.print(
+                f"[dim]Already sent (cached) — packet {cached.get('packet_id', '?')[:8]}[/dim]"
+            )
+            return
 
     client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
 
@@ -662,24 +682,6 @@ def dispatch(
         as_ = instance
     format_ = resolve_format(format_)
 
-    if idempotency_key:
-        cached = _check_idempotency(idempotency_key)
-        if cached:
-            if format_ == OutputFormat.JSON:
-                _output_json(
-                    {
-                        "packet_id": cached["packet_id"],
-                        "event_id": cached["event_id"],
-                        "cached": True,
-                    }
-                )
-                raise typer.Exit(0)
-            console.print(
-                f"[dim]Already sent (cached) — packet {cached['packet_id'][:8]},"
-                f" event {cached['event_id'][:8]}[/dim]"
-            )
-            return
-
     async def _run() -> None:
         p = _load_profile(profile)
         local = _resolve_instance(p, as_)
@@ -724,6 +726,17 @@ def dispatch(
         if dry_run:
             _output_json(json.loads(signed.to_json()))
             return
+
+        if idempotency_key:
+            cached = _check_idempotency(idempotency_key)
+            if cached:
+                if format_ == OutputFormat.JSON:
+                    _output_json({**cached, "cached": True})
+                    return
+                console.print(
+                    f"[dim]Already sent (cached) — packet {cached.get('packet_id', '?')[:8]}[/dim]"
+                )
+                return
 
         relay_urls = [relay] if relay else p.default_relays
         recipient_nostr_pub = _resolve_nostr_pubkey(signed.to_did, p)
@@ -812,24 +825,6 @@ def ack(
 ) -> None:
     """Acknowledge a received seed packet — sends a reply back to the sender."""
     format_ = resolve_format(format_)
-
-    if idempotency_key:
-        cached = _check_idempotency(idempotency_key)
-        if cached:
-            if format_ == OutputFormat.JSON:
-                _output_json(
-                    {
-                        "packet_id": cached["packet_id"],
-                        "event_id": cached["event_id"],
-                        "cached": True,
-                    }
-                )
-                raise typer.Exit(0)
-            console.print(
-                f"[dim]Already sent (cached) — packet {cached['packet_id'][:8]},"
-                f" event {cached['event_id'][:8]}[/dim]"
-            )
-            return
 
     async def _run() -> None:
         p = _load_profile(profile)
@@ -924,6 +919,17 @@ def ack(
             _output_json(json.loads(signed.to_json()))
             return
 
+        if idempotency_key:
+            cached = _check_idempotency(idempotency_key)
+            if cached:
+                if format_ == OutputFormat.JSON:
+                    _output_json({**cached, "cached": True})
+                    return
+                console.print(
+                    f"[dim]Already sent (cached) — ack {cached.get('packet_id', '?')[:8]}[/dim]"
+                )
+                return
+
         relay_urls = [relay] if relay else p.default_relays
         client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
         try:
@@ -953,7 +959,7 @@ def ack(
         if format_ == OutputFormat.JSON:
             _output_json(
                 {
-                    "ack_packet_id": signed.id,
+                    "packet_id": signed.id,
                     "event_id": event_id,
                     "in_reply_to": full_packet_id,
                     "to": to_label,
