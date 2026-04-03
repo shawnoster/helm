@@ -2396,3 +2396,129 @@ def context_cmd(
 
     if copy:
         _copy_to_clipboard(output)
+
+
+# ── Log sub-app ──────────────────────────────────────────────────────────────
+
+log_app = typer.Typer(
+    name="log",
+    help="Daily progress logging.",
+    no_args_is_help=True,
+)
+app.add_typer(log_app, name="log")
+
+
+@log_app.command("append")
+def log_append(
+    message: str = typer.Option(..., "--message", "-m", help="Progress entry text"),
+    tags: str | None = typer.Option(
+        None,
+        "--tags",
+        "-t",
+        help="Comma-separated tags (e.g. pr/174,fix/170)",
+    ),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO,
+        "--format",
+        "-f",
+        help="Output format",
+    ),
+) -> None:
+    """Append a timestamped entry to today's daily note."""
+    from aya.log import append_entry
+
+    fmt = resolve_format(format_)
+    try:
+        daily, entry = append_entry(message, tags=tags)
+    except ValueError as exc:
+        _emit_error(ErrorCode.INVALID_ARGUMENT, str(exc))
+    if fmt is OutputFormat.JSON:
+        _output_json({"entry": entry, "file": str(daily)})
+    else:
+        console.print(f"[green]✓[/green] {entry}")
+        console.print(f"[dim]{daily}[/dim]")
+
+
+@log_app.command("auto")
+def log_auto(
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO,
+        "--format",
+        "-f",
+        help="Output format",
+    ),
+) -> None:
+    """Inspect recent activity and log a summary if warranted.
+
+    Exits silently if nothing noteworthy is detected or if the last entry
+    was written less than 5 minutes ago.
+    """
+    from aya.log import auto_log
+
+    fmt = resolve_format(format_)
+    try:
+        result = auto_log()
+    except ValueError as exc:
+        _emit_error(ErrorCode.INVALID_ARGUMENT, str(exc))
+    if result is None:
+        if fmt is OutputFormat.JSON:
+            _output_json({"logged": False})
+        return
+    daily, entry = result
+    if fmt is OutputFormat.JSON:
+        _output_json({"logged": True, "entry": entry, "file": str(daily)})
+    else:
+        console.print(f"[green]✓[/green] {entry}")
+        console.print(f"[dim]{daily}[/dim]")
+
+
+@log_app.command("show")
+def log_show(
+    date: str | None = typer.Option(
+        None,
+        "--date",
+        "-d",
+        help="Date to show (YYYY-MM-DD, default: today)",
+    ),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO,
+        "--format",
+        "-f",
+        help="Output format",
+    ),
+) -> None:
+    """Display progress entries for today (or a given date)."""
+    from aya.log import show_entries
+    from aya.scheduler.time_utils import _get_local_tz
+
+    fmt = resolve_format(format_)
+    dt = None
+    if date:
+        from datetime import datetime as _dt
+
+        try:
+            dt = _dt.strptime(date, "%Y-%m-%d").replace(tzinfo=_get_local_tz())
+        except ValueError:
+            _emit_error(
+                ErrorCode.INVALID_ARGUMENT,
+                f"Invalid date format: {date!r} (expected YYYY-MM-DD)",
+            )
+
+    try:
+        entries = show_entries(date=dt)
+    except ValueError as exc:
+        _emit_error(ErrorCode.INVALID_ARGUMENT, str(exc))
+
+    if fmt is OutputFormat.JSON:
+        _output_json({"date": date or "today", "entries": entries})
+        return
+
+    if not entries:
+        console.print("[dim]No progress entries found.[/dim]")
+        return
+
+    for e in entries:
+        line = f"[{e['time']}] {e['message']}"
+        if "tags" in e:
+            line += f" — {e['tags']}"
+        console.print(line)
