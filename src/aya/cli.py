@@ -1212,7 +1212,7 @@ def receive(
         if format_ == OutputFormat.JSON:
             _output_json({"packets": received_summaries})
 
-        if format_ != OutputFormat.JSON and not quiet:
+        if format_ != OutputFormat.JSON and not quiet and auto_ingest:
             ingested_count = sum(1 for s in received_summaries if s.get("ingested"))
             skipped_count = sum(1 for s in received_summaries if s.get("skipped"))
             total = len(received_summaries)
@@ -1223,7 +1223,7 @@ def receive(
                 declined = total - ingested_count - skipped_count
                 if declined:
                     parts.append(f"({declined} declined)")
-                err.print("  ".join(parts))
+                console.print("  ".join(parts))
 
         # Persist updated ingested_ids and last_checked.
         p.save(profile)
