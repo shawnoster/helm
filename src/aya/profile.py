@@ -6,11 +6,14 @@ Canonical location: ~/.aya/profile.json
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from aya.paths import PROFILE_PATH
+
+logger = logging.getLogger(__name__)
 
 REEVALUATION_DAYS = 3
 

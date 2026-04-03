@@ -23,6 +23,8 @@ from aya.scheduler import (
     load_items,
 )
 
+logger = logging.getLogger(__name__)
+
 # ── aya data paths (from ~/.aya) ────────────────────────────────────────────
 PROFILE = _paths.PROFILE_PATH
 
@@ -164,7 +166,7 @@ def _gather_status() -> dict[str, Any]:
         active_watches = get_active_watches()
     except (FileNotFoundError, json.JSONDecodeError, OSError, KeyError) as e:
         # Log scheduler fetch failures but don't crash — mark scheduler check failed
-        logging.warning("Failed to load scheduler status: %s", e)
+        logger.warning("Failed to load scheduler status: %s", e)
         scheduler_ok = False
 
     # Add synthetic check for scheduler data integrity

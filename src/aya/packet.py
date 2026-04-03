@@ -214,7 +214,7 @@ class Packet(BaseModel):
         if packet.version and "/" in packet.version:
             major = packet.version.split("/")[1].split(".")[0]
             if major != PROTOCOL_VERSION.split("/")[1].split(".", maxsplit=1)[0]:
-                logging.getLogger(__name__).warning(
+                logger.warning(
                     "Unknown protocol major version: %s (expected %s)",
                     packet.version,
                     PROTOCOL_VERSION,

@@ -7,10 +7,13 @@ notebook_path that aya needs to find user data.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from aya.paths import CONFIG_PATH
+
+logger = logging.getLogger(__name__)
 
 
 def load_config(path: Path = CONFIG_PATH) -> dict[str, Any]:

@@ -6,10 +6,13 @@ Entry point: build_context_block().
 
 from __future__ import annotations
 
+import logging
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 # ── Project type classification ───────────────────────────────────────────────
 

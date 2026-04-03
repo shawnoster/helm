@@ -224,6 +224,7 @@ class Profile:
 
         Validates profile structure and logs warnings for deprecated keys or malformed data.
         """
+        logger.debug("Loading profile from %s", path)
         data = json.loads(path.read_text())
         # Migrate profiles written by older versions (assistant_sync → aya)
         aya_data = data.get("aya") or data.get("assistant_sync", {})
@@ -323,6 +324,7 @@ class Profile:
 
     def save(self, path: Path) -> None:
         """Write aya fields back into the profile without clobbering other keys."""
+        logger.debug("Saving profile to %s", path)
         data = json.loads(path.read_text()) if path.exists() else {}
         # Drop legacy key on first save with new format
         data.pop("assistant_sync", None)

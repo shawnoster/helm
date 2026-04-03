@@ -146,6 +146,7 @@ class RelayClient:
             # In sync context: asyncio.run()
             event_id = asyncio.run(client.publish(packet, recipient_pubkey))
         """
+        logger.debug("Publishing packet %s to %d relay(s)", packet.id[:8], len(self._relay_urls))
         event = self._build_event(packet, recipient_nostr_pubkey, encrypt=encrypt)
         errors: list[str] = []
         last_event_id: str | None = None
@@ -158,6 +159,7 @@ class RelayClient:
                 errors.append(relay_url)
 
         if last_event_id is not None:
+            logger.debug("Packet %s published as event %s", packet.id[:8], last_event_id[:8])
             return last_event_id
 
         raise RelayError(f"All relays rejected the event: {errors}")
@@ -233,12 +235,14 @@ class RelayClient:
                 return packets
             packets = asyncio.run(fetch_all())
         """
+        logger.debug("Fetching pending packets from %d relay(s)", len(self._relay_urls))
         seen_ids: set[str] = set()
         for relay_url in self._relay_urls:
             async for packet in self._fetch_from_relay(relay_url, since):
                 if packet.id not in seen_ids:
                     seen_ids.add(packet.id)
                     yield packet
+        logger.debug("Fetch complete, %d unique packet(s) found", len(seen_ids))
 
     async def _fetch_from_relay(
         self,
@@ -289,6 +293,7 @@ class RelayClient:
             for attempt in range(_MAX_RETRIES_FETCH):
                 page_events = []
                 try:
+                    logger.debug("Connecting to %s (page cursor until=%s)", relay_url, until)
                     async with websockets.connect(relay_url) as ws:
                         await ws.send(json.dumps(["REQ", sub_id, filter_]))
                         try:

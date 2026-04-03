@@ -9,8 +9,11 @@ defined here — those belong to the notebook repo, not to aya.
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 _aya_home_env = os.environ.get("AYA_HOME")
 AYA_HOME = Path(_aya_home_env).expanduser() if _aya_home_env else Path.home() / ".aya"

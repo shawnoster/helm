@@ -111,6 +111,18 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+
+@app.callback()
+def main(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug logging"),
+) -> None:
+    """aya — personal AI assistant toolkit."""
+    if verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(name)s %(levelname)s: %(message)s")
+    else:
+        logging.basicConfig(level=logging.WARNING)
+
+
 # ── Schedule sub-app ─────────────────────────────────────────────────────────
 
 schedule_app = typer.Typer(
@@ -581,6 +593,7 @@ def send(
     ),
 ) -> None:
     """Send a packet to a Nostr relay."""
+    logger.debug("send: packet_file=%s, as=%s", packet_file, as_)
     if instance is not None and as_ != "default":
         _emit_error(
             ErrorCode.INVALID_ARGUMENT,
@@ -671,6 +684,7 @@ def dispatch(
     ),
 ) -> None:
     """Pack and send in one step — the natural 'pack for home' flow."""
+    logger.debug("dispatch: to=%s, intent=%s, as=%s", to, intent, as_)
     if instance is not None and as_ != "default":
         _emit_error(
             ErrorCode.INVALID_ARGUMENT,
@@ -1005,6 +1019,7 @@ def receive(
     ),
 ) -> None:
     """Poll for pending packets and surface them for review."""
+    logger.debug("receive: as=%s, auto_ingest=%s, quiet=%s", as_, auto_ingest, quiet)
     if instance is not None and as_ != "default":
         _emit_error(
             ErrorCode.INVALID_ARGUMENT,

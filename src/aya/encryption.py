@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import base64
 import hmac as _hmac
+import logging
 import os
 
 from coincurve import PrivateKey as Secp256k1PrivateKey
@@ -14,6 +15,8 @@ from coincurve import PublicKey as Secp256k1PublicKey
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms
 from cryptography.hazmat.primitives.kdf.hkdf import HKDF
+
+logger = logging.getLogger(__name__)
 
 _NIP44_VERSION = 2
 _NONCE_LEN = 32
