@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -40,6 +41,10 @@ def set_config_value(key: str, value: str, path: Path = CONFIG_PATH) -> dict[str
 
 
 def get_notebook_path(path: Path = CONFIG_PATH) -> Path | None:
+    """Return the notebook path from AYA_NOTEBOOK_PATH env var or config.json."""
+    env = os.environ.get("AYA_NOTEBOOK_PATH", "").strip()
+    if env:
+        return Path(env).expanduser()
     config = load_config(path)
     raw = config.get("notebook_path")
     return Path(raw).expanduser() if raw else None

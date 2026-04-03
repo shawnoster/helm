@@ -2379,7 +2379,8 @@ def context_cmd(
     if not notebook_path:
         err.print(
             "[red]notebook_path not set.[/red] "
-            "Run: [bold]aya config set notebook_path ~/notebook[/bold]"
+            "Set [bold]AYA_NOTEBOOK_PATH[/bold] or run: "
+            "[bold]aya config set notebook_path ~/notebook[/bold]"
         )
         raise typer.Exit(1)
     if not notebook_path.exists():
