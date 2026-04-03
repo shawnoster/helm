@@ -1008,7 +1008,9 @@ def receive(
     ),
     auto_ingest: bool = typer.Option(False, help="Ingest all trusted packets without prompting"),
     skip_untrusted: bool = typer.Option(
-        False, "--skip-untrusted", help="Skip untrusted packets silently instead of prompting"
+        False,
+        "--skip-untrusted",
+        help="Skip untrusted packets silently (use with --auto-ingest)",
     ),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Auto-confirm all prompts (non-interactive mode)"
