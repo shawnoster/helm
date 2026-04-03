@@ -1936,14 +1936,19 @@ def _ingest(packet: Packet, *, quiet: bool = False) -> None:
     from aya.paths import PACKETS_DIR
 
     PACKETS_DIR.mkdir(parents=True, exist_ok=True)
+    PACKETS_DIR.chmod(0o700)
     packet_file = PACKETS_DIR / f"{packet.id}.json"
     packet_file.write_text(packet.to_json())
+    packet_file.chmod(0o600)
 
     # Prune old packets (>7 days based on file mtime)
     cutoff = datetime.now(UTC).timestamp() - 7 * 86400
     for old in PACKETS_DIR.glob("*.json"):
-        if old.stat().st_mtime < cutoff:
-            old.unlink()
+        try:
+            if old.stat().st_mtime < cutoff:
+                old.unlink(missing_ok=True)
+        except FileNotFoundError:
+            continue
 
 
 # ── show ──────────────────────────────────────────────────────────────────────
