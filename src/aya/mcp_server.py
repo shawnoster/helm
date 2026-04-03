@@ -375,8 +375,16 @@ async def _handle_receive(arguments: dict[str, Any]) -> list[types.TextContent]:
                 {"id": pkt.id, "intent": pkt.intent, "from": pkt.from_did, "ingested": True}
             )
         else:
+            # MCP is always non-interactive — skip untrusted packets silently.
+            logger.debug("Skipping untrusted packet %s from %s", pkt.id[:8], pkt.from_did[:30])
             received.append(
-                {"id": pkt.id, "intent": pkt.intent, "from": pkt.from_did, "ingested": False}
+                {
+                    "id": pkt.id,
+                    "intent": pkt.intent,
+                    "from": pkt.from_did,
+                    "ingested": False,
+                    "skipped": True,
+                }
             )
 
     profile.save(PROFILE_PATH)

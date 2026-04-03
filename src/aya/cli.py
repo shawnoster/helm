@@ -1007,6 +1007,9 @@ def receive(
         None, "--instance", help="[deprecated] Use --as instead", hidden=True
     ),
     auto_ingest: bool = typer.Option(False, help="Ingest all trusted packets without prompting"),
+    skip_untrusted: bool = typer.Option(
+        False, "--skip-untrusted", help="Skip untrusted packets silently instead of prompting"
+    ),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Auto-confirm all prompts (non-interactive mode)"
     ),
@@ -1019,7 +1022,13 @@ def receive(
     ),
 ) -> None:
     """Poll for pending packets and surface them for review."""
-    logger.debug("receive: as=%s, auto_ingest=%s, quiet=%s", as_, auto_ingest, quiet)
+    logger.debug(
+        "receive: as=%s, auto_ingest=%s, skip_untrusted=%s, quiet=%s",
+        as_,
+        auto_ingest,
+        skip_untrusted,
+        quiet,
+    )
     if instance is not None and as_ != "default":
         _emit_error(
             ErrorCode.INVALID_ARGUMENT,
@@ -1127,6 +1136,25 @@ def receive(
                         "ingested": True,
                     }
                 )
+                continue
+
+            if skip_untrusted and not trusted:
+                logger.debug(
+                    "Skipping untrusted packet %s from %s",
+                    packet.id[:8],
+                    packet.from_did[:30],
+                )
+                received_summaries.append(
+                    {
+                        "id": packet.id,
+                        "intent": packet.intent,
+                        "from": packet.from_did,
+                        "ingested": False,
+                        "skipped": True,
+                    }
+                )
+                if format_ != OutputFormat.JSON and not quiet:
+                    err.print(f"[dim]Skipped untrusted: {packet.id[:8]} ({packet.intent})[/dim]")
                 continue
 
             ingest = yes or typer.confirm(

@@ -1289,6 +1289,88 @@ class TestReceive:
         assert relay_url in saved.last_checked
         assert saved.last_checked[relay_url]  # non-empty ISO timestamp
 
+    def test_receive_skip_untrusted(self, profile_with_sender: Path, sender: Identity) -> None:
+        """--skip-untrusted must silently skip untrusted packets and ingest trusted ones."""
+        p = Profile.load(profile_with_sender)
+        to_did = p.instances["default"].did
+
+        trusted_packet = self._signed_packet(sender, to_did, intent="Trusted msg")
+        untrusted_sender = Identity.generate("stranger")
+        untrusted_packet = self._signed_packet(untrusted_sender, to_did, intent="Untrusted msg")
+
+        async def mock_fetch(*args, **kwargs):
+            yield trusted_packet
+            yield untrusted_packet
+
+        with patch("typer.confirm") as mock_confirm:
+            mock_confirm.side_effect = AssertionError(
+                "typer.confirm should not be called with --skip-untrusted"
+            )
+            with patch("aya.cli.RelayClient") as mock_cls:
+                mock_cls.return_value.fetch_pending = mock_fetch
+                result = runner.invoke(
+                    app,
+                    [
+                        "receive",
+                        "--auto-ingest",
+                        "--skip-untrusted",
+                        "--profile",
+                        str(profile_with_sender),
+                    ],
+                )
+
+        assert result.exit_code == 0, result.output
+        saved = Profile.load(profile_with_sender)
+        assert any(e["id"] == trusted_packet.id for e in saved.ingested_ids)
+        assert not any(e["id"] == untrusted_packet.id for e in saved.ingested_ids)
+
+    def test_receive_skip_untrusted_json(self, profile_with_sender: Path, sender: Identity) -> None:
+        """--skip-untrusted with --format json must include skipped=true for untrusted packets."""
+        p = Profile.load(profile_with_sender)
+        to_did = p.instances["default"].did
+
+        trusted_packet = self._signed_packet(sender, to_did, intent="Trusted json")
+        untrusted_sender = Identity.generate("stranger")
+        untrusted_packet = self._signed_packet(untrusted_sender, to_did, intent="Untrusted json")
+
+        async def mock_fetch(*args, **kwargs):
+            yield trusted_packet
+            yield untrusted_packet
+
+        with patch("typer.confirm") as mock_confirm:
+            mock_confirm.side_effect = AssertionError(
+                "typer.confirm should not be called with --skip-untrusted"
+            )
+            with patch("aya.cli.RelayClient") as mock_cls:
+                mock_cls.return_value.fetch_pending = mock_fetch
+                result = runner.invoke(
+                    app,
+                    [
+                        "receive",
+                        "--auto-ingest",
+                        "--skip-untrusted",
+                        "--format",
+                        "json",
+                        "--profile",
+                        str(profile_with_sender),
+                    ],
+                )
+
+        assert result.exit_code == 0, result.output
+        import json
+
+        data = json.loads(result.output)
+        packets = data["packets"]
+        assert len(packets) == 2
+
+        trusted_entry = next(p for p in packets if p["id"] == trusted_packet.id)
+        assert trusted_entry["ingested"] is True
+        assert "skipped" not in trusted_entry
+
+        untrusted_entry = next(p for p in packets if p["id"] == untrusted_packet.id)
+        assert untrusted_entry["ingested"] is False
+        assert untrusted_entry["skipped"] is True
+
 
 # ── inbox ─────────────────────────────────────────────────────────────────────
 
