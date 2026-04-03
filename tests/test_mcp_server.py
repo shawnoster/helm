@@ -25,6 +25,7 @@ def test_list_tools_names():
         "aya_schedule_remind",
         "aya_schedule_watch",
         "aya_ack",
+        "aya_show",
     }
 
 

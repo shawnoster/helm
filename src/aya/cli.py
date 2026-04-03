@@ -1932,6 +1932,128 @@ def _ingest(packet: Packet, *, quiet: bool = False) -> None:
                 )
             )
 
+    # Persist packet content for later retrieval
+    from aya.paths import PACKETS_DIR
+
+    PACKETS_DIR.mkdir(parents=True, exist_ok=True)
+    packet_file = PACKETS_DIR / f"{packet.id}.json"
+    packet_file.write_text(packet.to_json())
+
+    # Prune old packets (>7 days based on file mtime)
+    cutoff = datetime.now(UTC).timestamp() - 7 * 86400
+    for old in PACKETS_DIR.glob("*.json"):
+        if old.stat().st_mtime < cutoff:
+            old.unlink()
+
+
+# ── show ──────────────────────────────────────────────────────────────────────
+
+
+@app.command()
+def show(
+    packet_id: str = typer.Argument(help="Packet ID or prefix (min 8 chars)"),
+    format_: OutputFormat = typer.Option(OutputFormat.AUTO, "--format", "-f", help="Output format"),
+) -> None:
+    """Show the content of a previously ingested packet."""
+    from aya.paths import PACKETS_DIR
+
+    format_ = resolve_format(format_)
+
+    if len(packet_id) < 8:
+        _emit_error(ErrorCode.INVALID_ARGUMENT, "Packet ID prefix must be at least 8 characters.")
+
+    # Find matching packet files
+    if not PACKETS_DIR.exists():
+        _emit_error(ErrorCode.PACKET_NOT_FOUND, "No ingested packets found.")
+
+    matches = [f for f in PACKETS_DIR.glob("*.json") if f.stem.startswith(packet_id)]
+    if not matches:
+        _emit_error(
+            ErrorCode.PACKET_NOT_FOUND,
+            f"Packet '{packet_id}' not found.",
+            {"packet_id": packet_id},
+        )
+    if len(matches) > 1:
+        _emit_error(
+            ErrorCode.AMBIGUOUS_PREFIX,
+            f"Ambiguous prefix — matches {len(matches)} packets.",
+            {"packet_id": packet_id, "matches": len(matches)},
+        )
+
+    from aya.packet import Packet
+
+    packet = Packet.from_json(matches[0].read_text())
+
+    if format_ == OutputFormat.JSON:
+        _output_json(json.loads(packet.to_json()))
+        raise typer.Exit(0)
+
+    # Rich text display
+    console.print(
+        Panel(
+            str(packet.content),
+            title=f"{packet.intent}  ·  {packet.id[:8]}",
+            subtitle=f"from {packet.from_did[:30]}…  ·  {packet.sent_at[:10]}",
+        )
+    )
+
+
+# ── packets ───────────────────────────────────────────────────────────────────
+
+
+@app.command()
+def packets(
+    limit: int = typer.Option(20, "--limit", "-n", help="Max packets to show"),
+    format_: OutputFormat = typer.Option(OutputFormat.AUTO, "--format", "-f", help="Output format"),
+) -> None:
+    """List recently ingested packets."""
+    from aya.paths import PACKETS_DIR
+
+    format_ = resolve_format(format_)
+
+    if not PACKETS_DIR.exists():
+        if format_ == OutputFormat.JSON:
+            _output_json({"packets": []})
+            raise typer.Exit(0)
+        console.print("[dim]No ingested packets found.[/dim]")
+        return
+
+    from aya.packet import Packet
+
+    files = sorted(PACKETS_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)[
+        :limit
+    ]
+    items: list[dict[str, str]] = []
+    for f in files:
+        try:
+            pkt = Packet.from_json(f.read_text())
+            items.append(
+                {
+                    "id": pkt.id,
+                    "intent": pkt.intent,
+                    "from": pkt.from_did,
+                    "sent_at": pkt.sent_at,
+                    "content_type": pkt.content_type,
+                }
+            )
+        except Exception:  # noqa: S112
+            continue
+
+    if format_ == OutputFormat.JSON:
+        _output_json({"packets": items})
+        raise typer.Exit(0)
+
+    # Rich table display
+    table = Table(title=f"Ingested Packets ({len(items)})")
+    table.add_column("ID", width=10)
+    table.add_column("Intent")
+    table.add_column("From", width=8)
+    table.add_column("Sent")
+    for item in items:
+        from_display = item["from"][:30] + "…" if len(item["from"]) > 30 else item["from"]
+        table.add_row(item["id"][:8], item["intent"], from_display, item["sent_at"][:10])
+    console.print(table)
+
 
 # ── Config commands ───────────────────────────────────────────────────────────
 

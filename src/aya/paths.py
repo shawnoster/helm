@@ -27,3 +27,6 @@ ALERTS_FILE = AYA_HOME / "alerts.json"
 ACTIVITY_FILE = AYA_HOME / "activity.json"
 LOCK_FILE = AYA_HOME / ".scheduler.lock"
 CLAIMS_DIR = AYA_HOME / "claims"
+
+# ── ingested packets ───────────────────────────────────────────────────────
+PACKETS_DIR = AYA_HOME / "packets"

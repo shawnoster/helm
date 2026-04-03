@@ -2539,3 +2539,102 @@ class TestJsonFormat:
         assert data["message"] == "Test reminder"
         assert data["type"] == "reminder"
         assert "id" in data
+
+
+# ── TestPacketPersistence ────────────────────────────────────────────────────
+
+
+class TestPacketPersistence:
+    """Tests for packet persistence, show, and packets commands."""
+
+    @pytest.fixture
+    def packets_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """Set up a packets directory and patch PACKETS_DIR to point to it."""
+        packets = tmp_path / "packets"
+        packets.mkdir()
+        monkeypatch.setattr("aya.cli.PACKETS_DIR", packets, raising=False)
+        # Also patch in paths module for imports within cli
+        import aya.paths
+
+        monkeypatch.setattr(aya.paths, "PACKETS_DIR", packets)
+        return packets
+
+    @pytest.fixture
+    def sample_packet(self) -> Packet:
+        local = Identity.generate("default")
+        home = Identity.generate("home")
+        return Packet(
+            **{"from": home.did, "to": local.did},
+            intent="daily handoff",
+            content="Here is today's summary.",
+        )
+
+    def test_ingest_persists_packet(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """After _ingest, a packet JSON file should exist in PACKETS_DIR."""
+        packets = tmp_path / "packets"
+        import aya.paths
+
+        monkeypatch.setattr(aya.paths, "PACKETS_DIR", packets)
+
+        local = Identity.generate("default")
+        home = Identity.generate("home")
+        pkt = Packet(
+            **{"from": home.did, "to": local.did},
+            intent="seed from home",
+            content="test content",
+        )
+
+        from aya.cli import _ingest
+
+        _ingest(pkt, quiet=True)
+
+        assert packets.exists()
+        packet_files = list(packets.glob("*.json"))
+        assert len(packet_files) == 1
+        assert packet_files[0].stem == pkt.id
+
+    def test_show_displays_packet(self, packets_dir: Path, sample_packet: Packet) -> None:
+        """show command displays packet content."""
+        packet_file = packets_dir / f"{sample_packet.id}.json"
+        packet_file.write_text(sample_packet.to_json())
+
+        result = runner.invoke(app, ["show", sample_packet.id[:8], "--format", "text"])
+        assert result.exit_code == 0, result.output
+        assert "daily handoff" in result.output
+
+    def test_show_json_format(self, packets_dir: Path, sample_packet: Packet) -> None:
+        """show --format json returns valid JSON with expected fields."""
+        packet_file = packets_dir / f"{sample_packet.id}.json"
+        packet_file.write_text(sample_packet.to_json())
+
+        result = runner.invoke(app, ["show", sample_packet.id[:8], "--format", "json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["intent"] == "daily handoff"
+        assert data["id"] == sample_packet.id
+
+    def test_packets_list(
+        self,
+        packets_dir: Path,
+    ) -> None:
+        """packets command lists stored packets."""
+        local = Identity.generate("default")
+        home = Identity.generate("home")
+        for i in range(3):
+            pkt = Packet(
+                **{"from": home.did, "to": local.did},
+                intent=f"packet {i}",
+                content=f"content {i}",
+            )
+            (packets_dir / f"{pkt.id}.json").write_text(pkt.to_json())
+
+        result = runner.invoke(app, ["packets", "--format", "json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert len(data["packets"]) == 3
+
+    def test_show_unknown_id(self, packets_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """show with an unknown ID exits nonzero."""
+        monkeypatch.setenv("AYA_FORMAT", "json")
+        result = runner.invoke(app, ["show", "00000000unknown"])
+        assert result.exit_code != 0

@@ -153,6 +153,21 @@ _TOOLS: list[types.Tool] = [
             "additionalProperties": False,
         },
     ),
+    types.Tool(
+        name="aya_show",
+        description="Show the full content of a previously ingested packet by ID or prefix.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "packet_id": {
+                    "type": "string",
+                    "description": "Packet ID or prefix (min 8 chars).",
+                },
+            },
+            "required": ["packet_id"],
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 
@@ -431,6 +446,28 @@ async def _handle_ack(arguments: dict[str, Any]) -> list[types.TextContent]:
     return _text({"packet_id": signed.id, "event_id": event_id, "in_reply_to": full_packet_id})
 
 
+async def _handle_show(arguments: dict[str, Any]) -> list[types.TextContent]:
+    packet_id = arguments["packet_id"]
+
+    from aya.packet import Packet
+    from aya.paths import PACKETS_DIR
+
+    if len(packet_id) < 8:
+        return _error("Packet ID prefix must be at least 8 characters.")
+
+    if not PACKETS_DIR.exists():
+        return _error("No ingested packets found.")
+
+    matches = [f for f in PACKETS_DIR.glob("*.json") if f.stem.startswith(packet_id)]
+    if not matches:
+        return _error(f"Packet '{packet_id}' not found.")
+    if len(matches) > 1:
+        return _error(f"Ambiguous prefix '{packet_id}' -- matches {len(matches)} packets.")
+
+    pkt = Packet.from_json(matches[0].read_text())
+    return _text(json.loads(pkt.to_json()))
+
+
 # ── dispatcher ───────────────────────────────────────────────────────────────
 
 _HANDLERS: dict[str, Any] = {
@@ -441,6 +478,7 @@ _HANDLERS: dict[str, Any] = {
     "aya_schedule_remind": _handle_schedule_remind,
     "aya_schedule_watch": _handle_schedule_watch,
     "aya_ack": _handle_ack,
+    "aya_show": _handle_show,
 }
 
 
