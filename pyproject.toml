@@ -133,6 +133,10 @@ known-first-party = ["aya"]
 "src/aya/cli.py" = [
     "PLC0415",  # deferred import of mcp_server avoids pulling heavy deps at CLI startup
 ]
+"src/aya/log.py" = [
+    "S603",     # subprocess call — git CLI, not untrusted input
+    "S607",     # partial path — git resolved from PATH
+]
 "src/aya/status.py" = [
     "RUF001",   # EN dashes intentional in time-range parsing strings
     "RUF002",   # EN dashes intentional in time-range parsing docstrings

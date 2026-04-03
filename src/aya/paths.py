@@ -34,5 +34,8 @@ CLAIMS_DIR = AYA_HOME / "claims"
 # ── idempotency cache ─────────────────────────────────────────────────────
 SENT_CACHE = AYA_HOME / "sent_cache.json"
 
+# ── daily log state ────────────────────────────────────────────────────────
+LOG_STATE_FILE = AYA_HOME / "log_state.json"
+
 # ── ingested packets ───────────────────────────────────────────────────────
 PACKETS_DIR = AYA_HOME / "packets"
