@@ -434,8 +434,9 @@ def run_tick(quiet: bool = False) -> dict[str, Any]:
         */5 * * * * aya schedule tick --quiet
 
     When an active REPL session is detected (via session lock + recent
-    activity), alerts are still created and stored but delivery is skipped.
-    The REPL pulls them at natural breakpoints via ``aya schedule pending``.
+    activity), polling is skipped entirely — no new alerts are created.
+    The REPL pulls existing pending alerts at natural breakpoints via
+    ``aya schedule pending``.
 
     Returns a summary dict: {"claims_swept": N, "alerts_expired": N, "session_active": bool}
     """
