@@ -165,7 +165,10 @@ def append_entry(
     """
     notebook = get_notebook_path()
     if not notebook:
-        msg = "notebook_path not set. Run: aya config set notebook_path ~/notebook"
+        msg = (
+            "notebook_path not set."
+            " Set AYA_NOTEBOOK_PATH or run: aya config set notebook_path ~/notebook"
+        )
         raise ValueError(msg)
     if not notebook.exists():
         msg = f"Notebook path does not exist: {notebook}"
@@ -195,7 +198,10 @@ def show_entries(
     """
     notebook = get_notebook_path()
     if not notebook:
-        msg = "notebook_path not set. Run: aya config set notebook_path ~/notebook"
+        msg = (
+            "notebook_path not set."
+            " Set AYA_NOTEBOOK_PATH or run: aya config set notebook_path ~/notebook"
+        )
         raise ValueError(msg)
     if not notebook.exists():
         msg = f"Notebook path does not exist: {notebook}"
