@@ -183,7 +183,7 @@ class TestCanonicalHookEntries:
 class TestParseTickInterval:
     def test_seconds(self) -> None:
         assert parse_tick_interval("30s") == 30
-        assert parse_tick_interval("1s") == 1
+        assert parse_tick_interval("5s") == 5  # minimum
         assert parse_tick_interval("59s") == 59
 
     def test_minutes(self) -> None:
@@ -223,8 +223,17 @@ class TestParseTickInterval:
             parse_tick_interval("-5m")
 
     def test_rejects_above_60m(self) -> None:
-        with pytest.raises(ValueError, match="between 1s and 60m"):
+        with pytest.raises(ValueError, match="at most 60m"):
             parse_tick_interval("2h")
+
+    def test_rejects_below_minimum_seconds(self) -> None:
+        """Sub-5s intervals would generate 12+ crontab lines per minute
+        and spawn a Python interpreter for each; the scheduler tick
+        wasn't designed for that workload. Users who need finer-grained
+        polling should run a long-running daemon instead."""
+        for too_small in ("1s", "2s", "4s"):
+            with pytest.raises(ValueError, match="at least 5s"):
+                parse_tick_interval(too_small)
 
 
 # ── Hook install/uninstall (real files) ──────────────────────────────────────

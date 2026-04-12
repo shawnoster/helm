@@ -3696,3 +3696,41 @@ class TestSendSignatureValidation:
         assert result.exit_code == 0, result.output
         # Signature unchanged — pass-through, not re-signed
         assert captured["packet"].signature == original_sig
+
+    def test_resign_surfaces_console_notice_in_text_mode(
+        self, profile_with_trusted: Path, tmp_path: Path
+    ) -> None:
+        """When aya send re-signs in interactive/text mode, the user
+        should see a visible notice. Silent mutation is surprising."""
+        p = Profile.load(profile_with_trusted)
+        local = p.instances["default"]
+        home_key = p.trusted_keys["home"]
+
+        pkt = Packet(
+            **{"from": local.did, "to": home_key.did},
+            intent="silent resign",
+            content="hello",
+        )
+        assert pkt.signature is None
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        async def fake_publish(packet, *args, **kwargs):
+            return "e" * 64
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.publish = fake_publish
+            result = runner.invoke(
+                app,
+                [
+                    "send",
+                    str(packet_file),
+                    "--profile",
+                    str(profile_with_trusted),
+                    "--format",
+                    "text",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "Re-signed packet" in result.output

@@ -623,6 +623,11 @@ def send(
         if packet.from_did == local.did:
             packet = packet.sign(local)
             logger.info("Re-signed packet %s with local instance key", packet.id)
+            if format_ != OutputFormat.JSON:
+                err.print(
+                    "[dim]Re-signed packet with local instance key "
+                    "(signature was missing or invalid).[/dim]"
+                )
         else:
             _emit_error(
                 ErrorCode.INVALID_ARGUMENT,

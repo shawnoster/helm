@@ -15,6 +15,14 @@ logger = logging.getLogger(__name__)
 # ── Constants ────────────────────────────────────────────────────────────────
 
 DEFAULT_TICK_INTERVAL = "5m"  # Conservative default; configurable via --tick-interval
+
+# Minimum supported tick interval in seconds. Sub-5s ticks generate
+# 12+ crontab lines per minute (60 / N), each spawning a Python
+# interpreter; cron wasn't designed for this workload. Users who need
+# genuine sub-5s polling should write a proper long-running daemon
+# instead of abusing the scheduler tick.
+MIN_TICK_SECONDS = 5
+
 CRON_COMMENT = "# aya-scheduler-tick"
 
 CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
@@ -163,12 +171,16 @@ def _resolve_aya_path() -> str | None:
 def parse_tick_interval(text: str) -> int:
     """Parse a tick-interval string into total seconds.
 
-    Accepts forms like ``"30s"``, ``"1m"``, ``"5m"``, ``"1h"`` (single
-    unit only). Returns the duration in seconds.
+    Accepts forms like ``"5s"``, ``"30s"``, ``"1m"``, ``"5m"``, ``"1h"``
+    (single unit only). Returns the duration in seconds.
 
-    Raises ValueError on bad input or non-positive values, or on values
-    that exceed the supported range (1s … 60m). The upper bound exists
-    because cron's ``*/N`` syntax doesn't generalize cleanly past 60.
+    Raises ValueError on bad input, non-positive values, values below
+    ``MIN_TICK_SECONDS`` (currently 5s), or values above 60m. The lower
+    bound exists because sub-5s intervals generate 12+ crontab entries
+    per minute (each spawning a Python interpreter) — if you genuinely
+    need faster polling, run a long-running daemon instead of abusing
+    the scheduler tick. The upper bound exists because cron's ``*/N``
+    syntax doesn't generalize cleanly past 60.
     """
     text = text.strip().lower()
     if not text:
@@ -197,8 +209,14 @@ def parse_tick_interval(text: str) -> int:
         raise ValueError(f"Tick interval must be positive: {text!r}")
 
     seconds = n * unit_secs
-    if seconds < 1 or seconds > 3600:
-        raise ValueError(f"Tick interval must be between 1s and 60m, got {text!r} ({seconds}s)")
+    if seconds < MIN_TICK_SECONDS:
+        raise ValueError(
+            f"Tick interval must be at least {MIN_TICK_SECONDS}s, got {text!r} "
+            f"({seconds}s). Sub-{MIN_TICK_SECONDS}s intervals spawn too many "
+            "cron subprocesses per minute; use a long-running daemon instead."
+        )
+    if seconds > 3600:
+        raise ValueError(f"Tick interval must be at most 60m, got {text!r} ({seconds}s)")
     return seconds
 
 
