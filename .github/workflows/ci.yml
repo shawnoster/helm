@@ -9,10 +9,11 @@ on:
       - "pyproject.toml"
   pull_request:
     branches: [main]
-    paths:
-      - "src/**"
-      - "tests/**"
-      - "pyproject.toml"
+    # No path filter on pull_request: the "Lint, type-check, test" job is
+    # a required status check via the Protect main ruleset, and
+    # path-filtered required checks never report on PRs that don't touch
+    # the filtered paths — leaving doc-only PRs blocked indefinitely.
+    # Always running CI on PRs reports the check; uv cache keeps it fast.
   workflow_dispatch:
 
 concurrency:
