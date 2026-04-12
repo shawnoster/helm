@@ -1893,21 +1893,54 @@ def schedule_alerts(
 @schedule_app.command("install")
 def schedule_install(
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview changes without applying"),
+    tick_interval: str | None = typer.Option(
+        None,
+        "--tick-interval",
+        help=(
+            "How often the scheduler ticks (e.g. '30s', '1m', '5m', '1h'). "
+            "Sub-minute intervals generate multi-line crontab entries with "
+            "sleep offsets. Persisted to ~/.aya/config.json so re-runs without "
+            "this flag preserve the chosen value. Default: 5m on first install."
+        ),
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Replace any existing aya cron entries instead of treating them as already-installed.",
+    ),
 ) -> None:
     """Install scheduler integrations — system crontab + Claude Code hooks."""
-    result = install_scheduler(dry_run=dry_run)
+    from aya.config import load_config, set_config_value
+    from aya.install import DEFAULT_TICK_INTERVAL
+
+    # Resolve the effective tick interval: explicit flag > persisted config > default.
+    if tick_interval is None:
+        cfg = load_config()
+        tick_interval = cfg.get("tick_interval", DEFAULT_TICK_INTERVAL)
+
+    result = install_scheduler(dry_run=dry_run, tick_interval=tick_interval, force=force)
 
     if result.errors:
         for e in result.errors:
             err.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    # Persist the chosen interval (only on a successful real install,
+    # not dry-run or already-present cases — those don't change state).
+    if not dry_run and result.cron_installed:
+        set_config_value("tick_interval", tick_interval)
 
     prefix = "[dim](dry run)[/dim] " if dry_run else ""
 
     if result.cron_already_present:
-        console.print(f"  {prefix}[dim]Crontab:[/dim] already installed")
+        console.print(
+            f"  {prefix}[dim]Crontab:[/dim] already installed "
+            f"[dim](use --force to replace with --tick-interval {tick_interval})[/dim]"
+        )
     elif result.cron_installed:
-        console.print(f"  {prefix}[green]Crontab:[/green] installed")
-        console.print(f"    [dim]{result.cron_line}[/dim]")
+        console.print(f"  {prefix}[green]Crontab:[/green] installed (tick={tick_interval})")
+        for line in result.cron_lines:
+            console.print(f"    [dim]{line}[/dim]")
 
     for event in result.hooks_already_present:
         console.print(f"  {prefix}[dim]{event}:[/dim] already installed")

@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
-CRON_SCHEDULE = "*/5 * * * *"
+DEFAULT_TICK_INTERVAL = "5m"  # Conservative default; configurable via --tick-interval
 CRON_COMMENT = "# aya-scheduler-tick"
 
 CLAUDE_SETTINGS_PATH = Path.home() / ".claude" / "settings.json"
@@ -122,11 +122,17 @@ CANONICAL_HOOKS: dict[str, list[dict[str, Any]]] = {
 class InstallResult:
     cron_installed: bool = False
     cron_already_present: bool = False
-    cron_line: str = ""
+    cron_lines: list[str] = field(default_factory=list)
+    tick_interval: str = ""
     hooks_installed: list[str] = field(default_factory=list)
     hooks_already_present: list[str] = field(default_factory=list)
     hooks_updated: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+
+    @property
+    def cron_line(self) -> str:
+        """Backwards-compat: first line of cron_lines, or empty string."""
+        return self.cron_lines[0] if self.cron_lines else ""
 
 
 @dataclass
@@ -144,9 +150,80 @@ def _resolve_aya_path() -> str | None:
     return shutil.which("aya")
 
 
-def _build_cron_line(aya_path: str) -> str:
-    """Return the full crontab line with comment marker."""
-    return f"{CRON_SCHEDULE} {aya_path} schedule tick --quiet  {CRON_COMMENT}"
+def parse_tick_interval(text: str) -> int:
+    """Parse a tick-interval string into total seconds.
+
+    Accepts forms like ``"30s"``, ``"1m"``, ``"5m"``, ``"1h"`` (single
+    unit only). Returns the duration in seconds.
+
+    Raises ValueError on bad input or non-positive values, or on values
+    that exceed the supported range (1s … 60m). The upper bound exists
+    because cron's ``*/N`` syntax doesn't generalize cleanly past 60.
+    """
+    text = text.strip().lower()
+    if not text:
+        raise ValueError("Empty tick interval")
+
+    if text.endswith("s"):
+        unit_secs = 1
+        num_str = text[:-1]
+    elif text.endswith("m"):
+        unit_secs = 60
+        num_str = text[:-1]
+    elif text.endswith("h"):
+        unit_secs = 3600
+        num_str = text[:-1]
+    else:
+        raise ValueError(f"Tick interval must end in s/m/h: {text!r}")
+
+    try:
+        n = int(num_str)
+    except ValueError as exc:
+        raise ValueError(
+            f"Tick interval must be a positive integer with s/m/h suffix: {text!r}"
+        ) from exc
+
+    if n <= 0:
+        raise ValueError(f"Tick interval must be positive: {text!r}")
+
+    seconds = n * unit_secs
+    if seconds < 1 or seconds > 3600:
+        raise ValueError(f"Tick interval must be between 1s and 60m, got {text!r} ({seconds}s)")
+    return seconds
+
+
+def _build_cron_lines(aya_path: str, interval_seconds: int) -> list[str]:
+    """Return crontab line(s) for the given tick interval.
+
+    For intervals ≥ 60s and ≤ 60m: emits a single ``*/N * * * *`` line
+    (or ``* * * * *`` when N == 1, since ``*/1`` is non-standard).
+
+    For sub-minute intervals: emits multiple ``* * * * *`` lines, one
+    per offset (0, interval, 2*interval, …) within the minute, using
+    ``( sleep N && cmd )`` for the offset entries. Standard pattern is
+    30s = two lines (one immediate, one with sleep 30).
+    """
+    if interval_seconds >= 60:
+        minutes = interval_seconds // 60
+        if minutes == 1:
+            cron_expr = "* * * * *"  # */1 is non-standard
+        elif minutes == 60:
+            cron_expr = "0 * * * *"  # */60 is invalid; use minute-0 of every hour
+        else:
+            cron_expr = f"*/{minutes} * * * *"
+        return [f"{cron_expr} {aya_path} schedule tick --quiet  {CRON_COMMENT}"]
+
+    # Sub-minute: walk offsets through the 60-second window.
+    lines: list[str] = []
+    for offset in range(0, 60, interval_seconds):
+        if offset == 0:
+            lines.append(f"* * * * * {aya_path} schedule tick --quiet  {CRON_COMMENT}")
+        else:
+            lines.append(
+                f"* * * * * ( sleep {offset} && {aya_path} schedule tick --quiet )  "
+                f"{CRON_COMMENT}-{offset}s"
+            )
+    return lines
 
 
 def _get_current_crontab() -> str:
@@ -170,20 +247,39 @@ def _has_aya_cron(crontab_text: str) -> bool:
     return False
 
 
-def _add_cron_entry(aya_path: str, dry_run: bool = False) -> tuple[bool, bool, str]:
-    """Add cron entry. Returns (installed, already_present, line)."""
-    current = _get_current_crontab()
-    cron_line = _build_cron_line(aya_path)
+def _add_cron_entry(
+    aya_path: str,
+    interval_seconds: int,
+    dry_run: bool = False,
+    force: bool = False,
+) -> tuple[bool, bool, list[str]]:
+    """Add cron entry. Returns (installed, already_present, lines).
 
-    if _has_aya_cron(current):
-        return False, True, cron_line
+    Without ``force``, an existing aya cron entry causes a no-op
+    (returns ``already_present=True``). With ``force``, any existing
+    aya entries are removed first and the new lines for the requested
+    interval are written.
+    """
+    current = _get_current_crontab()
+    cron_lines = _build_cron_lines(aya_path, interval_seconds)
+
+    if _has_aya_cron(current) and not force:
+        return False, True, cron_lines
 
     if dry_run:
-        return True, False, cron_line
+        return True, False, cron_lines
 
-    new_crontab = current.rstrip("\n") + "\n" + cron_line + "\n"
-    if not current.strip():
-        new_crontab = cron_line + "\n"
+    # Strip any existing aya entries (force or no — when force, we replace;
+    # when not force, _has_aya_cron above returned True so we don't reach here).
+    surviving = [
+        line
+        for line in current.splitlines()
+        if "aya schedule tick" not in line and CRON_COMMENT not in line
+    ]
+    new_crontab_parts = surviving + cron_lines
+    new_crontab = "\n".join(new_crontab_parts) + "\n"
+    if not new_crontab.strip():
+        new_crontab = "\n".join(cron_lines) + "\n"
 
     subprocess.run(
         ["crontab", "-"],  # noqa: S607
@@ -191,7 +287,7 @@ def _add_cron_entry(aya_path: str, dry_run: bool = False) -> tuple[bool, bool, s
         text=True,
         check=True,
     )
-    return True, False, cron_line
+    return True, False, cron_lines
 
 
 def _remove_cron_entry(dry_run: bool = False) -> bool:
@@ -340,9 +436,31 @@ def _remove_hooks(dry_run: bool = False, settings_path: Path | None = None) -> l
 # ── Top-level install/uninstall ──────────────────────────────────────────────
 
 
-def install_scheduler(dry_run: bool = False, settings_path: Path | None = None) -> InstallResult:
-    """Install all scheduler integrations — crontab + Claude Code hooks."""
+def install_scheduler(
+    dry_run: bool = False,
+    settings_path: Path | None = None,
+    tick_interval: str = DEFAULT_TICK_INTERVAL,
+    force: bool = False,
+) -> InstallResult:
+    """Install all scheduler integrations — crontab + Claude Code hooks.
+
+    Args:
+        dry_run: Preview changes without applying.
+        settings_path: Override the Claude Code settings.json location (for tests).
+        tick_interval: How often the scheduler should tick. Accepts forms
+            like "30s", "1m", "5m", "1h" (1s … 60m). Sub-minute intervals
+            generate multi-line crontab entries with sleep offsets.
+        force: Replace any existing aya cron entries instead of treating
+            them as already-installed.
+    """
     result = InstallResult()
+    result.tick_interval = tick_interval
+
+    try:
+        interval_seconds = parse_tick_interval(tick_interval)
+    except ValueError as exc:
+        result.errors.append(f"invalid tick_interval: {exc}")
+        return result
 
     # Crontab
     aya_path = _resolve_aya_path()
@@ -350,10 +468,12 @@ def install_scheduler(dry_run: bool = False, settings_path: Path | None = None) 
         result.errors.append("Could not find 'aya' on PATH — skipping crontab")
     else:
         try:
-            installed, already, line = _add_cron_entry(aya_path, dry_run=dry_run)
+            installed, already, lines = _add_cron_entry(
+                aya_path, interval_seconds, dry_run=dry_run, force=force
+            )
             result.cron_installed = installed
             result.cron_already_present = already
-            result.cron_line = line
+            result.cron_lines = lines
         except subprocess.CalledProcessError as exc:
             result.errors.append(f"crontab failed: {exc}")
 
