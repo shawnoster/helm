@@ -1302,9 +1302,12 @@ class TestReceive:
         p = Profile.load(profile_with_sender)
         packet = self._signed_packet(sender, p.instances["default"].did)
 
-        # Record a previous check time on one relay
+        # Record a previous check time on one relay. Use a recent relative
+        # timestamp (1 hour ago) so it stays within cli.py's 7-day lookback
+        # clamp regardless of when the test runs. Round to seconds to match
+        # the iso serialization on line 1309.
         relay_url = p.default_relays[0]
-        last_check_time = datetime(2026, 3, 31, 12, 0, 0, tzinfo=UTC)
+        last_check_time = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
         p.last_checked[relay_url] = (
             last_check_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
         )
