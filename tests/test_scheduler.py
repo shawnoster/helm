@@ -37,12 +37,16 @@ def _isolate_scheduler(tmp_path, monkeypatch):
     """Point scheduler at a temp directory so tests don't touch real data."""
     scheduler_file = tmp_path / "assistant" / "memory" / "scheduler.json"
     alerts_file = tmp_path / "assistant" / "memory" / "alerts.json"
+    registered_file = tmp_path / "assistant" / "memory" / "session_registered_crons.json"
+    lock_file = tmp_path / "assistant" / "memory" / ".scheduler.lock"
     scheduler_file.parent.mkdir(parents=True)
     scheduler_file.write_text(json.dumps({"items": []}))
     alerts_file.write_text(json.dumps({"alerts": []}))
 
     monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
     monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+    monkeypatch.setattr("aya.scheduler.REGISTERED_CRONS_FILE", registered_file)
+    monkeypatch.setattr("aya.scheduler.LOCK_FILE", lock_file)
 
 
 # ── Timezone configuration ──────────────────────────────────────────────────────
@@ -614,3 +618,105 @@ class TestSchemaVersion:
         scheduler.ALERTS_FILE.write_text(json.dumps({"schema_version": 999, "alerts": []}))
         _load_collection_unlocked(scheduler.ALERTS_FILE, "alerts")
         assert "schema_version 999" in caplog.text
+
+
+# ── TestRegisteredCronIds ─────────────────────────────────────────────────────
+
+
+class TestRegisteredCronIds:
+    """Tests for the per-session cron ID tracker (storage.register_new_cron_ids).
+
+    Race condition coverage: register_new_cron_ids is the atomic
+    check-and-update used by `aya hook crons` to dedupe registrations
+    across concurrent PostToolUse hook invocations. Two callers racing
+    on the same candidate ID must agree that exactly one of them sees
+    it as new.
+    """
+
+    def test_first_call_returns_all_candidates(self):
+        from aya.scheduler import (
+            load_registered_cron_ids,
+            register_new_cron_ids,
+        )
+
+        new = register_new_cron_ids({"cron-a", "cron-b"})
+        assert new == {"cron-a", "cron-b"}
+        assert load_registered_cron_ids() == {"cron-a", "cron-b"}
+
+    def test_second_call_returns_only_unseen_subset(self):
+        from aya.scheduler import register_new_cron_ids
+
+        register_new_cron_ids({"cron-a", "cron-b"})
+        new = register_new_cron_ids({"cron-a", "cron-c"})
+        # cron-a was already registered; cron-c is new
+        assert new == {"cron-c"}
+
+    def test_call_with_only_known_ids_returns_empty(self):
+        from aya.scheduler import register_new_cron_ids
+
+        register_new_cron_ids({"cron-a", "cron-b"})
+        new = register_new_cron_ids({"cron-a", "cron-b"})
+        assert new == set()
+
+    def test_empty_input_is_noop(self):
+        from aya.scheduler import load_registered_cron_ids, register_new_cron_ids
+
+        register_new_cron_ids({"cron-a"})
+        new = register_new_cron_ids(set())
+        assert new == set()
+        # Existing tracker state preserved
+        assert load_registered_cron_ids() == {"cron-a"}
+
+    def test_persists_merged_set_across_processes(self, tmp_path):
+        """The tracker file on disk should contain the union of all
+        registered IDs after multiple register calls."""
+        import json as json_
+
+        from aya import scheduler
+        from aya.scheduler import register_new_cron_ids
+
+        register_new_cron_ids({"cron-a"})
+        register_new_cron_ids({"cron-b"})
+        register_new_cron_ids({"cron-c"})
+
+        data = json_.loads(scheduler.REGISTERED_CRONS_FILE.read_text())
+        assert set(data["ids"]) == {"cron-a", "cron-b", "cron-c"}
+
+    def test_reset_clears_tracker(self):
+        from aya.scheduler import (
+            load_registered_cron_ids,
+            register_new_cron_ids,
+            reset_registered_cron_ids,
+        )
+
+        register_new_cron_ids({"cron-a", "cron-b"})
+        reset_registered_cron_ids()
+        assert load_registered_cron_ids() == set()
+
+        # After reset, all candidates are new again
+        new = register_new_cron_ids({"cron-a", "cron-b"})
+        assert new == {"cron-a", "cron-b"}
+
+    def test_reset_when_tracker_does_not_exist(self):
+        """reset_registered_cron_ids should be a no-op when the file is missing."""
+        from aya.scheduler import reset_registered_cron_ids
+
+        # Should not raise even if the file doesn't exist
+        reset_registered_cron_ids()
+        reset_registered_cron_ids()  # idempotent
+
+    def test_load_returns_empty_for_corrupt_file(self, monkeypatch):
+        """Defensive read: a corrupt or malformed tracker should return
+        an empty set rather than crash. This matters because the file
+        is updated under load by parallel hooks; a partial write that
+        somehow slipped past atomic_write would otherwise wedge the
+        scheduler."""
+        from aya import scheduler
+        from aya.scheduler import load_registered_cron_ids
+
+        scheduler.REGISTERED_CRONS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        scheduler.REGISTERED_CRONS_FILE.write_text("not json at all {{{")
+        assert load_registered_cron_ids() == set()
+
+        scheduler.REGISTERED_CRONS_FILE.write_text('{"ids": "not a list"}')
+        assert load_registered_cron_ids() == set()

@@ -2025,11 +2025,7 @@ def hook_crons(
         SessionStart: ``aya hook crons --reset``
         PostToolUse:  ``aya hook crons --event PostToolUse``
     """
-    from aya.scheduler import (
-        load_registered_cron_ids,
-        reset_registered_cron_ids,
-        save_registered_cron_ids,
-    )
+    from aya.scheduler import register_new_cron_ids, reset_registered_cron_ids
 
     if reset:
         reset_registered_cron_ids()
@@ -2038,10 +2034,20 @@ def hook_crons(
     if not crons:
         return
 
-    already_registered = load_registered_cron_ids()
-    new_crons = [c for c in crons if c.get("id", "") not in already_registered]
-    if not new_crons:
+    # Atomically merge candidate cron IDs into the per-session tracker
+    # under a single file lock. The returned set is the IDs that were
+    # NOT previously in the tracker — i.e. the ones we should emit.
+    # Two concurrent processes racing on the same cron will both call
+    # register_new_cron_ids; only the lock winner sees the IDs as new.
+    # The other gets an empty set back and emits nothing. This prevents
+    # duplicate CronCreate registrations when Claude Code dispatches
+    # parallel tool calls and the PostToolUse hook fires concurrently.
+    candidate_ids = {c.get("id", "") for c in crons if c.get("id")}
+    new_ids = register_new_cron_ids(candidate_ids)
+    if not new_ids:
         return
+
+    new_crons = [c for c in crons if c.get("id", "") in new_ids]
 
     # Emit one hookSpecificOutput per new cron so each gets its own system
     # reminder and can't be truncated when multiple crons are bundled.
@@ -2065,11 +2071,6 @@ def hook_crons(
                 }
             )
         )
-
-    # Persist the IDs we just emitted so the next call (e.g. via the
-    # PostToolUse hook) doesn't double-register them.
-    updated_ids = already_registered | {c.get("id", "") for c in new_crons if c.get("id")}
-    save_registered_cron_ids(updated_ids)
 
 
 # ── ci ────────────────────────────────────────────────────────────────────────

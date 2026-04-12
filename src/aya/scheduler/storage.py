@@ -478,8 +478,13 @@ def _registered_crons_file() -> Path:
     return _paths.AYA_HOME / "session_registered_crons.json"
 
 
-def load_registered_cron_ids() -> set[str]:
-    """Return the set of cron IDs already registered in this session."""
+def _load_registered_cron_ids_unlocked() -> set[str]:
+    """Read the registered-crons tracker from disk without acquiring the lock.
+
+    Caller must already hold an exclusive ``_file_lock()`` if they intend
+    to write afterwards. Use ``load_registered_cron_ids()`` for read-only
+    access.
+    """
     path = _registered_crons_file()
     if not path.exists():
         return set()
@@ -495,8 +500,11 @@ def load_registered_cron_ids() -> set[str]:
     return {pid for pid in raw_ids if isinstance(pid, str)}
 
 
-def save_registered_cron_ids(ids: set[str]) -> None:
-    """Persist the set of cron IDs registered in this session."""
+def _save_registered_cron_ids_unlocked(ids: set[str]) -> None:
+    """Write the registered-crons tracker to disk without acquiring the lock.
+
+    Caller must already hold an exclusive ``_file_lock()``.
+    """
     path = _registered_crons_file()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -506,11 +514,59 @@ def save_registered_cron_ids(ids: set[str]) -> None:
     _atomic_write(path, payload)
 
 
+def load_registered_cron_ids() -> set[str]:
+    """Return the set of cron IDs already registered in this session.
+
+    Read-only snapshot. For atomic check-and-update use
+    ``register_new_cron_ids()``.
+    """
+    with _file_lock(shared=True):
+        return _load_registered_cron_ids_unlocked()
+
+
+def save_registered_cron_ids(ids: set[str]) -> None:
+    """Persist the set of cron IDs registered in this session.
+
+    Acquires the file lock to avoid races with concurrent readers/writers.
+    For check-and-update from a known-empty starting state use
+    ``register_new_cron_ids()`` which is atomic across the load-merge-save
+    cycle.
+    """
+    with _file_lock():
+        _save_registered_cron_ids_unlocked(ids)
+
+
+def register_new_cron_ids(candidate_ids: set[str]) -> set[str]:
+    """Atomically merge ``candidate_ids`` into the per-session tracker.
+
+    Returns the subset of ``candidate_ids`` that were NOT previously in
+    the tracker — i.e. the IDs the caller should emit as new
+    registrations. The tracker is updated to include all candidates
+    before this function returns, so a subsequent concurrent call sees
+    them as already-registered and emits nothing.
+
+    The entire load → merge → save sequence runs under a single
+    exclusive ``_file_lock()`` so two concurrent processes can't both
+    decide an ID is new and double-emit it. This matters because the
+    PostToolUse ``aya hook crons`` hook fires on every tool use, and
+    Claude Code dispatches tool calls in parallel.
+    """
+    if not candidate_ids:
+        return set()
+    with _file_lock():
+        existing = _load_registered_cron_ids_unlocked()
+        new = candidate_ids - existing
+        if new:
+            _save_registered_cron_ids_unlocked(existing | candidate_ids)
+        return new
+
+
 def reset_registered_cron_ids() -> None:
     """Clear the per-session registered crons tracker.
 
     Called at SessionStart so a fresh session re-registers everything.
     """
-    path = _registered_crons_file()
-    if path.exists():
-        path.unlink(missing_ok=True)
+    with _file_lock():
+        path = _registered_crons_file()
+        if path.exists():
+            path.unlink(missing_ok=True)

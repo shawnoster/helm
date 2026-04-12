@@ -113,6 +113,7 @@ from .storage import (
     load_alerts,
     load_items,
     load_registered_cron_ids,
+    register_new_cron_ids,
     reset_registered_cron_ids,
     save_alerts,
     save_items,
@@ -299,6 +300,7 @@ __all__ = [
     "_session_lock_file",
     "load_registered_cron_ids",
     "save_registered_cron_ids",
+    "register_new_cron_ids",
     "reset_registered_cron_ids",
     "_passes_severity_filter",
     # Display
