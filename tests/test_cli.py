@@ -3383,3 +3383,164 @@ class TestDrop:
 
         assert result.exit_code == 0, result.output
         assert "Dropped packet" not in result.output
+
+
+# ── TestSendSignatureValidation ───────────────────────────────────────────────
+
+
+class TestSendSignatureValidation:
+    """Tests for signature validation in `aya send`.
+
+    Three paths:
+      - Missing/invalid signature, from_did matches local → re-sign + send
+      - Missing/invalid signature, from_did is external → reject
+      - Valid signature → pass through unchanged
+    """
+
+    def test_resigns_when_signature_missing_and_local_is_sender(
+        self, profile_with_trusted: Path, tmp_path: Path
+    ) -> None:
+        """Empty-sig packet authored by local instance is auto-signed before send."""
+        p = Profile.load(profile_with_trusted)
+        local = p.instances["default"]
+        home_key = p.trusted_keys["home"]
+
+        pkt = Packet(
+            **{"from": local.did, "to": home_key.did},
+            intent="hand-edited packet",
+            content="hello",
+        )
+        # Note: no .sign() call — signature is None
+        assert pkt.signature is None
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        captured: dict = {}
+
+        async def fake_publish(packet, *args, **kwargs):
+            captured["packet"] = packet
+            return "e" * 64
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.publish = fake_publish
+            result = runner.invoke(
+                app,
+                ["send", str(packet_file), "--profile", str(profile_with_trusted)],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert captured["packet"].signature is not None
+        # And the freshly applied signature is valid
+        assert captured["packet"].verify_from_did()
+
+    def test_resigns_when_signature_invalid_and_local_is_sender(
+        self, profile_with_trusted: Path, tmp_path: Path
+    ) -> None:
+        """Garbage-sig packet authored by local instance is auto-resigned."""
+        p = Profile.load(profile_with_trusted)
+        local = p.instances["default"]
+        home_key = p.trusted_keys["home"]
+
+        pkt = Packet(
+            **{"from": local.did, "to": home_key.did},
+            intent="bad sig packet",
+            content="hello",
+        )
+        # Inject a bogus base64 signature so verify_from_did() returns False
+        pkt.signature = "A" * 100
+        assert not pkt.verify_from_did()
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        captured: dict = {}
+
+        async def fake_publish(packet, *args, **kwargs):
+            captured["packet"] = packet
+            return "e" * 64
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.publish = fake_publish
+            result = runner.invoke(
+                app,
+                ["send", str(packet_file), "--profile", str(profile_with_trusted)],
+            )
+
+        assert result.exit_code == 0, result.output
+        # Signature replaced with a valid one
+        assert captured["packet"].verify_from_did()
+
+    def test_rejects_when_signature_missing_and_sender_is_external(
+        self, profile_with_trusted: Path, tmp_path: Path
+    ) -> None:
+        """Empty-sig packet claiming to be from a different sender is refused."""
+        p = Profile.load(profile_with_trusted)
+        home_key = p.trusted_keys["home"]
+        other_sender = Identity.generate("offline")
+
+        pkt = Packet(
+            **{"from": other_sender.did, "to": home_key.did},
+            intent="forged-looking packet",
+            content="hello",
+        )
+        assert pkt.signature is None
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        publish_calls = 0
+
+        async def fake_publish(*args, **kwargs):
+            nonlocal publish_calls
+            publish_calls += 1
+            return "e" * 64
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.publish = fake_publish
+            result = runner.invoke(
+                app,
+                [
+                    "send",
+                    str(packet_file),
+                    "--profile",
+                    str(profile_with_trusted),
+                    "--format",
+                    "json",
+                ],
+            )
+
+        assert result.exit_code != 0
+        assert publish_calls == 0  # never reached the relay
+
+    def test_passes_through_valid_signature(
+        self, profile_with_trusted: Path, tmp_path: Path
+    ) -> None:
+        """Properly-signed packet sends without modification."""
+        p = Profile.load(profile_with_trusted)
+        local = p.instances["default"]
+        home_key = p.trusted_keys["home"]
+
+        pkt = Packet(
+            **{"from": local.did, "to": home_key.did},
+            intent="properly signed",
+            content="hello",
+        ).sign(local)
+        original_sig = pkt.signature
+        assert pkt.verify_from_did()
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        captured: dict = {}
+
+        async def fake_publish(packet, *args, **kwargs):
+            captured["packet"] = packet
+            return "e" * 64
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.publish = fake_publish
+            result = runner.invoke(
+                app,
+                ["send", str(packet_file), "--profile", str(profile_with_trusted)],
+            )
+
+        assert result.exit_code == 0, result.output
+        # Signature unchanged — pass-through, not re-signed
+        assert captured["packet"].signature == original_sig

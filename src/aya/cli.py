@@ -613,6 +613,34 @@ def send(
     relay_urls = [relay] if relay else p.default_relays
     packet = Packet.from_json(packet_file.read_text())
 
+    # Validate the packet's signature before publishing. Two failure modes
+    # to handle separately:
+    #
+    # 1. Signature is missing or invalid AND from_did matches the local
+    #    instance → user authored this packet but didn't sign it (common
+    #    when hand-editing JSON). Re-sign with the local key automatically.
+    #
+    # 2. Signature is missing or invalid AND from_did is someone else →
+    #    refuse. Forwarding an unsigned packet that claims to be from
+    #    another sender would let the relay carry forged-looking data.
+    #    The user must either get the original sender to sign it, or
+    #    rewrite the from_did to match a local instance.
+    if not packet.verify_from_did():
+        if packet.from_did == local.did:
+            packet = packet.sign(local)
+            logger.info("Re-signed packet %s with local instance key", packet.id)
+        else:
+            _emit_error(
+                ErrorCode.INVALID_ARGUMENT,
+                (
+                    f"Packet has missing or invalid signature, and from_did "
+                    f"({packet.from_did[:40]}…) does not match local instance "
+                    f"({local.did[:40]}…). Refusing to forward an unsigned "
+                    f"packet that claims to be from another sender."
+                ),
+                {"packet_id": packet.id, "from_did": packet.from_did},
+            )
+
     if dry_run:
         _output_json(json.loads(packet.to_json()))
         raise typer.Exit(0)
