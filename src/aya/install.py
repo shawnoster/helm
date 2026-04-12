@@ -78,6 +78,7 @@ CANONICAL_HOOKS: dict[str, list[dict[str, Any]]] = {
                     "type": "command",
                     "command": "aya hook crons --event PostToolUse 2>/dev/null || true",
                     "statusMessage": "",
+                    "async": True,
                 }
             ]
         },
@@ -248,12 +249,22 @@ def _get_current_crontab() -> str:
     return result.stdout
 
 
+def _is_aya_cron_line(line: str) -> bool:
+    """True if a crontab line is an aya-managed scheduler-tick entry.
+
+    Detection requires the canonical CRON_COMMENT marker (or its
+    sub-minute offset variant ``CRON_COMMENT-30s``). Substring-matching
+    only on ``"aya schedule tick"`` is too aggressive — it would
+    accidentally strip user comments that mention the command (e.g.
+    ``# reminder: investigate aya schedule tick latency``) when
+    rewriting the crontab.
+    """
+    return CRON_COMMENT in line
+
+
 def _has_aya_cron(crontab_text: str) -> bool:
-    """Check if any line contains an aya tick entry."""
-    for line in crontab_text.splitlines():
-        if "aya schedule tick" in line or CRON_COMMENT in line:
-            return True
-    return False
+    """Check if any line is an aya-managed tick entry."""
+    return any(_is_aya_cron_line(line) for line in crontab_text.splitlines())
 
 
 def _add_cron_entry(
@@ -280,11 +291,7 @@ def _add_cron_entry(
 
     # Strip any existing aya entries (force or no — when force, we replace;
     # when not force, _has_aya_cron above returned True so we don't reach here).
-    surviving = [
-        line
-        for line in current.splitlines()
-        if "aya schedule tick" not in line and CRON_COMMENT not in line
-    ]
+    surviving = [line for line in current.splitlines() if not _is_aya_cron_line(line)]
     new_crontab_parts = surviving + cron_lines
     new_crontab = "\n".join(new_crontab_parts) + "\n"
     if not new_crontab.strip():
@@ -308,11 +315,7 @@ def _remove_cron_entry(dry_run: bool = False) -> bool:
     if dry_run:
         return True
 
-    lines = [
-        line
-        for line in current.splitlines()
-        if "aya schedule tick" not in line and CRON_COMMENT not in line
-    ]
+    lines = [line for line in current.splitlines() if not _is_aya_cron_line(line)]
     new_crontab = "\n".join(lines) + "\n" if lines else ""
 
     if new_crontab.strip():
