@@ -2262,30 +2262,36 @@ def show(
 # ── read ──────────────────────────────────────────────────────────────────────
 
 
-def _extract_body(content: object) -> str:
+def _extract_body(content: object, content_type: ContentType | None = None) -> str:
     """Extract a packet body string from raw content for display.
 
     For seed packets (`application/aya-seed`), content is a dict with
     ``opener``, ``context_summary``, and ``open_questions``. For content
-    packets (markdown, text), content is a plain string. Anything else
+    packets (markdown, text), content is a plain string. JSON dict content
+    that isn't a seed is serialized with ``json.dumps``. Anything else
     falls back to ``str(content)``.
     """
     lines: list[str] = []
     if isinstance(content, dict):
-        opener = content.get("opener")
-        if opener:
-            lines.append(str(opener))
-        context_summary = content.get("context_summary")
-        if context_summary:
-            lines.append("")
-            lines.append("--- context ---")
-            lines.append(str(context_summary))
-        open_questions = content.get("open_questions") or []
-        if open_questions:
-            lines.append("")
-            lines.append("--- open questions ---")
-            for q in open_questions:
-                lines.append(f"- {q}")
+        if content_type == ContentType.SEED:
+            opener = content.get("opener")
+            if opener:
+                lines.append(str(opener))
+            context_summary = content.get("context_summary")
+            if context_summary:
+                if lines:
+                    lines.append("")
+                lines.append("--- context ---")
+                lines.append(str(context_summary))
+            open_questions = content.get("open_questions") or []
+            if open_questions:
+                if lines:
+                    lines.append("")
+                lines.append("--- open questions ---")
+                for q in open_questions:
+                    lines.append(f"- {q}")
+        else:
+            lines.append(json.dumps(content, indent=2, default=str))
     elif isinstance(content, str):
         lines.append(content)
     else:
@@ -2332,7 +2338,7 @@ def read(
     from aya.packet import Packet
 
     packet = Packet.from_json(matches[0].read_text())
-    body = _extract_body(packet.content)
+    body = _extract_body(packet.content, packet.content_type)
 
     if format_ == OutputFormat.JSON:
         result: dict[str, object] = {"id": packet.id, "body": body}
@@ -2348,7 +2354,7 @@ def read(
         console.print(f"[bold]{packet.intent}[/bold]  ·  {packet.id[:12]}")
         console.print(f"[dim]from {packet.from_did[:30]}…  ·  {packet.sent_at[:16]}[/dim]")
         console.print()
-    console.print(body)
+    console.print(body, markup=False, highlight=False)
 
 
 # ── drop ──────────────────────────────────────────────────────────────────────
@@ -2358,7 +2364,7 @@ def read(
 def drop(
     packet_id: str = typer.Argument(help="Packet ID or prefix (min 8 chars) to drop from inbox"),
     as_: str = typer.Option("default", "--as", help="Local identity to act as"),
-    relay: str = typer.Option(None, help="Relay URL (overrides profile default)"),
+    relay: str | None = typer.Option(None, help="Relay URL (overrides profile default)"),
     profile: Path = typer.Option(DEFAULT_PROFILE),
     format_: OutputFormat = typer.Option(OutputFormat.AUTO, "--format", "-f", help="Output format"),
 ) -> None:
@@ -2403,8 +2409,12 @@ def drop(
             # (bad-sig, spam, untrusted senders that aya skipped).
             relay_urls = [relay] if relay else p.default_relays
             client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
-            relay_packet_ids = [pkt.id async for pkt in client.fetch_pending()]
-            relay_matches = [pid for pid in relay_packet_ids if pid.startswith(packet_id)]
+            relay_matches: list[str] = []
+            async for pkt in client.fetch_pending():
+                if pkt.id.startswith(packet_id):
+                    relay_matches.append(pkt.id)
+                    if len(relay_matches) > 1:
+                        break  # ambiguous — stop early
 
             if not relay_matches:
                 _emit_error(
