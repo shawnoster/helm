@@ -119,7 +119,7 @@ CCR minimum interval is 1 hour. aya can fire at any cron interval.
 
 Already have aya installed on another machine? Give Claude Code this prompt on the new machine and it will handle everything:
 
-> Install aya (`uv tool install aya-ai-assist`), initialize identity with `aya init --label <LABEL>`, then pair with my other instance. If I have a pairing code from the other machine, run `aya pair --code <CODE> --peer <OTHER_LABEL> --as <LABEL>` and we're done. If not, run `aya pair --peer <OTHER_LABEL> --as <LABEL>` — this will block waiting for the other machine to join (up to 10 minutes), so give me the short code it displays and immediately run `aya pair --code <CODE>` on the other machine before the window expires. After pairing, install hooks and crontab with `aya schedule install`. Register a relay poll cron: `aya schedule recurring -m "relay-poll" -c "*/10 * * * *" -p "Run: aya receive --as <LABEL> --auto-ingest --quiet. If any packets were ingested, surface their content to the user."`. Finally, add the aya plugin to your shell profile: `alias claude='claude --plugin-dir /path/to/aya'` and verify everything with `aya status`.
+> Install aya (`uv tool install aya-ai-assist`), initialize identity with `aya init --label <LABEL>`, then pair with my other instance. If I have a pairing code from the other machine, run `aya pair --code <CODE> --peer <OTHER_LABEL> --as <LABEL>` and we're done. If not, run `aya pair --peer <OTHER_LABEL> --as <LABEL>` — this will block waiting for the other machine to join (up to 10 minutes), so give me the short code it displays and immediately run `aya pair --code <CODE>` on the other machine before the window expires. After pairing, install hooks and crontab with `aya schedule install`. Finally, add the aya plugin to your shell profile: `alias claude='claude --plugin-dir /path/to/aya/.claude-plugin'` and verify everything with `aya status`.
 
 Replace `<LABEL>` with a name for this machine (e.g. `home`, `work`, `laptop`, your name), `<OTHER_LABEL>` with the other machine's label, and `<CODE>` with the pairing code.
 
@@ -129,8 +129,7 @@ Replace `<LABEL>` with a name for this machine (e.g. `home`, `work`, `laptop`, y
 2. **Creates identity** — generates ed25519 + secp256k1 keypairs
 3. **Pairs instances** — exchanges trust via short-lived relay code
 4. **Installs hooks** — `aya schedule install` wires Claude Code hooks and system crontab automatically
-5. **Registers relay polling** — checks for incoming packets every 10 minutes during active sessions
-6. **Loads the plugin** — makes `/aya-send`, `/aya-watch`, and other slash commands available globally
+5. **Loads the plugin** — makes the `/relay` skill available, so the agent can check, read, reply to, and send packets between instances
 
 ---
 
@@ -209,21 +208,19 @@ This prints all due reminders, alerts, and session cron prompts as plain text. C
 
 ## Claude Code plugin
 
-aya ships as a Claude Code plugin with slash commands that work in any project. Load it in dev mode by adding an alias to your shell profile:
+aya ships as a Claude Code plugin. Load it in dev mode by pointing the
+`--plugin-dir` flag at the `.claude-plugin/` subdirectory of your local
+clone:
 
 ```bash
-alias claude='claude --plugin-dir /path/to/aya'
+alias claude='claude --plugin-dir /path/to/aya/.claude-plugin'
 ```
 
-This makes the following commands available globally:
+This loads aya's bundled skills:
 
-| Command | What it does |
+| Skill | What it does |
 | ---- | ---- |
-| `/aya-send` | Pack and dispatch a packet to another machine |
-| `/aya-triage-packets` | Receive and route incoming packets |
-| `/aya-pair` | Guided pairing between two instances |
-| `/aya-setup` | First-run bootstrap (identity, hooks, polling) |
-| `/aya-watch` | Watch a GitHub PR with smart defaults |
+| `/relay` | Cross-instance packet management — check inbox, read packets, reply with `--in-reply-to` threading, send fresh packets, and show relay status. Wraps `aya inbox`, `aya receive`, `aya show`, and `aya dispatch` with structured body extraction so the agent never has to paste raw packet JSON to the user. Bakes in immediate-poll-on-send to catch in-flight replies during active exchanges. |
 
 After editing any skill file in the aya repo, run `/reload-plugins` in your session to pick up changes — no reinstall needed.
 
