@@ -75,12 +75,27 @@ re-dispatch."*
 ## 2. Read
 
 Show the body of a previously ingested packet without dumping the
-envelope.
+envelope. Force `--format json` (default `auto` returns Rich text on a
+TTY, which breaks `json.loads`). Do **not** redirect stderr into
+stdout — `aya show` may emit Rich warnings or `PACKET_NOT_FOUND` to
+stderr, and merging them would corrupt the JSON stream.
 
 ```bash
-aya show <packet-id> 2>&1 | python3 -c "
+aya show --format json <packet-id> | python3 -c "
 import sys, json
 d = json.loads(sys.stdin.read())
+
+# Header metadata for the framing template
+print('META id_prefix=' + d.get('id', '')[:12])
+print('META from_did=' + d.get('from', '?'))
+print('META sent_at=' + d.get('sent_at', '?'))
+print('META intent=' + d.get('intent', '?'))
+if d.get('in_reply_to'):
+    print('META in_reply_to=' + d['in_reply_to'][:12])
+
+print('---BODY---')
+
+# Body extraction
 c = d.get('content')
 if isinstance(c, dict):
     print(c.get('opener', ''))
@@ -96,17 +111,25 @@ elif isinstance(c, str):
 "
 ```
 
-Then present to the user with framing:
+The script prints `META` lines for header fields (id, from DID, sent_at,
+intent, in_reply_to), then `---BODY---`, then the extracted body.
+Use the META lines to populate the framing template:
 
 ```
 ━━━ Packet <id_prefix> ━━━
-From: <from_label>   Sent: <sent_at>
+From: <from_did>     Sent: <sent_at>
 Intent: <intent>
 <in_reply_to: <parent_id_prefix>, if present>
 
 <extracted body>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
+
+Note: `aya show --format json` returns DIDs in the `from` field, not
+human labels. To resolve the DID to a label (e.g. `work` instead of
+`did:key:z6MkqxSg…`), look it up via `aya inbox --as <local-label>
+--format json` (which includes `from_label`) or via the local profile's
+`trusted_keys` map. See verb 3 (Reply) for the lookup pattern.
 
 For browsing past packets: `aya packets -n 10` (lists historical, not
 just unread).
