@@ -237,18 +237,39 @@ immediately poll** per verb 1 — same reasoning as verb 3.
 ## 5. Status
 
 Quick relay health check: identity, trusted peers, pending inbox count.
+Honors `AYA_HOME` environment variable for non-default installs and
+parses `aya inbox --format json` for the actual packet count.
 
 ```bash
-aya inbox --as <local-label> 2>&1
 python3 -c "
-import json, pathlib
-p = json.loads(pathlib.Path('~/.aya/profile.json').expanduser().read_text())
+import json, os, pathlib, subprocess
+
+# Honor AYA_HOME env var override (default: ~/.aya)
+aya_home = pathlib.Path(os.environ.get('AYA_HOME') or '~/.aya').expanduser()
+profile_path = aya_home / 'profile.json'
+
+p = json.loads(profile_path.read_text())
 aya = p.get('aya', {})
 me = next(iter(aya.get('instances', {}).keys()), 'unknown')
 trusted = [v.get('label', k[:16]) for k, v in aya.get('trusted_keys', {}).items()]
-print(f'This instance: {me}')
+relays = aya.get('default_relays', [])
+
+# Compute pending inbox count from the JSON CLI output
+inbox_result = subprocess.run(
+    ['aya', 'inbox', '--as', me, '--format', 'json'],
+    capture_output=True, text=True
+)
+try:
+    inbox_data = json.loads(inbox_result.stdout or '{}')
+    packets = inbox_data.get('packets', []) if isinstance(inbox_data, dict) else inbox_data
+    pending = len(packets)
+except (json.JSONDecodeError, ValueError):
+    pending = '?'
+
+print(f'Instance:      {me}')
 print(f'Trusted peers: {trusted}')
-print(f'Default relays: {aya.get(\"default_relays\", [])}')
+print(f'Pending inbox: {pending}')
+print(f'Relays:        {relays}')
 "
 ```
 
@@ -264,8 +285,9 @@ Relays:         <urls>
 ```
 
 There is no `aya status --relay` subcommand — the python fallback above
-reads the profile directly. Workspace-level `aya status` is a separate
-thing and doesn't cover relay state.
+reads the profile directly (respecting `AYA_HOME`) and shells out to
+`aya inbox --format json` for the count. Workspace-level `aya status`
+is a separate thing and doesn't cover relay state.
 
 ---
 
