@@ -2605,10 +2605,21 @@ def read(
     from aya.packet import Packet
 
     packet = Packet.from_json(matches[0].read_text())
-    body = _extract_body(packet.content, packet.content_type)
 
     if format_ == OutputFormat.JSON:
-        result: dict[str, object] = {"id": packet.id, "body": body}
+        # In JSON output mode, non-seed dict content (e.g. application/json
+        # packets) is passed through as a structured value rather than
+        # stringified. Callers that ``jq`` or ``python -c 'json.load'`` over
+        # the output get a real object, not a string containing pretty-printed
+        # JSON. Seed-shape dicts still go through _extract_body so the
+        # ``body`` field stays a readable string (opener + context + qs).
+        body_value: object
+        if isinstance(packet.content, dict) and packet.content_type != ContentType.SEED:
+            body_value = packet.content
+        else:
+            body_value = _extract_body(packet.content, packet.content_type)
+
+        result: dict[str, object] = {"id": packet.id, "body": body_value}
         if meta:
             result["from"] = packet.from_did
             result["sent_at"] = packet.sent_at
@@ -2617,6 +2628,8 @@ def read(
         _output_json(result)
         raise typer.Exit(0)
 
+    # Text mode — always render as a string via _extract_body.
+    body = _extract_body(packet.content, packet.content_type)
     if meta:
         console.print(f"[bold]{packet.intent}[/bold]  ·  {packet.id[:12]}")
         console.print(f"[dim]from {packet.from_did[:30]}…  ·  {packet.sent_at[:16]}[/dim]")

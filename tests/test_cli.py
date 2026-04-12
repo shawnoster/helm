@@ -3259,14 +3259,13 @@ class TestRead:
     def seed_packet(self) -> Packet:
         local = Identity.generate("default")
         home = Identity.generate("home")
-        return Packet(
-            **{"from": home.did, "to": local.did},
+        return Packet.as_seed(
+            from_did=home.did,
+            to_did=local.did,
             intent="seed test",
-            content={
-                "opener": "What's the plan for tomorrow?",
-                "context_summary": "Wrapping up the relay project.",
-                "open_questions": ["who reviews?", "merge target?"],
-            },
+            opener="What's the plan for tomorrow?",
+            context_summary="Wrapping up the relay project.",
+            open_questions=["who reviews?", "merge target?"],
         )
 
     @pytest.fixture
@@ -3335,6 +3334,58 @@ class TestRead:
     def test_prefix_too_short_errors(self, packets_dir: Path) -> None:
         result = runner.invoke(app, ["read", "01XX", "--format", "text"])
         assert result.exit_code != 0
+
+    def test_json_format_preserves_structured_body_for_json_content(
+        self, packets_dir: Path
+    ) -> None:
+        """Non-seed dict content must pass through as a structured object
+        in JSON output mode, not be stringified. Callers that pipe
+        ``aya read --format json | jq`` should get a real object back."""
+        from aya.packet import ContentType
+
+        local = Identity.generate("default")
+        home = Identity.generate("home")
+        pkt = Packet(
+            **{"from": home.did, "to": local.did},
+            intent="structured payload",
+            content_type=ContentType.JSON,
+            content={
+                "event": "deployed",
+                "version": "1.2.3",
+                "checks": ["lint", "test"],
+            },
+        )
+        (packets_dir / f"{pkt.id}.json").write_text(pkt.to_json())
+
+        result = runner.invoke(app, ["read", pkt.id, "--format", "json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        # body is a dict, not a string containing pretty-printed JSON
+        assert isinstance(data["body"], dict)
+        assert data["body"]["event"] == "deployed"
+        assert data["body"]["version"] == "1.2.3"
+        assert data["body"]["checks"] == ["lint", "test"]
+
+    def test_text_format_still_stringifies_json_content(self, packets_dir: Path) -> None:
+        """Text mode output hasn't regressed: non-seed dicts still render as
+        pretty-printed JSON for human reading."""
+        from aya.packet import ContentType
+
+        local = Identity.generate("default")
+        home = Identity.generate("home")
+        pkt = Packet(
+            **{"from": home.did, "to": local.did},
+            intent="structured payload",
+            content_type=ContentType.JSON,
+            content={"event": "deployed", "version": "1.2.3"},
+        )
+        (packets_dir / f"{pkt.id}.json").write_text(pkt.to_json())
+
+        result = runner.invoke(app, ["read", pkt.id, "--format", "text"])
+        assert result.exit_code == 0, result.output
+        # Text mode prints the pretty-printed JSON body
+        assert '"event": "deployed"' in result.output
+        assert '"version": "1.2.3"' in result.output
 
 
 # ── TestDrop ──────────────────────────────────────────────────────────────────
