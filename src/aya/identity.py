@@ -188,6 +188,35 @@ def _normalize_ingested_ids(raw: object) -> list[dict[str, str]]:
     return result
 
 
+def _normalize_dropped_ids(raw: object) -> list[str]:
+    """Validate and coerce ``dropped_ids`` from a profile load.
+
+    Defensive against corrupted or hand-edited profiles where the field
+    might be a dict, string, or other non-list value (which would
+    silently iterate keys/characters and persist garbage). Returns a
+    list of valid ULID strings; logs a warning when the stored value
+    has the wrong type.
+    """
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        logger.warning(
+            "Profile dropped_ids has invalid type %s (expected list); resetting to empty.",
+            type(raw).__name__,
+        )
+        return []
+    result: list[str] = []
+    for entry in raw:
+        if isinstance(entry, str) and _is_valid_ulid(entry):
+            result.append(entry)
+        else:
+            logger.warning(
+                "Dropping dropped_ids entry with invalid value: %r",
+                entry,
+            )
+    return result
+
+
 @dataclass
 class Profile:
     """
@@ -324,7 +353,7 @@ class Profile:
             default_relays=relays,
             last_checked=aya_data.get("last_checked", {}),
             ingested_ids=_normalize_ingested_ids(aya_data.get("ingested_ids", [])),
-            dropped_ids=[pid for pid in aya_data.get("dropped_ids", []) if isinstance(pid, str)],
+            dropped_ids=_normalize_dropped_ids(aya_data.get("dropped_ids")),
         )
 
     def save(self, path: Path) -> None:
