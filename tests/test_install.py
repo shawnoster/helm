@@ -36,10 +36,10 @@ class TestIsAyaHookEntry:
         entry = {"hooks": [{"type": "command", "command": "aya hook crons"}]}
         assert _is_aya_hook_entry(entry) is True
 
-    def test_positive_ci_watch(self) -> None:
+    def test_positive_hook_watch(self) -> None:
         entry = {
             "matcher": "Bash",
-            "hooks": [{"type": "command", "command": "aya ci watch 2>/dev/null || true"}],
+            "hooks": [{"type": "command", "command": "aya hook watch 2>/dev/null || true"}],
         }
         assert _is_aya_hook_entry(entry) is True
 

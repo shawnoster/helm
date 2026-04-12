@@ -43,6 +43,7 @@ from .types import (
     AlertDetails,
     AlertItem,
     AlertSeverity,
+    CiChecksConfig,
     GithubPrConfig,
     JiraQueryConfig,
     JiraTicketConfig,
@@ -111,7 +112,7 @@ def add_watch(
 ) -> SchedulerItem:
     """Add a condition-based watch. Returns the created item."""
     now = _dt_now(_get_local_tz())
-    watch_config: GithubPrConfig | JiraQueryConfig | JiraTicketConfig
+    watch_config: GithubPrConfig | JiraQueryConfig | JiraTicketConfig | CiChecksConfig
 
     if provider == "github-pr":
         m = re.match(r"([^/]+)/([^#]+)#(\d+)", target)
@@ -121,6 +122,19 @@ def add_watch(
         condition = condition or "approved_or_merged"
         if interval == 30:
             interval = 5
+    elif provider == "ci-checks":
+        m = re.match(r"([^/]+)/([^#]+)#(\d+)", target)
+        if not m:
+            raise ValueError("Format: owner/repo#123")
+        watch_config = {
+            "owner": m.group(1),
+            "repo": m.group(2),
+            "pr": int(m.group(3)),
+            "branch": "",
+        }
+        condition = condition or "checks_failed"
+        if interval == 30:
+            interval = 1
     elif provider == "jira-query":
         watch_config = {"jql": target}
         condition = condition or "new_results"

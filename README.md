@@ -156,7 +156,7 @@ To remove everything: `aya schedule uninstall`.
 | `aya hook crons` | SessionStart | Reads pending session crons, injects `CronCreate` instructions into session context |
 | `aya receive --quiet --auto-ingest` | SessionStart | Ingests packets from trusted senders in the background |
 | `aya schedule pending --format text` | SessionStart | Prints due reminders and alerts directly into the session |
-| `aya ci watch` | PostToolUse (Bash) | After `git push`, monitors CI and wakes agent if checks fail |
+| `aya hook watch` | PostToolUse (Bash) | Polls all due scheduler watches and wakes agent on change (CI, PR, Jira) |
 
 ### How session crons work
 
@@ -180,14 +180,14 @@ aya schedule recurring \
 
 The cron is persisted in aya's scheduler store. On the next session start, `aya hook crons` picks it up and injects the `CronCreate` call automatically.
 
-### PostToolUse: CI watch
+### PostToolUse: unified watch
 
-After every shell command, aya can watch any triggered CI workflows to completion:
+After every shell command, aya polls all due scheduler watches (CI checks, GitHub PRs, Jira tickets) and wakes Claude if any condition fires:
 
 ```json
 {
   "matcher": "Bash",
-  "command": "aya ci watch 2>/dev/null || true",
+  "command": "aya hook watch 2>/dev/null || true",
   "asyncRewake": true
 }
 ```

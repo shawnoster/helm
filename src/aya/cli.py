@@ -24,7 +24,6 @@ from rich.table import Table
 from rich.text import Text
 
 from aya import __version__
-from aya.ci import watch_pr_checks
 from aya.config import get_notebook_path, load_config, set_config_value
 from aya.context import build_context_block
 from aya.identity import Identity, Profile, TrustedKey, _assert_valid_ulid
@@ -44,11 +43,13 @@ from aya.relay import RelayClient
 
 # Subcommand modules — imported at top-level; each is only invoked when its
 # subcommand is actually called, so startup cost is acceptable.
+from aya.rewake import emit as rewake_emit
 from aya.scheduler import (
     SEVERITY_ACTIONABLE,
     SEVERITY_HEARTBEAT,
     AlertSeverity,
     _display_items,
+    _format_watch_alert,
     add_recurring,
     add_reminder,
     add_seed_alert,
@@ -58,12 +59,14 @@ from aya.scheduler import (
     dismiss_item,
     format_pending,
     format_scheduler_status,
+    get_active_watches,
     get_pending,
     get_scheduler_status,
     get_session_crons,
     is_idle,
     list_items,
     parse_due,
+    poll_watch,
     record_activity,
     run_poll,
     run_tick,
@@ -143,15 +146,6 @@ hook_app = typer.Typer(
     no_args_is_help=True,
 )
 app.add_typer(hook_app, name="hook")
-
-# ── CI sub-app ────────────────────────────────────────────────────────────────
-
-ci_app = typer.Typer(
-    name="ci",
-    help="CI integration — watch checks, report failures.",
-    no_args_is_help=True,
-)
-app.add_typer(ci_app, name="ci")
 
 # ── Config sub-app ────────────────────────────────────────────────────────────
 
@@ -1972,15 +1966,173 @@ def hook_crons() -> None:
 # ── ci ────────────────────────────────────────────────────────────────────────
 
 
-@ci_app.command("watch")
-def ci_watch() -> None:
-    """Watch CI checks after git push. Reads Claude hook JSON from stdin."""
+@hook_app.command("watch")
+def hook_watch() -> None:
+    """Poll all due scheduler watches and emit asyncRewake on change.
+
+    Replaces the old ``aya ci watch`` command.  Registered as a single
+    PostToolUse asyncRewake hook — handles CI checks, GitHub PR watches,
+    Jira watches, and any future provider.
+
+    On ``git push``, auto-creates a transient ``ci-checks`` watch that
+    polls PR checks and wakes Claude if they fail or time out.
+
+    Reads Claude hook JSON from stdin.
+    """
     try:
         payload = json.loads(sys.stdin.read())
     except (json.JSONDecodeError, ValueError):
         payload = {}
 
-    raise typer.Exit(watch_pr_checks(payload))
+    exit_code = _hook_watch_impl(payload)
+    raise typer.Exit(exit_code)
+
+
+def _hook_watch_impl(payload: dict) -> int:
+    """Core logic for hook watch — testable without typer.Exit."""
+    from aya.scheduler.storage import (
+        _alerts_file,
+        _atomic_write,
+        _file_lock,
+        _load_alerts_unlocked,
+        _load_items_unlocked,
+        _scheduler_file,
+    )
+    from aya.scheduler.types import AlertDetails, _alerts_data, _scheduler_data
+
+    exit_code = 0
+    now = datetime.now().astimezone()
+
+    # ── Step 1: detect git push → create ci-checks watch ────────────────
+    command = payload.get("tool_input", {}).get("command", "")
+    if "git push" in command:
+        _maybe_create_ci_watch()
+
+    # ── Step 2: poll all due watches ────────────────────────────────────
+    with _file_lock():
+        items = _load_items_unlocked()
+        alerts = _load_alerts_unlocked()
+        items_modified = False
+        alerts_modified = False
+        existing_sources = {a["source_item_id"] for a in alerts if not a.get("seen")}
+
+        for item in items:
+            if item.get("type") != "watch" or item.get("status") != "active":
+                continue
+
+            # Respect poll interval
+            last = item.get("last_checked_at")
+            interval = item.get("poll_interval_minutes", 30)
+            if last:
+                next_check = datetime.fromisoformat(last) + timedelta(minutes=interval)
+                if now < next_check:
+                    continue
+
+            new_state, changed = poll_watch(item)
+            if new_state is None:
+                continue
+
+            item["last_checked_at"] = now.isoformat()
+            item["last_state"] = new_state
+            items_modified = True
+
+            if changed and item["id"] not in existing_sources:
+                alert_msg = _format_watch_alert(item, new_state)
+                from aya.scheduler.display import _create_alert as create_alert
+
+                alert = create_alert(
+                    source_item_id=item["id"],
+                    message=alert_msg,
+                    details=AlertDetails(**new_state),  # type: ignore[arg-type]
+                    now=now,
+                )
+                alerts.append(alert)
+                alerts_modified = True
+
+                # Emit asyncRewake so Claude wakes up
+                rewake_emit(alert_msg)
+                exit_code = 2
+
+            from aya.scheduler.providers import _evaluate_auto_remove
+
+            if _evaluate_auto_remove(item, new_state):
+                item["status"] = "dismissed"
+                items_modified = True
+
+        if items_modified:
+            _atomic_write(_scheduler_file(), _scheduler_data(items))
+        if alerts_modified:
+            _atomic_write(_alerts_file(), _alerts_data(alerts))
+
+    return exit_code
+
+
+def _maybe_create_ci_watch() -> None:
+    """If this was a git push to a GitHub PR branch, create a ci-checks watch."""
+    timeout = 15
+
+    def _run_cmd(cmd: list[str]) -> tuple[int, str]:
+        try:
+            result = subprocess.run(  # noqa: S603
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=timeout,
+            )
+            return result.returncode, (result.stdout or "").strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return 127, ""
+
+    rc, remote = _run_cmd(["git", "remote", "get-url", "origin"])
+    if rc != 0 or "github.com" not in remote:
+        return
+
+    rc, branch = _run_cmd(["git", "branch", "--show-current"])
+    if rc != 0 or not branch or branch in ("main", "master"):
+        return
+
+    # Parse owner/repo from remote URL
+    m = re.match(r".*github\.com[:/]([^/]+)/([^/.]+)", remote)
+    if not m:
+        return
+    owner, repo = m.group(1), m.group(2)
+
+    # Check if PR exists for this branch
+    rc, pr_num = _run_cmd(
+        [
+            "gh",
+            "pr",
+            "view",
+            branch,
+            "--repo",
+            f"{owner}/{repo}",
+            "--json",
+            "number",
+            "-q",
+            ".number",
+        ]
+    )
+    if rc != 0 or not pr_num:
+        return
+
+    # Check if we already have an active ci-checks watch for this PR
+    existing = get_active_watches()
+    for w in existing:
+        if w.get("provider") != "ci-checks":
+            continue
+        cfg = w.get("watch_config", {})
+        if cfg.get("owner") == owner and cfg.get("repo") == repo and cfg.get("pr") == int(pr_num):
+            return  # already watching
+
+    add_watch(
+        provider="ci-checks",
+        target=f"{owner}/{repo}#{pr_num}",
+        message=f"CI checks on PR #{pr_num} ({owner}/{repo}, branch: {branch})",
+        condition="checks_failed",
+        interval=1,
+        remove_when="checks_complete",
+    )
 
 
 # ── profile ───────────────────────────────────────────────────────────────────

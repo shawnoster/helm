@@ -10,6 +10,8 @@ from collections.abc import Callable
 from typing import Any, cast
 
 from .types import (
+    CiChecksConfig,
+    CiChecksState,
     GithubPrConfig,
     GithubPrState,
     JiraQueryConfig,
@@ -159,10 +161,55 @@ def _check_jira_ticket(config: JiraTicketConfig) -> JiraTicketState | None:
         return None
 
 
+def _check_ci_checks(config: CiChecksConfig) -> CiChecksState | None:
+    """Check CI status for a PR via gh pr checks."""
+    owner = config["owner"]
+    repo = config["repo"]
+    pr = config["pr"]
+
+    data = _run_gh(
+        [
+            "pr",
+            "checks",
+            str(pr),
+            "--repo",
+            f"{owner}/{repo}",
+            "--json",
+            "name,state,conclusion",
+        ]
+    )
+    if not isinstance(data, list):
+        return None
+
+    passed: list[str] = []
+    failed: list[str] = []
+    pending: list[str] = []
+
+    for check in data:
+        name = check.get("name", "unknown")
+        status = check.get("state", "")
+        conclusion = check.get("conclusion") or ""
+
+        if status in ("pending", "in_progress", "queued"):
+            pending.append(name)
+        elif conclusion in ("failure", "timed_out", "cancelled"):
+            failed.append(name)
+        else:
+            passed.append(name)
+
+    return CiChecksState(
+        all_complete=len(pending) == 0,
+        passed=passed,
+        failed=failed,
+        pending=pending,
+    )
+
+
 WATCH_PROVIDERS: dict[str, Callable[..., WatchState | None]] = {
     "github-pr": _check_github_pr,
     "jira-query": _check_jira_query,
     "jira-ticket": _check_jira_ticket,
+    "ci-checks": _check_ci_checks,
 }
 
 
@@ -203,6 +250,16 @@ def _detect_jira_status_changed(new: JiraTicketState, last: JiraTicketState | No
     return new["status"] != (last["status"] if last else None)
 
 
+def _detect_ci_checks_failed(new: CiChecksState, _last: CiChecksState | None) -> bool:
+    """Detect if any CI check failed (and checks are no longer pending)."""
+    return new["all_complete"] and len(new["failed"]) > 0
+
+
+def _detect_ci_checks_complete(new: CiChecksState, _last: CiChecksState | None) -> bool:
+    """Detect if all CI checks finished (pass or fail)."""
+    return new["all_complete"]
+
+
 _CHANGE_DETECTORS: dict[tuple[str, str], Callable[[Any, Any], bool]] = {
     ("github-pr", "approved_or_merged"): _detect_github_approved_or_merged,
     ("github-pr", "merged"): _detect_github_merged,
@@ -211,6 +268,8 @@ _CHANGE_DETECTORS: dict[tuple[str, str], Callable[[Any, Any], bool]] = {
     ("jira-query", ""): _detect_jira_count_change,
     ("jira-ticket", "status_changed"): _detect_jira_status_changed,
     ("jira-ticket", ""): _detect_json_diff,
+    ("ci-checks", "checks_failed"): _detect_ci_checks_failed,
+    ("ci-checks", ""): _detect_ci_checks_complete,
 }
 
 
@@ -246,4 +305,7 @@ def _evaluate_auto_remove(item: SchedulerItem, state: WatchState) -> bool:
     if remove_when == "merged_or_closed" and item.get("provider") == "github-pr":
         gh_state = cast(GithubPrState, state)
         return gh_state["merged"] or gh_state["pr_state"] == "closed"
+    if remove_when == "checks_complete" and item.get("provider") == "ci-checks":
+        ci_state = cast(CiChecksState, state)
+        return ci_state["all_complete"]
     return False

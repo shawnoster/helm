@@ -25,6 +25,7 @@ STATUS_DONE = "done"
 PROVIDER_GITHUB_PR = "github-pr"
 PROVIDER_JIRA_QUERY = "jira-query"
 PROVIDER_JIRA_TICKET = "jira-ticket"
+PROVIDER_CI_CHECKS = "ci-checks"
 
 # ── schema versions ──────────────────────────────────────────────────────────
 SCHEDULER_SCHEMA_VERSION = 1
@@ -45,6 +46,8 @@ CONDITION_APPROVED_OR_MERGED = "approved_or_merged"
 CONDITION_MERGED = "merged"
 CONDITION_NEW_RESULTS = "new_results"
 CONDITION_STATUS_CHANGED = "status_changed"
+CONDITION_CHECKS_FAILED = "checks_failed"
+CONDITION_CHECKS_COMPLETE = "checks_complete"
 
 
 # ── TypedDict schemas ────────────────────────────────────────────────────────
@@ -66,7 +69,7 @@ class SchedulerItem(TypedDict):
     snoozed_until: NotRequired[str | None]
     # Watch-specific
     provider: NotRequired[str]
-    watch_config: NotRequired[GithubPrConfig | JiraQueryConfig | JiraTicketConfig]
+    watch_config: NotRequired[GithubPrConfig | JiraQueryConfig | JiraTicketConfig | CiChecksConfig]
     condition: NotRequired[str]
     poll_interval_minutes: NotRequired[int]
     last_checked_at: NotRequired[str | None]
@@ -154,6 +157,15 @@ class JiraTicketConfig(TypedDict):
     ticket: str
 
 
+class CiChecksConfig(TypedDict):
+    """watch_config for a ci-checks watch."""
+
+    owner: str
+    repo: str
+    branch: str
+    pr: int
+
+
 class GithubPrState(TypedDict):
     """State snapshot returned by _check_github_pr."""
 
@@ -181,8 +193,17 @@ class JiraTicketState(TypedDict):
     assignee: str
 
 
+class CiChecksState(TypedDict):
+    """State snapshot returned by _check_ci_checks."""
+
+    all_complete: bool
+    passed: list[str]
+    failed: list[str]
+    pending: list[str]
+
+
 # Union of all possible watch-state shapes
-WatchState = GithubPrState | JiraQueryState | JiraTicketState
+WatchState = GithubPrState | JiraQueryState | JiraTicketState | CiChecksState
 
 
 class SuppressedCron(TypedDict):

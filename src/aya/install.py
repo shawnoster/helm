@@ -77,8 +77,8 @@ CANONICAL_HOOKS: dict[str, list[dict[str, Any]]] = {
             "hooks": [
                 {
                     "type": "command",
-                    "command": "aya ci watch 2>/dev/null || true",
-                    "statusMessage": "Watching CI...",
+                    "command": "aya hook watch 2>/dev/null || true",
+                    "statusMessage": "Checking watches...",
                     "asyncRewake": True,
                 },
                 {

@@ -176,7 +176,7 @@ To remove everything: `aya schedule uninstall`.
 | `aya hook crons` | SessionStart | Converts aya's recurring schedules into Claude Code CronCreate calls |
 | `aya receive` | SessionStart | Ingests packets from trusted senders in background |
 | `aya schedule pending` | SessionStart | Surfaces due reminders and alerts into session context |
-| `aya ci watch` | PostToolUse (Bash) | After `git push`, monitors CI and wakes agent if checks fail |
+| `aya hook watch` | PostToolUse (Bash) | Polls all due scheduler watches and wakes agent on change (CI, PR, Jira) |
 
 ## Common Patterns
 
