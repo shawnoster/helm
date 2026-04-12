@@ -68,68 +68,67 @@ grep -E "verification failed|InvalidSignature" /tmp/aya-recv.err
 
 If a warning line appears, tell the user: *"packet `<id>` failed
 signature verification and was discarded by aya — sender needs to
-re-dispatch."*
+re-dispatch."* The packet itself stays on the relay and will resurface
+on every poll until you explicitly drop it locally:
+
+```bash
+aya drop <packet-id> --as <local-label>
+```
+
+`aya drop` adds the ID to the local profile's `dropped_ids` list, and
+both `aya inbox` and `aya inbox --all` filter it out from then on. The
+drop is local to this profile — the packet stays on the relay until
+natural expiry.
 
 ---
 
 ## 2. Read
 
-Show the body of a previously ingested packet without dumping the
-envelope. Force `--format json` (default `auto` returns Rich text on a
-TTY, which breaks `json.loads`). Do **not** redirect stderr into
-stdout — `aya show` may emit Rich warnings or `PACKET_NOT_FOUND` to
-stderr, and merging them would corrupt the JSON stream.
+Use `aya read <packet-id>` to extract the body cleanly without dumping
+the envelope JSON. Add `--meta` to include id/from/sent_at/intent
+header fields, and `--format json` for structured consumption.
 
 ```bash
-aya show --format json <packet-id> | python3 -c "
-import sys, json
-d = json.loads(sys.stdin.read())
-
-# Header metadata for the framing template
-print('META id_prefix=' + d.get('id', '')[:12])
-print('META from_did=' + d.get('from', '?'))
-print('META sent_at=' + d.get('sent_at', '?'))
-print('META intent=' + d.get('intent', '?'))
-if d.get('in_reply_to'):
-    print('META in_reply_to=' + d['in_reply_to'][:12])
-
-print('---BODY---')
-
-# Body extraction
-c = d.get('content')
-if isinstance(c, dict):
-    print(c.get('opener', ''))
-    if c.get('context_summary'):
-        print('\\n--- context ---')
-        print(c['context_summary'])
-    if c.get('open_questions'):
-        print('\\n--- open questions ---')
-        for q in c['open_questions']:
-            print(f'- {q}')
-elif isinstance(c, str):
-    print(c)
-"
+aya read --meta --format json <packet-id>
 ```
 
-The script prints `META` lines for header fields (id, from DID, sent_at,
-intent, in_reply_to), then `---BODY---`, then the extracted body.
-Use the META lines to populate the framing template:
+The JSON output has shape:
+
+```json
+{
+  "id": "01KP07VKNS...",
+  "body": "<extracted text — opener+context+questions for seeds, content for markdown>",
+  "from": "did:key:z6Mkqx…",
+  "sent_at": "2026-04-12T07:00:21+00:00",
+  "intent": "skill version check",
+  "in_reply_to": null
+}
+```
+
+Use those fields to populate a framing template in your response to
+the user — never paste the raw JSON itself:
 
 ```
 ━━━ Packet <id_prefix> ━━━
-From: <from_did>     Sent: <sent_at>
+From: <from>          Sent: <sent_at>
 Intent: <intent>
 <in_reply_to: <parent_id_prefix>, if present>
 
-<extracted body>
+<body>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-Note: `aya show --format json` returns DIDs in the `from` field, not
-human labels. To resolve the DID to a label (e.g. `work` instead of
-`did:key:z6MkqxSg…`), look it up via `aya inbox --as <local-label>
---format json` (which includes `from_label`) or via the local profile's
-`trusted_keys` map. See verb 3 (Reply) for the lookup pattern.
+For text-mode rendering directly to the user (no parsing needed):
+
+```bash
+aya read --meta <packet-id>
+```
+
+`aya read` returns DIDs in the `from` field, not human labels. To
+resolve a DID to a label (e.g. `work` instead of `did:key:z6MkqxSg…`),
+look it up via `aya inbox --as <local-label> --format json` (which
+includes `from_label`) or via the local profile's `trusted_keys` map.
+See verb 3 (Reply) for the lookup pattern.
 
 For browsing past packets: `aya packets -n 10` (lists historical, not
 just unread).
@@ -139,8 +138,8 @@ just unread).
 ## 3. Reply
 
 Always thread via `--in-reply-to`. The recipient comes from the original
-packet — but `aya show --format json` only returns the sender DID in
-`from`, not a human label. Two options:
+packet — but `aya read` only returns the sender DID in `from`, not a
+human label. Two options:
 
 **Option A** (preferred when packet is still in inbox): resolve via
 `aya inbox --format json`, which includes both `from_did` and
@@ -159,13 +158,13 @@ for p in packets:
 ```
 
 **Option B** (fallback if packet has cleared the inbox): use the DID
-from `aya show` directly. `aya dispatch --to` accepts a DID as well as
-a label.
+from `aya read --meta` directly. `aya dispatch --to` accepts a DID as
+well as a label.
 
 ```bash
-PEER=$(aya show --format json <original-packet-id> | python3 -c "
+PEER=$(aya read --meta --format json <original-packet-id> | python3 -c "
 import sys, json
-print(json.loads(sys.stdin.read()).get('from', ''))
+print(json.loads(sys.stdin.read())['from'])
 ")
 ```
 
@@ -301,15 +300,17 @@ is a separate thing and doesn't cover relay state.
    nothing, catches packets the peer sent while you were composing.
    Single biggest latency win for active exchanges.
 
-3. **Never paste raw packet JSON to the user.** Always extract via the
-   python one-liner in verb 2 and present with the framing template.
-   Raw JSON is for debugging only.
+3. **Never paste raw packet JSON to the user.** Always extract via
+   `aya read` in verb 2 and present with the framing template. Raw
+   JSON is for debugging only.
 
 4. **Failed-signature packets are not silent.** If `aya receive` warns
    about verification failure, surface the packet ID + intent to the
-   user. The bad-sig packet stays in `aya inbox` re-surfacing every poll
-   until aya grows an explicit ack/drop command — that's a known gap,
-   not your fault, but the user needs to know it's stuck.
+   user. If the packet keeps re-surfacing on subsequent polls and the
+   user has been informed, run `aya drop <id> --as <local-label>` to
+   add it to the local profile's `dropped_ids` list. Drop is local-only
+   — the packet stays on the relay until natural expiry, but
+   `aya inbox` (and `--all`) filter it out from then on.
 
 5. **Cross-instance attribution is unreliable.** If a peer claims "I
    already did X" in a packet body, verify via the relevant artifact
@@ -335,7 +336,7 @@ is a separate thing and doesn't cover relay state.
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | `aya receive` returns `{"packets": []}` but you expect one | Peer hasn't dispatched yet, or relay propagation lag | Tell user to ping the peer; wait 30s and retry |
-| `WARNING:aya.packet:DID-based signature verification failed for packet <id>` on stderr | Bad signature; packet is **discarded** by aya, never appears in the JSON output (and not as `ingested:false`) | Surface to user; sender must re-dispatch |
+| `WARNING:aya.packet:DID-based signature verification failed for packet <id>` on stderr | Bad signature; packet is **discarded** by aya, never appears in the JSON output (and not as `ingested:false`) | Surface to user; run `aya drop <id>` to stop the resurface; sender must re-dispatch to retry |
 | `aya show <id>` returns `PACKET_NOT_FOUND` | Packet not yet ingested | Run verb 1 (Check) first |
 | `aya dispatch` errors with `Unknown recipient '<label>'. Available: ...` | `--to <peer>` not in `trusted_keys` | Run `aya pair` to connect, or `aya trust <did> --peer <label>` |
 | `aya dispatch` errors with `No Nostr pubkey found for recipient. Pair first.` | Trust entry exists but lacks `nostr_pubkey` field | Re-pair via `aya pair` to populate the pubkey |

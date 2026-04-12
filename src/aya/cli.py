@@ -1273,6 +1273,12 @@ def inbox(
 
         all_packets = [pkt async for pkt in client.fetch_pending()]
         ingested_set = {entry["id"] for entry in p.ingested_ids}
+        dropped_set = set(p.dropped_ids)
+
+        # Filter dropped packets out of both default and --all views.
+        # Dropped IDs are explicitly user-marked-ignore (bad-sig, spam, etc.)
+        # and should never resurface regardless of ingested status.
+        all_packets = [pkt for pkt in all_packets if pkt.id not in dropped_set]
 
         new_packets = [pkt for pkt in all_packets if pkt.id not in ingested_set]
         display_packets = all_packets if show_all else new_packets
@@ -2251,6 +2257,202 @@ def show(
             subtitle=f"from {packet.from_did[:30]}…  ·  {packet.sent_at[:10]}",
         )
     )
+
+
+# ── read ──────────────────────────────────────────────────────────────────────
+
+
+def _extract_body(content: object, content_type: ContentType | None = None) -> str:
+    """Extract a packet body string from raw content for display.
+
+    For seed packets (`application/aya-seed`), content is a dict with
+    ``opener``, ``context_summary``, and ``open_questions``. For content
+    packets (markdown, text), content is a plain string. JSON dict content
+    that isn't a seed is serialized with ``json.dumps``. Anything else
+    falls back to ``str(content)``.
+    """
+    lines: list[str] = []
+    if isinstance(content, dict):
+        if content_type == ContentType.SEED:
+            opener = content.get("opener")
+            if opener:
+                lines.append(str(opener))
+            context_summary = content.get("context_summary")
+            if context_summary:
+                if lines:
+                    lines.append("")
+                lines.append("--- context ---")
+                lines.append(str(context_summary))
+            open_questions = content.get("open_questions") or []
+            if open_questions:
+                if lines:
+                    lines.append("")
+                lines.append("--- open questions ---")
+                for q in open_questions:
+                    lines.append(f"- {q}")
+        else:
+            lines.append(json.dumps(content, indent=2, default=str))
+    elif isinstance(content, str):
+        lines.append(content)
+    else:
+        lines.append(str(content))
+    return "\n".join(lines)
+
+
+@app.command()
+def read(
+    packet_id: str = typer.Argument(help="Packet ID or prefix (min 8 chars)"),
+    meta: bool = typer.Option(False, "--meta", help="Also print packet metadata header"),
+    format_: OutputFormat = typer.Option(OutputFormat.AUTO, "--format", "-f", help="Output format"),
+) -> None:
+    """Read a previously ingested packet — extracts body without dumping the envelope JSON.
+
+    For seed packets, prints the opener (and context_summary, open_questions
+    if present). For content packets, prints the content directly. Use
+    ``--meta`` to also print id/from/sent_at/intent header.
+    """
+    from aya.paths import PACKETS_DIR
+
+    format_ = resolve_format(format_)
+
+    if len(packet_id) < 8:
+        _emit_error(ErrorCode.INVALID_ARGUMENT, "Packet ID prefix must be at least 8 characters.")
+
+    if not PACKETS_DIR.exists():
+        _emit_error(ErrorCode.PACKET_NOT_FOUND, "No ingested packets found.")
+
+    matches = [f for f in PACKETS_DIR.glob("*.json") if f.stem.startswith(packet_id)]
+    if not matches:
+        _emit_error(
+            ErrorCode.PACKET_NOT_FOUND,
+            f"Packet '{packet_id}' not found.",
+            {"packet_id": packet_id},
+        )
+    if len(matches) > 1:
+        _emit_error(
+            ErrorCode.AMBIGUOUS_PREFIX,
+            f"Ambiguous prefix — matches {len(matches)} packets.",
+            {"packet_id": packet_id, "matches": len(matches)},
+        )
+
+    from aya.packet import Packet
+
+    packet = Packet.from_json(matches[0].read_text())
+    body = _extract_body(packet.content, packet.content_type)
+
+    if format_ == OutputFormat.JSON:
+        result: dict[str, object] = {"id": packet.id, "body": body}
+        if meta:
+            result["from"] = packet.from_did
+            result["sent_at"] = packet.sent_at
+            result["intent"] = packet.intent
+            result["in_reply_to"] = getattr(packet, "in_reply_to", None)
+        _output_json(result)
+        raise typer.Exit(0)
+
+    if meta:
+        console.print(f"[bold]{packet.intent}[/bold]  ·  {packet.id[:12]}")
+        console.print(f"[dim]from {packet.from_did[:30]}…  ·  {packet.sent_at[:16]}[/dim]")
+        console.print()
+    console.print(body, markup=False, highlight=False)
+
+
+# ── drop ──────────────────────────────────────────────────────────────────────
+
+
+@app.command()
+def drop(
+    packet_id: str = typer.Argument(help="Packet ID or prefix (min 8 chars) to drop from inbox"),
+    as_: str = typer.Option("default", "--as", help="Local identity to act as"),
+    relay: str | None = typer.Option(None, help="Relay URL (overrides profile default)"),
+    profile: Path = typer.Option(DEFAULT_PROFILE),
+    format_: OutputFormat = typer.Option(OutputFormat.AUTO, "--format", "-f", help="Output format"),
+) -> None:
+    """Drop a packet from inbox view so it stops re-surfacing on each poll.
+
+    Useful for bad-signature packets, spam, or any packet you want to ignore
+    permanently. The drop is local to this profile — the packet stays on the
+    relay until its natural expiry. Prefix matching resolves the full ID by
+    looking at ingested packets first, then querying the relay if needed.
+    """
+    format_ = resolve_format(format_)
+
+    if len(packet_id) < 8:
+        _emit_error(ErrorCode.INVALID_ARGUMENT, "Packet ID prefix must be at least 8 characters.")
+
+    async def _run() -> None:
+        p = _load_profile(profile)
+        local = _resolve_instance(p, as_)
+
+        # Try to resolve full ID from ingested_ids first (cheap, no network).
+        ingested_matches = [
+            entry["id"] for entry in p.ingested_ids if entry["id"].startswith(packet_id)
+        ]
+
+        # Also check existing dropped_ids so the user can re-confirm a drop
+        # using a prefix without hitting the relay.
+        dropped_matches = [pid for pid in p.dropped_ids if pid.startswith(packet_id)]
+
+        local_matches = list(set(ingested_matches + dropped_matches))
+
+        if len(local_matches) == 1:
+            full_id = local_matches[0]
+        elif len(local_matches) > 1:
+            _emit_error(
+                ErrorCode.AMBIGUOUS_PREFIX,
+                f"Ambiguous prefix '{packet_id}' — matches {len(local_matches)} known packets.",
+                {"packet_id": packet_id, "matches": len(local_matches)},
+            )
+            return  # unreachable, _emit_error raises
+        else:
+            # Fall back to the relay for packets that were never ingested
+            # (bad-sig, spam, untrusted senders that aya skipped).
+            relay_urls = [relay] if relay else p.default_relays
+            client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
+            relay_matches: list[str] = []
+            async for pkt in client.fetch_pending():
+                if pkt.id.startswith(packet_id):
+                    relay_matches.append(pkt.id)
+                    if len(relay_matches) > 1:
+                        break  # ambiguous — stop early
+
+            if not relay_matches:
+                _emit_error(
+                    ErrorCode.PACKET_NOT_FOUND,
+                    f"No packet matching '{packet_id}' found locally or on relay. "
+                    "Use the full packet ID if it's already past relay retention.",
+                    {"packet_id": packet_id},
+                )
+                return  # unreachable
+            if len(relay_matches) > 1:
+                _emit_error(
+                    ErrorCode.AMBIGUOUS_PREFIX,
+                    f"Ambiguous prefix '{packet_id}' — matches {len(relay_matches)} relay packets.",
+                    {"packet_id": packet_id, "matches": len(relay_matches)},
+                )
+                return  # unreachable
+
+            full_id = relay_matches[0]
+
+        already_dropped = full_id in p.dropped_ids
+        if not already_dropped:
+            p.dropped_ids.append(full_id)
+            p.save(profile)
+
+        if format_ == OutputFormat.JSON:
+            _output_json(
+                {
+                    "dropped": full_id,
+                    "already_dropped": already_dropped,
+                }
+            )
+        else:
+            if already_dropped:
+                console.print(f"[dim]Packet[/dim] {full_id[:12]}… [dim]was already dropped.[/dim]")
+            else:
+                console.print(f"[green]Dropped[/green] {full_id[:12]}…")
+
+    asyncio.run(_run())
 
 
 # ── packets ───────────────────────────────────────────────────────────────────

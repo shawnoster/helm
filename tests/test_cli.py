@@ -3086,3 +3086,300 @@ class TestIdempotency:
                 )
             assert result.exit_code == 0, result.output
             mock_publish.assert_awaited_once()
+
+
+# ── TestRead ──────────────────────────────────────────────────────────────────
+
+
+class TestRead:
+    """Tests for the `aya read` command."""
+
+    @pytest.fixture
+    def packets_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        packets = tmp_path / "packets"
+        packets.mkdir()
+        import aya.paths
+
+        monkeypatch.setattr(aya.paths, "PACKETS_DIR", packets)
+        return packets
+
+    @pytest.fixture
+    def seed_packet(self) -> Packet:
+        local = Identity.generate("default")
+        home = Identity.generate("home")
+        return Packet(
+            **{"from": home.did, "to": local.did},
+            intent="seed test",
+            content={
+                "opener": "What's the plan for tomorrow?",
+                "context_summary": "Wrapping up the relay project.",
+                "open_questions": ["who reviews?", "merge target?"],
+            },
+        )
+
+    @pytest.fixture
+    def content_packet(self) -> Packet:
+        local = Identity.generate("default")
+        home = Identity.generate("home")
+        return Packet(
+            **{"from": home.did, "to": local.did},
+            intent="markdown body",
+            content="# Notes\n\nA short markdown body.",
+        )
+
+    def test_extracts_seed_opener_and_context(self, packets_dir: Path, seed_packet: Packet) -> None:
+        (packets_dir / f"{seed_packet.id}.json").write_text(seed_packet.to_json())
+        result = runner.invoke(app, ["read", seed_packet.id, "--format", "text"])
+        assert result.exit_code == 0, result.output
+        assert "What's the plan for tomorrow?" in result.output
+        assert "Wrapping up the relay project." in result.output
+        assert "who reviews?" in result.output
+        assert "merge target?" in result.output
+
+    def test_extracts_content_string(self, packets_dir: Path, content_packet: Packet) -> None:
+        (packets_dir / f"{content_packet.id}.json").write_text(content_packet.to_json())
+        result = runner.invoke(app, ["read", content_packet.id, "--format", "text"])
+        assert result.exit_code == 0, result.output
+        assert "A short markdown body." in result.output
+
+    def test_meta_flag_adds_header(self, packets_dir: Path, seed_packet: Packet) -> None:
+        (packets_dir / f"{seed_packet.id}.json").write_text(seed_packet.to_json())
+        result = runner.invoke(app, ["read", seed_packet.id, "--meta", "--format", "text"])
+        assert result.exit_code == 0, result.output
+        assert "seed test" in result.output  # intent
+        assert seed_packet.id[:12] in result.output
+
+    def test_json_format_returns_id_and_body(self, packets_dir: Path, seed_packet: Packet) -> None:
+        (packets_dir / f"{seed_packet.id}.json").write_text(seed_packet.to_json())
+        result = runner.invoke(app, ["read", seed_packet.id, "--format", "json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["id"] == seed_packet.id
+        assert "What's the plan" in data["body"]
+        # No metadata fields without --meta
+        assert "from" not in data
+
+    def test_json_meta_includes_metadata_fields(
+        self, packets_dir: Path, seed_packet: Packet
+    ) -> None:
+        (packets_dir / f"{seed_packet.id}.json").write_text(seed_packet.to_json())
+        result = runner.invoke(app, ["read", seed_packet.id, "--meta", "--format", "json"])
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["from"].startswith("did:key:")
+        assert data["intent"] == "seed test"
+        assert "sent_at" in data
+
+    def test_prefix_match_resolves_full_id(self, packets_dir: Path, seed_packet: Packet) -> None:
+        (packets_dir / f"{seed_packet.id}.json").write_text(seed_packet.to_json())
+        prefix = seed_packet.id[:10]
+        result = runner.invoke(app, ["read", prefix, "--format", "text"])
+        assert result.exit_code == 0, result.output
+
+    def test_packet_not_found_errors(self, packets_dir: Path) -> None:
+        result = runner.invoke(app, ["read", "01XXXXXXXXXX", "--format", "text"])
+        assert result.exit_code != 0
+
+    def test_prefix_too_short_errors(self, packets_dir: Path) -> None:
+        result = runner.invoke(app, ["read", "01XX", "--format", "text"])
+        assert result.exit_code != 0
+
+
+# ── TestDrop ──────────────────────────────────────────────────────────────────
+
+
+class TestDrop:
+    """Tests for the `aya drop` command and inbox filtering of dropped IDs."""
+
+    @pytest.fixture
+    def sender(self) -> Identity:
+        return Identity.generate("work")
+
+    @pytest.fixture
+    def profile_with_sender(self, profile_with_instance: Path, sender: Identity) -> Path:
+        p = Profile.load(profile_with_instance)
+        p.trusted_keys["work"] = TrustedKey(
+            did=sender.did, label="work", nostr_pubkey=sender.nostr_public_hex
+        )
+        p.save(profile_with_instance)
+        return profile_with_instance
+
+    def _signed_packet(self, sender: Identity, to_did: str, intent: str = "Test packet") -> Packet:
+        pkt = Packet(
+            **{"from": sender.did, "to": to_did},
+            intent=intent,
+            content="Test content.",
+        )
+        return pkt.sign(sender)
+
+    def test_drop_full_id_persists_to_profile(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did)
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["drop", packet.id, "--profile", str(profile_with_sender), "--format", "json"],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["dropped"] == packet.id
+        assert data["already_dropped"] is False
+
+        reloaded = Profile.load(profile_with_sender)
+        assert packet.id in reloaded.dropped_ids
+
+    def test_drop_is_idempotent(self, profile_with_sender: Path, sender: Identity) -> None:
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did)
+        p.dropped_ids.append(packet.id)
+        p.save(profile_with_sender)
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["drop", packet.id, "--profile", str(profile_with_sender), "--format", "json"],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["already_dropped"] is True
+
+        reloaded = Profile.load(profile_with_sender)
+        assert reloaded.dropped_ids.count(packet.id) == 1
+
+    def test_drop_resolves_prefix_from_ingested_ids(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did)
+        recent_ts = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+        p.ingested_ids.append({"id": packet.id, "ingested_at": recent_ts})
+        p.save(profile_with_sender)
+
+        # No relay mock — should resolve from ingested_ids without hitting the network
+        result = runner.invoke(
+            app,
+            ["drop", packet.id[:10], "--profile", str(profile_with_sender), "--format", "json"],
+        )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["dropped"] == packet.id
+
+    def test_drop_resolves_prefix_from_relay_when_not_ingested(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did)
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                [
+                    "drop",
+                    packet.id[:10],
+                    "--profile",
+                    str(profile_with_sender),
+                    "--format",
+                    "json",
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        data = json.loads(result.output)
+        assert data["dropped"] == packet.id
+
+    def test_drop_packet_not_found_errors(self, profile_with_sender: Path) -> None:
+        async def mock_fetch(*args, **kwargs):
+            if False:  # pragma: no cover
+                yield
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                [
+                    "drop",
+                    "01XXXXXXXXXX",
+                    "--profile",
+                    str(profile_with_sender),
+                    "--format",
+                    "json",
+                ],
+            )
+
+        assert result.exit_code != 0
+
+    def test_drop_prefix_too_short_errors(self, profile_with_sender: Path) -> None:
+        result = runner.invoke(
+            app,
+            ["drop", "01XX", "--profile", str(profile_with_sender), "--format", "json"],
+        )
+        assert result.exit_code != 0
+
+    def test_inbox_filters_dropped_packets(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did, intent="Stuck packet")
+        p.dropped_ids.append(packet.id)
+        p.save(profile_with_sender)
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                ["inbox", "--format", "text", "--profile", str(profile_with_sender)],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "Stuck packet" not in result.output
+        assert "Inbox empty" in result.output
+
+    def test_inbox_all_also_filters_dropped(
+        self, profile_with_sender: Path, sender: Identity
+    ) -> None:
+        """--all should also exclude dropped packets — drop is permanent ignore."""
+        p = Profile.load(profile_with_sender)
+        packet = self._signed_packet(sender, p.instances["default"].did, intent="Dropped packet")
+        p.dropped_ids.append(packet.id)
+        p.save(profile_with_sender)
+
+        async def mock_fetch(*args, **kwargs):
+            yield packet
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = mock_fetch
+            result = runner.invoke(
+                app,
+                [
+                    "inbox",
+                    "--all",
+                    "--format",
+                    "text",
+                    "--profile",
+                    str(profile_with_sender),
+                ],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert "Dropped packet" not in result.output
