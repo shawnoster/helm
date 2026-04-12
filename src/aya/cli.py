@@ -607,6 +607,34 @@ def send(
     relay_urls = [relay] if relay else p.default_relays
     packet = Packet.from_json(packet_file.read_text())
 
+    # Validate the packet's signature before publishing. Two failure modes
+    # to handle separately:
+    #
+    # 1. Signature is missing or invalid AND from_did matches the local
+    #    instance → user authored this packet but didn't sign it (common
+    #    when hand-editing JSON). Re-sign with the local key automatically.
+    #
+    # 2. Signature is missing or invalid AND from_did is someone else →
+    #    refuse. Forwarding an unsigned packet that claims to be from
+    #    another sender would let the relay carry forged-looking data.
+    #    The user must either get the original sender to sign it, or
+    #    rewrite the from_did to match a local instance.
+    if not packet.verify_from_did():
+        if packet.from_did == local.did:
+            packet = packet.sign(local)
+            logger.info("Re-signed packet %s with local instance key", packet.id)
+        else:
+            _emit_error(
+                ErrorCode.INVALID_ARGUMENT,
+                (
+                    f"Packet has missing or invalid signature, and from_did "
+                    f"({packet.from_did[:40]}…) does not match local instance "
+                    f"({local.did[:40]}…). Refusing to forward an unsigned "
+                    f"packet that claims to be from another sender."
+                ),
+                {"packet_id": packet.id, "from_did": packet.from_did},
+            )
+
     if dry_run:
         _output_json(json.loads(packet.to_json()))
         raise typer.Exit(0)
@@ -1859,21 +1887,54 @@ def schedule_alerts(
 @schedule_app.command("install")
 def schedule_install(
     dry_run: bool = typer.Option(False, "--dry-run", "-n", help="Preview changes without applying"),
+    tick_interval: str | None = typer.Option(
+        None,
+        "--tick-interval",
+        help=(
+            "How often the scheduler ticks (e.g. '30s', '1m', '5m', '1h'). "
+            "Sub-minute intervals generate multi-line crontab entries with "
+            "sleep offsets. Persisted to ~/.aya/config.json so re-runs without "
+            "this flag preserve the chosen value. Default: 5m on first install."
+        ),
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Replace any existing aya cron entries instead of treating them as already-installed.",
+    ),
 ) -> None:
     """Install scheduler integrations — system crontab + Claude Code hooks."""
-    result = install_scheduler(dry_run=dry_run)
+    from aya.config import load_config, set_config_value
+    from aya.install import DEFAULT_TICK_INTERVAL
+
+    # Resolve the effective tick interval: explicit flag > persisted config > default.
+    if tick_interval is None:
+        cfg = load_config()
+        tick_interval = cfg.get("tick_interval", DEFAULT_TICK_INTERVAL)
+
+    result = install_scheduler(dry_run=dry_run, tick_interval=tick_interval, force=force)
 
     if result.errors:
         for e in result.errors:
             err.print(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)
+
+    # Persist the chosen interval (only on a successful real install,
+    # not dry-run or already-present cases — those don't change state).
+    if not dry_run and result.cron_installed:
+        set_config_value("tick_interval", tick_interval)
 
     prefix = "[dim](dry run)[/dim] " if dry_run else ""
 
     if result.cron_already_present:
-        console.print(f"  {prefix}[dim]Crontab:[/dim] already installed")
+        console.print(
+            f"  {prefix}[dim]Crontab:[/dim] already installed "
+            f"[dim](use --force to replace with --tick-interval {tick_interval})[/dim]"
+        )
     elif result.cron_installed:
-        console.print(f"  {prefix}[green]Crontab:[/green] installed")
-        console.print(f"    [dim]{result.cron_line}[/dim]")
+        console.print(f"  {prefix}[green]Crontab:[/green] installed (tick={tick_interval})")
+        for line in result.cron_lines:
+            console.print(f"    [dim]{line}[/dim]")
 
     for event in result.hooks_already_present:
         console.print(f"  {prefix}[dim]{event}:[/dim] already installed")
@@ -1922,26 +1983,69 @@ def schedule_uninstall(
 
 
 @hook_app.command("crons")
-def hook_crons() -> None:
-    """Output CronCreate instructions for Claude Code SessionStart hooks.
+def hook_crons(
+    reset: bool = typer.Option(
+        False,
+        "--reset",
+        help=(
+            "Clear the per-session registered-crons tracker before emitting. "
+            "Use at SessionStart so a fresh session re-registers everything."
+        ),
+    ),
+    event: str = typer.Option(
+        "SessionStart",
+        "--event",
+        help=(
+            "Hook event name to use in the emitted hookSpecificOutput JSON. "
+            "Defaults to SessionStart for the SessionStart hook entry; "
+            "PostToolUse hook should pass --event PostToolUse so the "
+            "additionalContext is delivered after the tool result."
+        ),
+    ),
+) -> None:
+    """Output CronCreate instructions for Claude Code hooks.
 
     Reads active session crons from the scheduler and emits a JSON
     hookSpecificOutput block that tells Claude Code to register them
-    via CronCreate.  Exits silently when there are no crons to register.
+    via CronCreate. Exits silently when there are no NEW crons to
+    register.
+
+    Tracks already-registered cron IDs in
+    ``~/.aya/session_registered_crons.json`` so a follow-up call only
+    emits crons that haven't been seen yet in the current session. This
+    is what makes mid-session ``aya schedule recurring`` calls actually
+    fire — the PostToolUse hook re-runs ``aya hook crons`` on the next
+    tool boundary, the new cron isn't in the tracker, and it gets
+    registered just like a SessionStart cron would.
 
     Unlike get_pending(), this does NOT claim alerts — safe to run before
     ``aya schedule pending`` without consuming alerts.
 
     Usage in ~/.claude/settings.json:
-        {"command": "aya hook crons", "statusMessage": "Registering crons..."}
+        SessionStart: ``aya hook crons --reset``
+        PostToolUse:  ``aya hook crons --event PostToolUse``
     """
+    from aya.scheduler import (
+        load_registered_cron_ids,
+        reset_registered_cron_ids,
+        save_registered_cron_ids,
+    )
+
+    if reset:
+        reset_registered_cron_ids()
+
     crons, _suppressed = get_session_crons()
     if not crons:
         return
 
-    # Emit one hookSpecificOutput per cron so each gets its own system
+    already_registered = load_registered_cron_ids()
+    new_crons = [c for c in crons if c.get("id", "") not in already_registered]
+    if not new_crons:
+        return
+
+    # Emit one hookSpecificOutput per new cron so each gets its own system
     # reminder and can't be truncated when multiple crons are bundled.
-    for c in crons:
+    for c in new_crons:
         cid = c.get("id", "")
         schedule = c.get("cron", "")
         prompt = c.get("prompt") or c.get("message") or c.get("description") or ""
@@ -1955,12 +2059,17 @@ def hook_crons() -> None:
             json.dumps(
                 {
                     "hookSpecificOutput": {
-                        "hookEventName": "SessionStart",
+                        "hookEventName": event,
                         "additionalContext": context,
                     }
                 }
             )
         )
+
+    # Persist the IDs we just emitted so the next call (e.g. via the
+    # PostToolUse hook) doesn't double-register them.
+    updated_ids = already_registered | {c.get("id", "") for c in new_crons if c.get("id")}
+    save_registered_cron_ids(updated_ids)
 
 
 # ── ci ────────────────────────────────────────────────────────────────────────

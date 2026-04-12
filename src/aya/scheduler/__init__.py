@@ -103,6 +103,7 @@ from .storage import (
     _new_id,
     _parse_tags,
     _scheduler_file,
+    _registered_crons_file,
     _session_lock_file,
     claim_alert,
     clear_session_lock,
@@ -111,8 +112,11 @@ from .storage import (
     is_session_active,
     load_alerts,
     load_items,
+    load_registered_cron_ids,
+    reset_registered_cron_ids,
     save_alerts,
     save_items,
+    save_registered_cron_ids,
     sweep_stale_claims,
     write_session_lock,
 )
@@ -190,6 +194,7 @@ _LAZY_ATTRS: dict[str, Any] = {
     "LOCK_FILE": lambda: _lock_file(),  # noqa: PLW0108 — forward ref
     "CLAIMS_DIR": lambda: _claims_dir(),  # noqa: PLW0108 — forward ref
     "SESSION_LOCK_FILE": lambda: _session_lock_file(),  # noqa: PLW0108 — forward ref
+    "REGISTERED_CRONS_FILE": lambda: _registered_crons_file(),  # noqa: PLW0108
     "LOCAL_TZ": _get_local_tz,
 }
 
@@ -255,6 +260,7 @@ __all__ = [
     "LOCK_FILE",
     "CLAIMS_DIR",
     "SESSION_LOCK_FILE",
+    "REGISTERED_CRONS_FILE",
     "LOCAL_TZ",
     # Core functions
     "add_reminder",
@@ -289,7 +295,11 @@ __all__ = [
     "write_session_lock",
     "clear_session_lock",
     "is_session_active",
+    "_registered_crons_file",
     "_session_lock_file",
+    "load_registered_cron_ids",
+    "save_registered_cron_ids",
+    "reset_registered_cron_ids",
     "_passes_severity_filter",
     # Display
     "show_alerts",

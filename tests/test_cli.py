@@ -892,15 +892,32 @@ def _isolate_scheduler(tmp_path, monkeypatch):
 
 @pytest.mark.usefixtures("_isolate_scheduler")
 class TestHookCrons:
-    def test_no_crons_exits_silently(self):
+    @pytest.fixture
+    def isolated_scheduler(self, tmp_path, monkeypatch):
+        """Patch SCHEDULER_FILE, ALERTS_FILE, and REGISTERED_CRONS_FILE to a tmp dir.
+
+        Without REGISTERED_CRONS_FILE patching the tests would leak writes to
+        the real ~/.aya/session_registered_crons.json across the test suite.
+        """
+        sched_dir = tmp_path / "sched"
+        sched_dir.mkdir()
+        scheduler_file = sched_dir / "scheduler.json"
+        alerts_file = sched_dir / "alerts.json"
+        registered_file = sched_dir / "session_registered_crons.json"
+        scheduler_file.write_text(json.dumps({"items": []}))
+        alerts_file.write_text(json.dumps({"alerts": []}))
+        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
+        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
+        monkeypatch.setattr("aya.scheduler.REGISTERED_CRONS_FILE", registered_file)
+        return sched_dir
+
+    def test_no_crons_exits_silently(self, isolated_scheduler):
         result = runner.invoke(app, ["hook", "crons"])
         assert result.exit_code == 0
         assert result.output.strip() == ""
 
-    def test_outputs_valid_json_with_crons(self, tmp_path, monkeypatch):
-        scheduler_file = tmp_path / "sched" / "scheduler.json"
-        alerts_file = tmp_path / "sched" / "alerts.json"
-        scheduler_file.parent.mkdir(parents=True)
+    def test_outputs_valid_json_with_crons(self, isolated_scheduler):
+        scheduler_file = isolated_scheduler / "scheduler.json"
         scheduler_file.write_text(
             json.dumps(
                 {
@@ -919,9 +936,6 @@ class TestHookCrons:
                 }
             )
         )
-        alerts_file.write_text(json.dumps({"alerts": []}))
-        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
-        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
 
         result = runner.invoke(app, ["hook", "crons"])
         assert result.exit_code == 0
@@ -931,13 +945,11 @@ class TestHookCrons:
         assert "CronCreate" in ctx
         assert "test-cron" in ctx
 
-    def test_multiple_crons_emit_separate_lines(self, tmp_path, monkeypatch):
+    def test_multiple_crons_emit_separate_lines(self, isolated_scheduler):
         """Each session cron must produce its own JSON line so Claude Code
         creates a separate system reminder per cron — prevents truncation
         when multiple crons are bundled into a single hookSpecificOutput."""
-        scheduler_file = tmp_path / "sched" / "scheduler.json"
-        alerts_file = tmp_path / "sched" / "alerts.json"
-        scheduler_file.parent.mkdir(parents=True)
+        scheduler_file = isolated_scheduler / "scheduler.json"
         scheduler_file.write_text(
             json.dumps(
                 {
@@ -966,9 +978,6 @@ class TestHookCrons:
                 }
             )
         )
-        alerts_file.write_text(json.dumps({"alerts": []}))
-        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
-        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
 
         result = runner.invoke(app, ["hook", "crons"])
         assert result.exit_code == 0
@@ -990,11 +999,9 @@ class TestHookCrons:
 
         assert ids == {"cron-health", "cron-relay"}, f"Missing cron IDs: {ids}"
 
-    def test_escapes_double_quotes_in_prompt(self, tmp_path, monkeypatch):
+    def test_escapes_double_quotes_in_prompt(self, isolated_scheduler):
         """Prompts with double quotes must be escaped to avoid malformed output."""
-        scheduler_file = tmp_path / "sched" / "scheduler.json"
-        alerts_file = tmp_path / "sched" / "alerts.json"
-        scheduler_file.parent.mkdir(parents=True)
+        scheduler_file = isolated_scheduler / "scheduler.json"
         scheduler_file.write_text(
             json.dumps(
                 {
@@ -1013,9 +1020,6 @@ class TestHookCrons:
                 }
             )
         )
-        alerts_file.write_text(json.dumps({"alerts": []}))
-        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
-        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
 
         result = runner.invoke(app, ["hook", "crons"])
         assert result.exit_code == 0
@@ -1026,12 +1030,9 @@ class TestHookCrons:
         # Must not contain unescaped quotes that would break parsing
         assert 'prompt="Say \\"hello\\" to the user."' in ctx
 
-    def test_does_not_claim_alerts(self, tmp_path, monkeypatch):
+    def test_does_not_claim_alerts(self, isolated_scheduler):
         """hook crons must not consume alerts — they belong to schedule pending."""
-        scheduler_file = tmp_path / "sched" / "scheduler.json"
-        alerts_file = tmp_path / "sched" / "alerts.json"
-        scheduler_file.parent.mkdir(parents=True)
-        scheduler_file.write_text(json.dumps({"items": []}))
+        alerts_file = isolated_scheduler / "alerts.json"
         alerts_file.write_text(
             json.dumps(
                 {
@@ -1048,8 +1049,6 @@ class TestHookCrons:
                 }
             )
         )
-        monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", scheduler_file)
-        monkeypatch.setattr("aya.scheduler.ALERTS_FILE", alerts_file)
 
         # Run hook crons
         runner.invoke(app, ["hook", "crons"])
@@ -1059,6 +1058,159 @@ class TestHookCrons:
         assert len(alerts) == 1
         assert alerts[0]["seen"] is False
         assert "delivered_at" not in alerts[0]
+
+    def test_second_call_emits_nothing_when_already_registered(self, isolated_scheduler):
+        """The mid-session re-registration guard: hook crons should track
+        which IDs it has emitted and skip them on subsequent calls."""
+        scheduler_file = isolated_scheduler / "scheduler.json"
+        scheduler_file.write_text(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "tracker-cron",
+                            "type": "recurring",
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "test",
+                            "session_required": True,
+                            "cron": "* * * * *",
+                            "prompt": "Tick.",
+                        }
+                    ]
+                }
+            )
+        )
+
+        first = runner.invoke(app, ["hook", "crons"])
+        assert first.exit_code == 0
+        assert "tracker-cron" in first.output
+
+        second = runner.invoke(app, ["hook", "crons"])
+        assert second.exit_code == 0
+        assert second.output.strip() == ""  # already registered, nothing new
+
+    def test_reset_flag_clears_tracker_and_re_emits(self, isolated_scheduler):
+        """--reset (used at SessionStart) should clear the tracker so a fresh
+        session re-registers everything from scratch."""
+        scheduler_file = isolated_scheduler / "scheduler.json"
+        scheduler_file.write_text(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "reset-cron",
+                            "type": "recurring",
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "test",
+                            "session_required": True,
+                            "cron": "* * * * *",
+                            "prompt": "Tick.",
+                        }
+                    ]
+                }
+            )
+        )
+
+        first = runner.invoke(app, ["hook", "crons"])
+        assert "reset-cron" in first.output
+
+        second = runner.invoke(app, ["hook", "crons", "--reset"])
+        assert second.exit_code == 0
+        # After --reset the tracker is empty, so the cron is re-emitted
+        assert "reset-cron" in second.output
+
+    def test_new_cron_added_mid_session_is_picked_up(self, isolated_scheduler):
+        """Add a cron after the first hook crons call, then re-run — only
+        the new cron should be emitted on the second call. This is the
+        end-to-end behavior the PostToolUse hook relies on."""
+        scheduler_file = isolated_scheduler / "scheduler.json"
+        scheduler_file.write_text(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "old-cron",
+                            "type": "recurring",
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "old",
+                            "session_required": True,
+                            "cron": "* * * * *",
+                            "prompt": "Old.",
+                        }
+                    ]
+                }
+            )
+        )
+
+        first = runner.invoke(app, ["hook", "crons"])
+        assert "old-cron" in first.output
+        assert "new-cron" not in first.output
+
+        # Mid-session: add a new cron
+        scheduler_file.write_text(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "old-cron",
+                            "type": "recurring",
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "old",
+                            "session_required": True,
+                            "cron": "* * * * *",
+                            "prompt": "Old.",
+                        },
+                        {
+                            "id": "new-cron",
+                            "type": "recurring",
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "new",
+                            "session_required": True,
+                            "cron": "* * * * *",
+                            "prompt": "New.",
+                        },
+                    ]
+                }
+            )
+        )
+
+        second = runner.invoke(app, ["hook", "crons"])
+        assert second.exit_code == 0
+        assert "new-cron" in second.output
+        assert "old-cron" not in second.output  # already in tracker
+
+    def test_event_flag_changes_hook_event_name(self, isolated_scheduler):
+        """--event PostToolUse routes the additionalContext through the
+        PostToolUse hook channel instead of SessionStart."""
+        scheduler_file = isolated_scheduler / "scheduler.json"
+        scheduler_file.write_text(
+            json.dumps(
+                {
+                    "items": [
+                        {
+                            "id": "event-cron",
+                            "type": "recurring",
+                            "status": "active",
+                            "created_at": "2026-01-01T00:00:00-07:00",
+                            "message": "test",
+                            "session_required": True,
+                            "cron": "* * * * *",
+                            "prompt": "Tick.",
+                        }
+                    ]
+                }
+            )
+        )
+
+        result = runner.invoke(app, ["hook", "crons", "--event", "PostToolUse"])
+        assert result.exit_code == 0
+        data = json.loads(result.output.strip())
+        assert data["hookSpecificOutput"]["hookEventName"] == "PostToolUse"
 
 
 @pytest.mark.usefixtures("_isolate_scheduler")
@@ -3383,3 +3535,164 @@ class TestDrop:
 
         assert result.exit_code == 0, result.output
         assert "Dropped packet" not in result.output
+
+
+# ── TestSendSignatureValidation ───────────────────────────────────────────────
+
+
+class TestSendSignatureValidation:
+    """Tests for signature validation in `aya send`.
+
+    Three paths:
+      - Missing/invalid signature, from_did matches local → re-sign + send
+      - Missing/invalid signature, from_did is external → reject
+      - Valid signature → pass through unchanged
+    """
+
+    def test_resigns_when_signature_missing_and_local_is_sender(
+        self, profile_with_trusted: Path, tmp_path: Path
+    ) -> None:
+        """Empty-sig packet authored by local instance is auto-signed before send."""
+        p = Profile.load(profile_with_trusted)
+        local = p.instances["default"]
+        home_key = p.trusted_keys["home"]
+
+        pkt = Packet(
+            **{"from": local.did, "to": home_key.did},
+            intent="hand-edited packet",
+            content="hello",
+        )
+        # Note: no .sign() call — signature is None
+        assert pkt.signature is None
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        captured: dict = {}
+
+        async def fake_publish(packet, *args, **kwargs):
+            captured["packet"] = packet
+            return "e" * 64
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.publish = fake_publish
+            result = runner.invoke(
+                app,
+                ["send", str(packet_file), "--profile", str(profile_with_trusted)],
+            )
+
+        assert result.exit_code == 0, result.output
+        assert captured["packet"].signature is not None
+        # And the freshly applied signature is valid
+        assert captured["packet"].verify_from_did()
+
+    def test_resigns_when_signature_invalid_and_local_is_sender(
+        self, profile_with_trusted: Path, tmp_path: Path
+    ) -> None:
+        """Garbage-sig packet authored by local instance is auto-resigned."""
+        p = Profile.load(profile_with_trusted)
+        local = p.instances["default"]
+        home_key = p.trusted_keys["home"]
+
+        pkt = Packet(
+            **{"from": local.did, "to": home_key.did},
+            intent="bad sig packet",
+            content="hello",
+        )
+        # Inject a bogus base64 signature so verify_from_did() returns False
+        pkt.signature = "A" * 100
+        assert not pkt.verify_from_did()
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        captured: dict = {}
+
+        async def fake_publish(packet, *args, **kwargs):
+            captured["packet"] = packet
+            return "e" * 64
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.publish = fake_publish
+            result = runner.invoke(
+                app,
+                ["send", str(packet_file), "--profile", str(profile_with_trusted)],
+            )
+
+        assert result.exit_code == 0, result.output
+        # Signature replaced with a valid one
+        assert captured["packet"].verify_from_did()
+
+    def test_rejects_when_signature_missing_and_sender_is_external(
+        self, profile_with_trusted: Path, tmp_path: Path
+    ) -> None:
+        """Empty-sig packet claiming to be from a different sender is refused."""
+        p = Profile.load(profile_with_trusted)
+        home_key = p.trusted_keys["home"]
+        other_sender = Identity.generate("offline")
+
+        pkt = Packet(
+            **{"from": other_sender.did, "to": home_key.did},
+            intent="forged-looking packet",
+            content="hello",
+        )
+        assert pkt.signature is None
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        publish_calls = 0
+
+        async def fake_publish(*args, **kwargs):
+            nonlocal publish_calls
+            publish_calls += 1
+            return "e" * 64
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.publish = fake_publish
+            result = runner.invoke(
+                app,
+                [
+                    "send",
+                    str(packet_file),
+                    "--profile",
+                    str(profile_with_trusted),
+                    "--format",
+                    "json",
+                ],
+            )
+
+        assert result.exit_code != 0
+        assert publish_calls == 0  # never reached the relay
+
+    def test_passes_through_valid_signature(
+        self, profile_with_trusted: Path, tmp_path: Path
+    ) -> None:
+        """Properly-signed packet sends without modification."""
+        p = Profile.load(profile_with_trusted)
+        local = p.instances["default"]
+        home_key = p.trusted_keys["home"]
+
+        pkt = Packet(
+            **{"from": local.did, "to": home_key.did},
+            intent="properly signed",
+            content="hello",
+        ).sign(local)
+        original_sig = pkt.signature
+        assert pkt.verify_from_did()
+        packet_file = tmp_path / "packet.json"
+        packet_file.write_text(pkt.to_json())
+
+        captured: dict = {}
+
+        async def fake_publish(packet, *args, **kwargs):
+            captured["packet"] = packet
+            return "e" * 64
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.publish = fake_publish
+            result = runner.invoke(
+                app,
+                ["send", str(packet_file), "--profile", str(profile_with_trusted)],
+            )
+
+        assert result.exit_code == 0, result.output
+        # Signature unchanged — pass-through, not re-signed
+        assert captured["packet"].signature == original_sig

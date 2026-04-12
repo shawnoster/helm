@@ -7,17 +7,19 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from typer.testing import CliRunner
 
 from aya.cli import app
 from aya.install import (
     CANONICAL_HOOKS,
     CRON_COMMENT,
-    _build_cron_line,
+    _build_cron_lines,
     _has_aya_cron,
     _is_aya_command,
     _is_aya_hook_entry,
     install_scheduler,
+    parse_tick_interval,
     uninstall_scheduler,
 )
 
@@ -98,12 +100,93 @@ class TestHasAyaCron:
         assert _has_aya_cron("") is False
 
 
-class TestBuildCronLine:
-    def test_format(self) -> None:
-        line = _build_cron_line("/home/user/.local/bin/aya")
-        assert line.startswith("*/5 * * * *")
-        assert "/home/user/.local/bin/aya schedule tick --quiet" in line
-        assert CRON_COMMENT in line
+class TestBuildCronLines:
+    def test_5m_format(self) -> None:
+        lines = _build_cron_lines("/home/user/.local/bin/aya", 300)
+        assert len(lines) == 1
+        assert lines[0].startswith("*/5 * * * *")
+        assert "/home/user/.local/bin/aya schedule tick --quiet" in lines[0]
+        assert CRON_COMMENT in lines[0]
+
+    def test_1m_format_uses_star(self) -> None:
+        lines = _build_cron_lines("/home/user/.local/bin/aya", 60)
+        assert len(lines) == 1
+        # */1 is non-standard; we emit "* * * * *" instead
+        assert lines[0].startswith("* * * * *")
+        assert "*/1" not in lines[0]
+
+    def test_30s_format_emits_two_lines(self) -> None:
+        lines = _build_cron_lines("/home/user/.local/bin/aya", 30)
+        assert len(lines) == 2
+        # First line fires at :00
+        assert lines[0].startswith("* * * * *")
+        assert "sleep" not in lines[0]
+        # Second line fires at :30 via sleep offset
+        assert "( sleep 30 && /home/user/.local/bin/aya schedule tick --quiet )" in lines[1]
+        assert "aya-scheduler-tick-30s" in lines[1]
+
+    def test_15s_format_emits_four_lines(self) -> None:
+        lines = _build_cron_lines("/home/user/.local/bin/aya", 15)
+        assert len(lines) == 4
+        # Offsets at 0, 15, 30, 45
+        assert "sleep" not in lines[0]
+        assert "sleep 15" in lines[1]
+        assert "sleep 30" in lines[2]
+        assert "sleep 45" in lines[3]
+
+    def test_1h_format_uses_minute_zero(self) -> None:
+        lines = _build_cron_lines("/home/user/.local/bin/aya", 3600)
+        assert len(lines) == 1
+        # */60 is invalid cron syntax; we emit "0 * * * *" instead
+        assert lines[0].startswith("0 * * * *")
+        assert "*/60" not in lines[0]
+
+
+class TestParseTickInterval:
+    def test_seconds(self) -> None:
+        assert parse_tick_interval("30s") == 30
+        assert parse_tick_interval("1s") == 1
+        assert parse_tick_interval("59s") == 59
+
+    def test_minutes(self) -> None:
+        assert parse_tick_interval("1m") == 60
+        assert parse_tick_interval("5m") == 300
+        assert parse_tick_interval("30m") == 1800
+
+    def test_hours(self) -> None:
+        assert parse_tick_interval("1h") == 3600
+
+    def test_whitespace_and_case(self) -> None:
+        assert parse_tick_interval("  5M  ") == 300
+        assert parse_tick_interval("30S") == 30
+
+    def test_rejects_empty(self) -> None:
+        with pytest.raises(ValueError, match="Empty"):
+            parse_tick_interval("")
+
+    def test_rejects_no_suffix(self) -> None:
+        with pytest.raises(ValueError, match="end in"):
+            parse_tick_interval("30")
+
+    def test_rejects_bad_unit(self) -> None:
+        with pytest.raises(ValueError, match="end in"):
+            parse_tick_interval("30d")
+
+    def test_rejects_non_numeric(self) -> None:
+        with pytest.raises(ValueError, match="positive integer"):
+            parse_tick_interval("abcm")
+
+    def test_rejects_zero(self) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            parse_tick_interval("0s")
+
+    def test_rejects_negative(self) -> None:
+        with pytest.raises(ValueError, match="positive"):
+            parse_tick_interval("-5m")
+
+    def test_rejects_above_60m(self) -> None:
+        with pytest.raises(ValueError, match="between 1s and 60m"):
+            parse_tick_interval("2h")
 
 
 # ── Hook install/uninstall (real files) ──────────────────────────────────────

@@ -448,3 +448,69 @@ def is_session_active() -> bool:
         is_active,
     )
     return is_active
+
+
+# ── per-session registered crons tracker ───────────────────────────────────
+#
+# `aya hook crons` reads active session crons and emits hookSpecificOutput
+# JSON instructing Claude Code to register them via CronCreate. To support
+# mid-session registration (i.e. running `aya schedule recurring` after
+# the session has already started), we track which cron IDs have already
+# been emitted within the current session, so a follow-up call only emits
+# the newly created ones.
+#
+# The tracker is reset at SessionStart via `aya hook crons --reset`, and
+# is consulted (without reset) by the PostToolUse hook entry to surface
+# any newly-created crons on the next tool boundary.
+
+
+def _registered_crons_file() -> Path:
+    """Return the per-session registered crons tracker file path.
+
+    Honors a package-level override (``REGISTERED_CRONS_FILE``) so tests
+    can redirect the path without touching ``AYA_HOME``.
+    """
+    pkg = _get_package_globals()
+    if "REGISTERED_CRONS_FILE" in pkg and pkg["REGISTERED_CRONS_FILE"] is not None:
+        val = pkg["REGISTERED_CRONS_FILE"]
+        if isinstance(val, Path):
+            return val
+    return _paths.AYA_HOME / "session_registered_crons.json"
+
+
+def load_registered_cron_ids() -> set[str]:
+    """Return the set of cron IDs already registered in this session."""
+    path = _registered_crons_file()
+    if not path.exists():
+        return set()
+    try:
+        data = json.loads(path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return set()
+    if not isinstance(data, dict):
+        return set()
+    raw_ids = data.get("ids", [])
+    if not isinstance(raw_ids, list):
+        return set()
+    return {pid for pid in raw_ids if isinstance(pid, str)}
+
+
+def save_registered_cron_ids(ids: set[str]) -> None:
+    """Persist the set of cron IDs registered in this session."""
+    path = _registered_crons_file()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "updated_at": datetime.now(_get_local_tz()).isoformat(),
+        "ids": sorted(ids),
+    }
+    _atomic_write(path, payload)
+
+
+def reset_registered_cron_ids() -> None:
+    """Clear the per-session registered crons tracker.
+
+    Called at SessionStart so a fresh session re-registers everything.
+    """
+    path = _registered_crons_file()
+    if path.exists():
+        path.unlink(missing_ok=True)
