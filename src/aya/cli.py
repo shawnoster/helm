@@ -39,7 +39,7 @@ from aya.pair import (
 )
 from aya.paths import CONFIG_PATH, PROFILE_PATH
 from aya.profile import ensure_profile
-from aya.relay import RelayClient
+from aya.relay import RelayClient, RelayUnreachableError
 
 # Subcommand modules — imported at top-level; each is only invoked when its
 # subcommand is actually called, so startup cost is acceptable.
@@ -167,6 +167,7 @@ class ErrorCode:
     PROFILE_NOT_FOUND = "PROFILE_NOT_FOUND"
     INSTANCE_NOT_FOUND = "INSTANCE_NOT_FOUND"
     RELAY_UNREACHABLE = "RELAY_UNREACHABLE"
+    RELAY_TIMEOUT = "RELAY_TIMEOUT"
     SIGNATURE_INVALID = "SIGNATURE_INVALID"
     PACKET_NOT_FOUND = "PACKET_NOT_FOUND"
     PEER_NOT_TRUSTED = "PEER_NOT_TRUSTED"
@@ -175,6 +176,15 @@ class ErrorCode:
     AMBIGUOUS_PREFIX = "AMBIGUOUS_PREFIX"
     DISPATCH_FAILED = "DISPATCH_FAILED"
     PAIR_TIMEOUT = "PAIR_TIMEOUT"
+
+
+# Relay fetch timeout in seconds — applies to commands that stream
+# pending packets from the relay for a bounded operation (e.g. aya drop
+# prefix resolution). Large or slow relays shouldn't wedge the CLI
+# indefinitely; after this many seconds, the fetch is abandoned and the
+# caller sees RELAY_TIMEOUT. Chosen to be comfortable for a healthy
+# relay + ~100 packets but short enough to feel interactive.
+_RELAY_FETCH_TIMEOUT_SECONDS = 30
 
 
 def _want_json_errors() -> bool:
@@ -2686,15 +2696,48 @@ def drop(
             return  # unreachable, _emit_error raises
         else:
             # Fall back to the relay for packets that were never ingested
-            # (bad-sig, spam, untrusted senders that aya skipped).
+            # (bad-sig, spam, untrusted senders that aya skipped). Wrap
+            # the stream in asyncio.timeout() so a slow or large relay
+            # can't wedge the command indefinitely — after
+            # _RELAY_FETCH_TIMEOUT_SECONDS we abandon the fetch and
+            # report RELAY_TIMEOUT so the caller can retry with a full
+            # ID or a different --relay.
             relay_urls = [relay] if relay else p.default_relays
             client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
             relay_matches: list[str] = []
-            async for pkt in client.fetch_pending():
-                if pkt.id.startswith(packet_id):
-                    relay_matches.append(pkt.id)
-                    if len(relay_matches) > 1:
-                        break  # ambiguous — stop early
+            try:
+                async with asyncio.timeout(_RELAY_FETCH_TIMEOUT_SECONDS):
+                    async for pkt in client.fetch_pending():
+                        if pkt.id.startswith(packet_id):
+                            relay_matches.append(pkt.id)
+                            if len(relay_matches) > 1:
+                                break  # ambiguous — stop early
+            except TimeoutError:
+                _emit_error(
+                    ErrorCode.RELAY_TIMEOUT,
+                    (
+                        f"Relay fetch timed out after {_RELAY_FETCH_TIMEOUT_SECONDS}s "
+                        f"while resolving prefix '{packet_id}'. The relay may be slow "
+                        f"or the inbox very large — retry with the full packet ID, "
+                        f"or use --relay to point at a different relay."
+                    ),
+                    {
+                        "packet_id": packet_id,
+                        "timeout_seconds": _RELAY_FETCH_TIMEOUT_SECONDS,
+                    },
+                )
+                return  # unreachable
+            except RelayUnreachableError:
+                _emit_error(
+                    ErrorCode.RELAY_UNREACHABLE,
+                    (
+                        f"Could not connect to relay while resolving prefix '{packet_id}'. "
+                        "Check your network connection or use --relay to point at a "
+                        "different relay."
+                    ),
+                    {"packet_id": packet_id},
+                )
+                return  # unreachable
 
             if not relay_matches:
                 _emit_error(

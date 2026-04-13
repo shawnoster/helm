@@ -237,11 +237,19 @@ class RelayClient:
         """
         logger.debug("Fetching pending packets from %d relay(s)", len(self._relay_urls))
         seen_ids: set[str] = set()
+        unreachable: list[str] = []
         for relay_url in self._relay_urls:
-            async for packet in self._fetch_from_relay(relay_url, since):
-                if packet.id not in seen_ids:
-                    seen_ids.add(packet.id)
-                    yield packet
+            try:
+                async for packet in self._fetch_from_relay(relay_url, since):
+                    if packet.id not in seen_ids:
+                        seen_ids.add(packet.id)
+                        yield packet
+            except RelayUnreachableError:
+                unreachable.append(relay_url)
+        if unreachable and len(unreachable) == len(self._relay_urls):
+            raise RelayUnreachableError(
+                f"All {len(self._relay_urls)} relay(s) unreachable: {unreachable}"
+            )
         logger.debug("Fetch complete, %d unique packet(s) found", len(seen_ids))
 
     async def _fetch_from_relay(
@@ -323,7 +331,7 @@ class RelayClient:
                         logger.warning("Failed to fetch from %s: %s", relay_url, exc)
 
             if not fetch_ok:
-                return
+                raise RelayUnreachableError(relay_url)
 
             # Process events, track the oldest timestamp for cursor advancement,
             # and count truly new events (guards against infinite loops when many
@@ -542,3 +550,7 @@ def _sign_hex(event_id_hex: str, private_key_hex: str) -> str:
 
 class RelayError(Exception):
     pass
+
+
+class RelayUnreachableError(RelayError):
+    """Raised when all retries to connect to a relay are exhausted."""
