@@ -59,7 +59,7 @@ machine that has run `aya init` with a real label.
      1. work
      2. sean-okeefe
    ```
-3. Validate with `aya dispatch --dry-run --to <label>`
+3. Validate with `printf 'validate' | aya dispatch --dry-run --as <local-label> --to <label> --intent validate`
 
 ---
 
@@ -418,9 +418,9 @@ is a separate thing and doesn't cover relay state.
 
 ## Notes
 
-- This skill fully replaces `/pack-for-home`. End-of-session handoffs
-  ("pack this up for work/home") are handled by verb 4 (Send) with
-  content curation. No separate skill needed.
+- End-of-session handoffs ("pack this up for work/home") are handled by
+  verb 4 (Send) with content curation. No separate handoff skill is
+  needed.
 - Seed packets are lighter and safer for questions; content packets carry
   material. Default to seeds.
 - The relay is asymmetric in practice: home runs hooks/cron-backed
