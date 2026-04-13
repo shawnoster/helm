@@ -39,7 +39,7 @@ from aya.pair import (
 )
 from aya.paths import CONFIG_PATH, PROFILE_PATH
 from aya.profile import ensure_profile
-from aya.relay import RelayClient
+from aya.relay import RelayClient, RelayUnreachableError
 
 # Subcommand modules — imported at top-level; each is only invoked when its
 # subcommand is actually called, so startup cost is acceptable.
@@ -2725,6 +2725,17 @@ def drop(
                         "packet_id": packet_id,
                         "timeout_seconds": _RELAY_FETCH_TIMEOUT_SECONDS,
                     },
+                )
+                return  # unreachable
+            except RelayUnreachableError:
+                _emit_error(
+                    ErrorCode.RELAY_UNREACHABLE,
+                    (
+                        f"Could not connect to relay while resolving prefix '{packet_id}'. "
+                        "Check your network connection or use --relay to point at a "
+                        "different relay."
+                    ),
+                    {"packet_id": packet_id},
                 )
                 return  # unreachable
 

@@ -3633,6 +3633,42 @@ class TestDrop:
         assert "RELAY_TIMEOUT" in result.output
         assert "timed out" in result.output
 
+    def test_drop_relay_unreachable(
+        self,
+        profile_with_sender: Path,
+    ) -> None:
+        """An unreachable relay should emit RELAY_UNREACHABLE, not PACKET_NOT_FOUND.
+
+        Mocks `fetch_pending` to raise `RelayUnreachableError` — the error
+        that `RelayClient` raises when all connection retries are exhausted.
+        The command should exit non-zero with RELAY_UNREACHABLE in the output.
+        """
+        from aya.relay import RelayUnreachableError
+
+        async def unreachable_fetch(*args, **kwargs):
+            raise RelayUnreachableError("wss://relay.example.com")
+            if False:  # pragma: no cover
+                yield
+
+        with patch("aya.cli.RelayClient") as mock_cls:
+            mock_cls.return_value.fetch_pending = unreachable_fetch
+            result = runner.invoke(
+                app,
+                [
+                    "drop",
+                    "01ABCDEFGH",  # prefix not in ingested/dropped — forces relay
+                    "--profile",
+                    str(profile_with_sender),
+                    "--format",
+                    "json",
+                ],
+            )
+
+        assert result.exit_code != 0
+        assert "RELAY_UNREACHABLE" in result.output
+        # Must NOT fall through to PACKET_NOT_FOUND
+        assert "PACKET_NOT_FOUND" not in result.output
+
 
 # ── TestSendSignatureValidation ───────────────────────────────────────────────
 
