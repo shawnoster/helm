@@ -11,6 +11,7 @@ import re
 import shutil
 import subprocess
 import sys
+import urllib.parse
 from contextlib import nullcontext, suppress
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -2883,22 +2884,17 @@ def config_show() -> None:
 
 
 def _load_profile_for_relay(profile_path: Path) -> Profile:
-    """Load a profile, emitting a structured error if it doesn't exist."""
-    if not profile_path.exists():
-        _emit_error(
-            ErrorCode.PROFILE_NOT_FOUND,
-            f"Profile not found at {profile_path}. Run `aya init` first.",
-            context={"profile_path": str(profile_path)},
-        )
-    return Profile.load(profile_path)
+    """Load a profile for relay commands using the standard profile loader."""
+    return _load_profile(profile_path)
 
 
 def _validate_relay_url(url: str) -> None:
-    """Reject anything that isn't a ws:// or wss:// URL."""
-    if not url.startswith(("wss://", "ws://")):
+    """Reject anything that isn't a valid ws:// or wss:// URL with a non-empty host."""
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"ws", "wss"} or not parsed.hostname or url != url.strip():
         _emit_error(
             ErrorCode.INVALID_ARGUMENT,
-            f"Relay URL must start with wss:// or ws:// (got {url!r}).",
+            f"Relay URL must be a valid wss:// or ws:// address with a hostname (got {url!r}).",
             context={"url": url},
             exit_code=2,
         )
@@ -2985,8 +2981,8 @@ def relay_remove(
         False,
         "--force",
         help="Allow removing the last remaining relay. Note: Profile.load() auto-refills an "
-        "empty list with the bootstrap defaults (damus + nos.lol) on next load, so this "
-        "effectively resets to defaults.",
+        "empty list with the bootstrap defaults on next load, so this effectively resets "
+        "to defaults.",
     ),
     profile: Path = typer.Option(DEFAULT_PROFILE, help="Path to profile.json"),
     format_: OutputFormat = typer.Option(
@@ -3036,8 +3032,11 @@ def relay_remove(
         _output_json({"ok": True, "removed": removed, "relays": relays})
         return
     console.print(f"[green]✓[/green] Removed [cyan]{removed}[/cyan]")
-    if not relays:
-        console.print("[yellow]⚠ default_relays is now empty.[/yellow]")
+    if not relays and force:
+        console.print(
+            "[yellow]⚠ default_relays was saved empty, but bootstrap defaults will be "
+            "restored on the next profile load.[/yellow]"
+        )
     console.print(f"[dim]Saved to {profile}[/dim]")
 
 
