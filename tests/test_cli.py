@@ -3867,3 +3867,304 @@ class TestSendSignatureValidation:
 
         assert result.exit_code == 0, result.output
         assert "Re-signed packet" in result.output
+
+
+# ── TestRelaySubcommand ───────────────────────────────────────────────────────
+
+
+class TestRelayList:
+    def test_list_text_shows_relays_in_order(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://relay.damus.io", "wss://nos.lol"]
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            ["relay", "list", "--profile", str(profile_with_instance), "--format", "text"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "wss://relay.damus.io" in result.output
+        assert "wss://nos.lol" in result.output
+        # Order check: damus appears before nos.lol
+        assert result.output.index("wss://relay.damus.io") < result.output.index("wss://nos.lol")
+
+    def test_list_json_shape(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://a.example", "wss://b.example"]
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            ["relay", "list", "--profile", str(profile_with_instance), "--format", "json"],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload == {"relays": ["wss://a.example", "wss://b.example"], "count": 2}
+
+    def test_list_missing_profile_emits_structured_error(self, tmp_path: Path) -> None:
+        missing = tmp_path / "does-not-exist.json"
+        result = runner.invoke(
+            app,
+            ["relay", "list", "--profile", str(missing), "--format", "json"],
+        )
+        assert result.exit_code == 1
+        # Structured error goes to stderr, but CliRunner merges by default.
+        # The error code should be recognizable either way.
+        combined = result.output + (result.stderr if hasattr(result, "stderr") else "")
+        assert "PROFILE_NOT_FOUND" in combined or "not found" in combined.lower()
+
+
+class TestRelayAdd:
+    def test_add_appends_by_default(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://first.example"]
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "add",
+                "wss://second.example",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "text",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+        reloaded = Profile.load(profile_with_instance)
+        assert reloaded.default_relays == ["wss://first.example", "wss://second.example"]
+
+    def test_add_first_prepends(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://existing.example"]
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "add",
+                "wss://new.example",
+                "--first",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "text",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+        reloaded = Profile.load(profile_with_instance)
+        assert reloaded.default_relays == ["wss://new.example", "wss://existing.example"]
+
+    def test_add_duplicate_is_noop(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://dup.example"]
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "add",
+                "wss://dup.example",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["already_present"] is True
+        assert payload["relays"] == ["wss://dup.example"]
+
+        # Profile unchanged
+        reloaded = Profile.load(profile_with_instance)
+        assert reloaded.default_relays == ["wss://dup.example"]
+
+    def test_add_rejects_non_websocket_scheme(self, profile_with_instance: Path) -> None:
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "add",
+                "https://not-a-relay.example",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 2, result.output
+
+    def test_add_rejects_bare_scheme(self, profile_with_instance: Path) -> None:
+        """wss:// with no host must not persist (Copilot review catch on #213)."""
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "add",
+                "wss://",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 2, result.output
+        reloaded = Profile.load(profile_with_instance)
+        assert "wss://" not in reloaded.default_relays
+
+    def test_add_rejects_internal_whitespace(self, profile_with_instance: Path) -> None:
+        """urlparse accepts 'wss://relay .example' silently; the CLI must not."""
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "add",
+                "wss://relay .example",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 2, result.output
+
+
+class TestRelayRemove:
+    def test_remove_by_url(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://a.example", "wss://b.example", "wss://c.example"]
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "remove",
+                "wss://b.example",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "text",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+
+        reloaded = Profile.load(profile_with_instance)
+        assert reloaded.default_relays == ["wss://a.example", "wss://c.example"]
+
+    def test_remove_by_index(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://a.example", "wss://b.example", "wss://c.example"]
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "remove",
+                "2",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["removed"] == "wss://b.example"
+
+        reloaded = Profile.load(profile_with_instance)
+        assert reloaded.default_relays == ["wss://a.example", "wss://c.example"]
+
+    def test_remove_unknown_url_errors(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://a.example"]
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "remove",
+                "wss://nope.example",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 2, result.output
+
+        # Profile unchanged
+        reloaded = Profile.load(profile_with_instance)
+        assert reloaded.default_relays == ["wss://a.example"]
+
+    def test_remove_index_out_of_range_errors(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://only.example"]
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "remove",
+                "5",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 2, result.output
+
+    def test_remove_last_requires_force(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://only.example"]
+        p.save(profile_with_instance)
+
+        # Without --force: refuses
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "remove",
+                "wss://only.example",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 2, result.output
+        reloaded = Profile.load(profile_with_instance)
+        assert reloaded.default_relays == ["wss://only.example"]
+
+        # With --force: allowed. The CLI response reports an empty list,
+        # but Profile.load() auto-refills from _DEFAULT_RELAYS on next read
+        # (safety net in identity.py), so the disk state effectively resets
+        # to the bootstrap defaults. We assert on the CLI response directly.
+        result = runner.invoke(
+            app,
+            [
+                "relay",
+                "remove",
+                "wss://only.example",
+                "--force",
+                "--profile",
+                str(profile_with_instance),
+                "--format",
+                "json",
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["removed"] == "wss://only.example"
+        assert payload["relays"] == []
