@@ -14,6 +14,7 @@ from rich.console import Console
 from rich.rule import Rule
 
 from aya import paths as _paths
+from aya.credentials import CredentialsReport, check_credentials
 from aya.scheduler import (
     LOCAL_TZ,
     get_active_watches,
@@ -176,6 +177,11 @@ def _gather_status() -> dict[str, Any]:
     checks_ok = sum(1 for c in checks if c.ok)
     checks_total = len(checks)
 
+    # Credential ACK — per-service env var presence for the common
+    # service integrations (GitHub, Atlassian, Datadog, npm, …). No
+    # network calls, no secret reads, just presence checks.
+    credentials = check_credentials()
+
     return {
         "now_local": now_local,
         "ship": ship,
@@ -184,6 +190,7 @@ def _gather_status() -> dict[str, Any]:
         "checks": checks,
         "checks_ok": checks_ok,
         "checks_total": checks_total,
+        "credentials": credentials,
         "unseen": unseen,
         "due": due,
         "upcoming": upcoming,
@@ -206,6 +213,26 @@ def _render_plain(data: dict[str, Any]) -> str:
     else:
         failed = [c for c in checks if not c.ok]
         lines.append(f"Systems {ok}/{total} — failed: {', '.join(c.name for c in failed)}")
+
+    credentials: CredentialsReport = data["credentials"]
+    lit_services = [s.name for s in credentials.services if s.state == "lit"]
+    partial_services = [
+        f"{s.name} (missing {', '.join(s.missing)})"
+        for s in credentials.services
+        if s.state == "partial"
+    ]
+    dark_services = [s.name for s in credentials.services if s.state == "dark"]
+    cred_summary = (
+        f"Credentials {credentials.lit} lit · {credentials.partial} partial · "
+        f"{credentials.dark} dark"
+    )
+    lines.append(cred_summary)
+    if lit_services:
+        lines.append(f"  lit: {', '.join(lit_services)}")
+    if partial_services:
+        lines.append(f"  partial: {'; '.join(partial_services)}")
+    if dark_services:
+        lines.append(f"  dark: {', '.join(dark_services)}")
 
     for a in data["unseen"][:ALERT_DISPLAY_LIMIT]:
         lines.append(f"  alert: {a['source_item_id'][:ID_PREVIEW_LENGTH]}  {a['message'][:60]}")
@@ -237,6 +264,22 @@ def _render_json(data: dict[str, Any]) -> str:
     total = data["checks_total"]
     checks = data["checks"]
 
+    credentials: CredentialsReport = data["credentials"]
+    credentials_payload: dict[str, Any] = {
+        "lit": credentials.lit,
+        "partial": credentials.partial,
+        "dark": credentials.dark,
+        "services": {
+            s.name: {
+                "state": s.state,
+                "required": s.required,
+                "set": s.set_vars,
+                "missing": s.missing,
+            }
+            for s in credentials.services
+        },
+    }
+
     payload: dict[str, Any] = {
         "greeting": _greeting(data["now_local"], data["user"], data["ship"]),
         "time_flavor": _time_flavor(data["now_local"]),
@@ -246,6 +289,7 @@ def _render_json(data: dict[str, Any]) -> str:
             "total": total,
             "checks": [{"name": c.name, "ok": c.ok, "detail": c.detail} for c in checks],
         },
+        "credentials": credentials_payload,
         "alerts": [
             {
                 "id": a.get("id", "")[:ID_PREVIEW_LENGTH],
@@ -289,6 +333,30 @@ def _render_rich(data: dict[str, Any], console: Console) -> None:
         for c in checks:
             if not c.ok:
                 console.print(f"  [red]✗[/red] {c.name}  [dim]{c.detail}[/dim]")
+
+    credentials: CredentialsReport = data["credentials"]
+    total_services = len(credentials.services)
+    if total_services:
+        if credentials.lit == total_services:
+            # Everyone's lit — one-line summary, Ship Mind satisfied.
+            console.print(
+                f"[green]✓[/green] Credentials  "
+                f"[dim]{credentials.lit}/{total_services} services lit[/dim]"
+            )
+        else:
+            console.print(
+                f"[yellow]◐[/yellow] Credentials  "
+                f"[dim]{credentials.lit} lit · {credentials.partial} partial · "
+                f"{credentials.dark} dark[/dim]"
+            )
+            for s in credentials.services:
+                if s.state == "lit":
+                    console.print(f"  [green]✓[/green] {s.name}")
+                elif s.state == "partial":
+                    missing = ", ".join(s.missing)
+                    console.print(f"  [yellow]◐[/yellow] {s.name}  [dim]missing {missing}[/dim]")
+                else:  # dark
+                    console.print(f"  [dim]○ {s.name}  (dark)[/dim]")
 
     next_eval_result = _parse_next_eval(data["next_eval"], now_local)
     if next_eval_result:

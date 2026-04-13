@@ -46,6 +46,8 @@ def _mock_gather_status(monkeypatch):
     """Patch _gather_status so we don't need a real profile on disk."""
     from datetime import UTC, datetime
 
+    from aya.credentials import CredentialsReport
+
     fake_data = {
         "now_local": datetime(2026, 4, 1, 10, 0, tzinfo=UTC),
         "ship": "GSV Test Ship",
@@ -54,6 +56,7 @@ def _mock_gather_status(monkeypatch):
         "checks": [],
         "checks_ok": 0,
         "checks_total": 0,
+        "credentials": CredentialsReport(services=[], lit=0, partial=0, dark=0),
         "unseen": [],
         "due": [],
         "upcoming": [],
