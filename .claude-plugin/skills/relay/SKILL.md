@@ -1,13 +1,14 @@
 ---
 name: relay
 description: >
-  Manage communication between work and home instances via the aya relay.
+  Manage communication between instances and peers via the aya relay.
   Covers checking inbox, reading packets, replying, sending new messages,
   and showing relay status. Invoke when the user says "check the relay",
-  "any packets", "send to home", "ask work", "reply to that", "what did
-  home say", "relay status", or any equivalent. Auto-polls after every
-  send to catch in-flight replies.
-argument-hint: "[check | read <id> | reply <id> | send <peer> <intent> | status]"
+  "any packets", "send to home", "send this to work", "tell Sean",
+  "pack this up", "ask work", "reply to that", "what did home say",
+  "relay status", "anything new?", or any equivalent. Infers intent
+  and recipient from context. Auto-polls after every send.
+argument-hint: "[check | read <id> | reply <id> | send [<peer>] [<intent>] | status]"
 ---
 
 # Relay
@@ -24,14 +25,41 @@ machine that has run `aya init` with a real label.
 
 ## 0. Route intent
 
+### Explicit subcommands (highest priority)
+
+`/relay check`, `/relay send work`, `/relay reply <id>`, `/relay status`
+→ use the verb directly, no inference needed.
+
+### Keyword routing
+
 | User says | Verb |
 |---|---|
-| "check the relay", "any packets", "check now" | 1. Check |
+| "check the relay", "any packets", "check now", "anything new?" | 1. Check |
 | "read that", "show packet", "what did home say" | 2. Read |
-| "reply to that", "answer work" | 3. Reply |
-| "send to home", "ask work about X" | 4. Send |
+| "reply to that", "answer work", "respond to Sean's packet" | 3. Reply |
+| "send to home", "ask work about X", "tell Sean about the design" | 4. Send |
 | "relay status", "is the relay up", "who's paired" | 5. Status |
-| Ambiguous | Run verb 1 (Check), then ask |
+
+### Context inference (when keywords don't match)
+
+| User says | Inferred verb + context |
+|---|---|
+| "pack this up for work" | Send (recipient: work, curation mode) |
+| "I'm done for the day, send this home" | Send (recipient: home, curation mode) |
+| "anything new from Sean?" | Check (filter results by sender) |
+| "what did work say about the design?" | Check → Read (search by intent/content) |
+| Just `/relay` with no context | Status, then ask "What do you need?" |
+
+### Recipient inference (for send/reply)
+
+1. Infer from phrasing — "send to work" → `work`, "tell Sean" → `sean-okeefe`
+2. If ambiguous, show a picker from trusted keys:
+   ```
+   Who should I send this to?
+     1. work
+     2. sean-okeefe
+   ```
+3. Validate with `aya dispatch --dry-run --to <label>`
 
 ---
 
@@ -189,8 +217,50 @@ collapses round-trip latency. Surface anything new in the same response.
 
 ## 4. Send
 
-Fresh dispatch, no thread. The user picks the peer; the skill picks the
-type from the content shape.
+Fresh dispatch, no thread. Recipient is inferred or picked (see §0).
+Content is either provided explicitly or curated from the conversation.
+
+### Step 1 — Determine content source
+
+**Explicit content (skip curation):**
+- `/relay send work --files design.md` → dispatch the file
+- "send Sean this: <quoted text>" → dispatch the quoted text
+- Content piped via heredoc → dispatch as-is
+
+**No explicit content (curation mode):**
+When the user says "pack this up" or "send this to work" without
+specifying what "this" is, review the current conversation and assemble
+a packet.
+
+### Step 2 — Curate (when no explicit content)
+
+Review the conversation for content worth sending. Prioritize:
+
+- **Open decisions** — questions still unresolved, choices being weighed
+- **Action items** — things flagged for follow-up
+- **Context switches** — project state that would be lost without handoff
+- **In-progress notes** — working docs, drafts, research
+
+Filter out:
+- Noise (linter output, large diffs, routine tool calls)
+- Content irrelevant to the recipient (work-only tickets when sending
+  home, personal notes when sending to a coworker)
+- Sensitive credentials
+
+Choose packet type:
+- **Content** (markdown via stdin) — structured markdown, 100-500 words.
+  Use when there's substantive material to carry
+- **Seed** (`--seed --opener`) — opener question + 2-3 sentence context.
+  Use for lightweight "start a conversation about X" or when there's no
+  document-like content. Default when curation produces a short result.
+
+Derive the intent from the content if the user didn't provide one: one
+short sentence, first person, e.g. "Pick up dinner party guest count
+decision" or "Continue reading list research".
+
+**Show draft before dispatch:** "Here's what I'd send — look right?"
+
+### Step 3 — Dispatch
 
 ### Type guide
 
@@ -348,9 +418,9 @@ is a separate thing and doesn't cover relay state.
 
 ## Notes
 
-- `/pack-for-home` is the shortcut for end-of-session handoffs from work
-  to home. This skill handles everything else, including the reverse
-  direction and mid-session exchanges.
+- This skill fully replaces `/pack-for-home`. End-of-session handoffs
+  ("pack this up for work/home") are handled by verb 4 (Send) with
+  content curation. No separate skill needed.
 - Seed packets are lighter and safer for questions; content packets carry
   material. Default to seeds.
 - The relay is asymmetric in practice: home runs hooks/cron-backed
