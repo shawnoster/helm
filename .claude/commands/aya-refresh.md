@@ -22,7 +22,12 @@ uv tool uninstall aya-ai-assist
 uv tool install --from git+https://github.com/shawnoster/aya aya-ai-assist --force
 ```
 
-3. Verify installation:
+3. Re-install hooks (picks up any format changes):
+```bash
+aya schedule install
+```
+
+4. Verify installation:
 ```bash
 which aya && aya status -f json | jq '.systems.ok'
 ```
