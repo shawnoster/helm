@@ -4265,3 +4265,36 @@ class TestMaybeCreateCiWatchRepoParsing:
             _maybe_create_ci_watch()
             mock_add.assert_not_called()
             mock_watches.assert_not_called()
+
+
+# ── send/pack/dispatch help text cross-references ───────────────────────────
+
+
+class TestCommandHelpCrossReferences:
+    """Verify that send, pack, and dispatch help text cross-references each other."""
+
+    def test_send_help_mentions_dispatch(self):
+        result = runner.invoke(app, ["send", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "aya dispatch" in result.output
+
+    def test_send_help_mentions_pack(self):
+        result = runner.invoke(app, ["send", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "aya pack" in result.output
+
+    def test_pack_help_mentions_dispatch(self):
+        result = runner.invoke(app, ["pack", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "aya dispatch" in result.output
+
+    def test_pack_help_mentions_send(self):
+        result = runner.invoke(app, ["pack", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "aya send" in result.output
+
+    def test_dispatch_help_mentions_pack_and_send(self):
+        result = runner.invoke(app, ["dispatch", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "aya pack" in result.output
+        assert "aya send" in result.output

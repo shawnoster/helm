@@ -524,7 +524,11 @@ def pack(
         OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
 ) -> None:
-    """Pack a knowledge packet ready to send."""
+    """Pack a knowledge packet ready to send.
+
+    To pack and send in one step: aya dispatch --to <label> --intent "..."
+    See also: aya send (send a pre-built packet file)
+    """
     if instance is not None and as_ != "default":
         _emit_error(
             ErrorCode.INVALID_ARGUMENT,
@@ -609,7 +613,13 @@ def send(
         OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
 ) -> None:
-    """Send a packet to a Nostr relay."""
+    """Send a packet to a Nostr relay.
+
+    This sends a pre-built packet file. To compose and send in one step:
+      aya dispatch --to <label> --intent "..."
+
+    See also: aya pack (create a packet without sending)
+    """
     logger.debug("send: packet_file=%s, as=%s", packet_file, as_)
     if instance is not None and as_ != "default":
         _emit_error(
@@ -734,7 +744,11 @@ def dispatch(
         OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
 ) -> None:
-    """Pack and send in one step — the natural 'pack for home' flow."""
+    """Pack and send in one step — the natural 'pack for home' flow.
+
+    Combines aya pack + aya send: creates the packet, signs it, and
+    publishes to the relay. This is the command most users want.
+    """
     logger.debug("dispatch: to=%s, intent=%s, as=%s", to, intent, as_)
     if instance is not None and as_ != "default":
         _emit_error(
