@@ -134,7 +134,7 @@ Replace `<LABEL>` with a name for this machine (e.g. `home`, `work`, `laptop`, y
 2. **Creates identity** — generates ed25519 + secp256k1 keypairs
 3. **Pairs instances** — exchanges trust via short-lived relay code
 4. **Installs hooks** — `aya schedule install` wires Claude Code hooks and system crontab automatically
-5. **Loads the plugin** — makes the `/relay` skill available, so the agent can check, read, reply to, and send packets between instances
+5. **Loads the plugin** — makes `/aya` and `/relay` skills available for managing aya and communicating between instances
 
 ---
 
@@ -223,9 +223,10 @@ alias claude='claude --plugin-dir /path/to/aya/.claude-plugin'
 
 This loads aya's bundled skills:
 
-| Skill | What it does |
-| ---- | ---- |
-| `/relay` | Cross-instance packet management — check inbox, read packets, reply with `--in-reply-to` threading, send fresh packets, and show relay status. Wraps `aya inbox`, `aya receive`, `aya show`, and `aya send` with structured body extraction so the agent never has to paste raw packet JSON to the user. Bakes in immediate-poll-on-send to catch in-flight replies during active exchanges. |
+| Skill | Verbs | What it does |
+| ---- | ---- | ---- |
+| `/aya` | setup, pair, status, refresh, watch | Manage aya — identity, pairing, health checks, updates, PR/ticket watches |
+| `/relay` | check, read, reply, send, status | Relay communication — send/receive packets between instances with structured output and auto-polling |
 
 After editing any skill file in the aya repo, run `/reload-plugins` in your session to pick up changes — no reinstall needed.
 
