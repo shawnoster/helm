@@ -2227,11 +2227,13 @@ def _maybe_create_ci_watch() -> None:
     if rc != 0 or not branch or branch in ("main", "master"):
         return
 
-    # Parse owner/repo from remote URL
-    m = re.match(r".*github\.com[:/]([^/]+)/([^/.]+)", remote)
-    if not m:
+    # Parse owner/repo via gh CLI (handles all URL formats including dots in names)
+    rc, name_with_owner = _run_cmd(
+        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"]
+    )
+    if rc != 0 or "/" not in name_with_owner:
         return
-    owner, repo = m.group(1), m.group(2)
+    owner, repo = name_with_owner.split("/", 1)
 
     # Check if PR exists for this branch
     rc, pr_num = _run_cmd(
