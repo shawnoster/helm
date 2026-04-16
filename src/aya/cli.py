@@ -441,7 +441,10 @@ def init(
             f"Nostr:    [dim]{identity.nostr_public_hex[:16]}…[/dim]  "
             "[dim italic](secp256k1 · relay transport)[/dim italic]\n"
             f"Relay:    [cyan]{relay_display}[/cyan]\n\n"
-            "[dim]Share your DID with other instances you want to trust.[/dim]",
+            "[dim]Share your DID with other instances you want to trust.[/dim]\n\n"
+            "[bold]Next steps:[/bold]\n"
+            "  [cyan]aya schedule install[/cyan]    Set up hooks and cron\n"
+            "  [cyan]aya pair --peer <name>[/cyan]  Connect to another instance",
             title="aya — init",
         )
     )
