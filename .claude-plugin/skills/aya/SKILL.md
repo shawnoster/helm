@@ -75,7 +75,7 @@ Full first-run bootstrap: identity, hooks, relay polling, and optional pairing.
 
    ```bash
    aya schedule recurring -m "relay-poll" -c "*/10 * * * *" \
-     -p "Run: aya receive --as {label} --auto-ingest --quiet. If any packets were ingested, surface their content to the user."
+     -p "Run: aya receive --as {label} --auto-ingest --skip-untrusted --quiet. If any packets were ingested, surface their content to the user."
    ```
 
 5. **Set up health break reminder** (optional — ask if the user wants it):
@@ -92,7 +92,7 @@ Full first-run bootstrap: identity, hooks, relay polling, and optional pairing.
    alias claude='claude --plugin-dir /path/to/aya'
    ```
 
-   Adjust the path to wherever aya is cloned. This makes slash commands available globally.
+   Adjust the path to wherever aya is cloned. This makes `/aya` and `/relay` skills available globally.
 
 7. **Offer pairing.** Ask: "Do you want to pair with another machine now?" If yes, hand off to verb 2 (Pair).
 
@@ -102,7 +102,7 @@ Full first-run bootstrap: identity, hooks, relay polling, and optional pairing.
    aya setup complete:
    - Identity: {label} ({DID prefix}...)
    - Hooks: installed (SessionStart, PreToolUse, PostToolUse)
-   - Crontab: */5 aya schedule tick --quiet
+   - Crontab: aya schedule tick --quiet (default: every 5m)
    - Relay poll: every 10 minutes
    - Health break: every 20 minutes (with idle back-off)
    - Plugin: claude alias configured
