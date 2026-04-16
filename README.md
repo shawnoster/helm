@@ -29,6 +29,11 @@ uv sync
 # uv tool install .
 ```
 
+> **Python 3.14 note:** coincurve 21.0.0 does not ship a cp314 wheel, and
+> building from the coincurve 21.0.0 sdist fails with cffi 2.0.0. Use
+> Python 3.12 or 3.13 until this is resolved upstream. For example:
+> `uvx --python 3.12 --from git+https://github.com/shawnoster/aya aya`
+
 ## Quick start
 
 ```bash
@@ -41,7 +46,7 @@ aya pair --peer bob          # on Alice's machine — shows a code
 aya pair --code WORD-WORD-0000 --peer alice   # on Bob's machine
 
 # Send a packet
-aya dispatch --to bob --intent "build notes" --files notes.md
+aya send --to bob --intent "build notes" --files notes.md
 
 # Check inbox
 aya inbox
@@ -220,7 +225,7 @@ This loads aya's bundled skills:
 
 | Skill | What it does |
 | ---- | ---- |
-| `/relay` | Cross-instance packet management — check inbox, read packets, reply with `--in-reply-to` threading, send fresh packets, and show relay status. Wraps `aya inbox`, `aya receive`, `aya show`, and `aya dispatch` with structured body extraction so the agent never has to paste raw packet JSON to the user. Bakes in immediate-poll-on-send to catch in-flight replies during active exchanges. |
+| `/relay` | Cross-instance packet management — check inbox, read packets, reply with `--in-reply-to` threading, send fresh packets, and show relay status. Wraps `aya inbox`, `aya receive`, `aya show`, and `aya send` with structured body extraction so the agent never has to paste raw packet JSON to the user. Bakes in immediate-poll-on-send to catch in-flight replies during active exchanges. |
 
 After editing any skill file in the aya repo, run `/reload-plugins` in your session to pick up changes — no reinstall needed.
 
@@ -236,8 +241,8 @@ After editing any skill file in the aya repo, run `/reload-plugins` in your sess
 | `aya pair` | Pair two instances via short-lived relay code |
 | `aya trust` | Manually trust a DID |
 | `aya pack` | Create a signed knowledge packet |
-| `aya send` | Publish a packet to a Nostr relay |
-| `aya dispatch` | Pack + send in one step (no temp file) |
+| `aya send` | Pack + send in one step (no temp file) |
+| `aya send-raw` | Publish a pre-built packet file to a Nostr relay |
 | `aya inbox` | List pending packets |
 | `aya receive` | Review and ingest packets |
 | `aya status` | Workspace readiness check — systems, schedule, focus |

@@ -605,11 +605,11 @@ class TestScheduleDismiss:
         assert result.exit_code != 0
 
 
-# ── dispatch ──────────────────────────────────────────────────────────────────
+# ── send ──────────────────────────────────────────────────────────────────────
 
 
-class TestDispatch:
-    def test_dispatch_sends_stdin_content(
+class TestSend:
+    def test_send_sends_stdin_content(
         self, profile_with_trusted: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         mock_publish = AsyncMock(return_value="a" * 64)
@@ -618,7 +618,7 @@ class TestDispatch:
             result = runner.invoke(
                 app,
                 [
-                    "dispatch",
+                    "send",
                     "--to",
                     "home",
                     "--intent",
@@ -631,20 +631,18 @@ class TestDispatch:
                 input="Today I worked on useAlgolia error handling.\n",
             )
         assert result.exit_code == 0, result.output
-        assert "Dispatched" in result.output
+        assert "Sent" in result.output
         assert "End of day notes" in result.output
         mock_publish.assert_awaited_once()
 
-    def test_dispatch_seed(
-        self, profile_with_trusted: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_send_seed(self, profile_with_trusted: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         mock_publish = AsyncMock(return_value="b" * 64)
         with patch("aya.cli.RelayClient") as mock_client_cls:
             mock_client_cls.return_value.publish = mock_publish
             result = runner.invoke(
                 app,
                 [
-                    "dispatch",
+                    "send",
                     "--to",
                     "home",
                     "--intent",
@@ -659,14 +657,14 @@ class TestDispatch:
                 ],
             )
         assert result.exit_code == 0, result.output
-        assert "Dispatched" in result.output
+        assert "Sent" in result.output
         mock_publish.assert_awaited_once()
 
-    def test_dispatch_seed_requires_opener(self, profile_with_trusted: Path) -> None:
+    def test_send_seed_requires_opener(self, profile_with_trusted: Path) -> None:
         result = runner.invoke(
             app,
             [
-                "dispatch",
+                "send",
                 "--to",
                 "home",
                 "--intent",
@@ -678,11 +676,11 @@ class TestDispatch:
         )
         assert result.exit_code != 0
 
-    def test_dispatch_unknown_recipient_fails(self, profile_with_instance: Path) -> None:
+    def test_send_unknown_recipient_fails(self, profile_with_instance: Path) -> None:
         result = runner.invoke(
             app,
             [
-                "dispatch",
+                "send",
                 "--to",
                 "nobody",
                 "--intent",
@@ -694,9 +692,7 @@ class TestDispatch:
         )
         assert result.exit_code != 0
 
-    def test_dispatch_default_resolves_to_single_trusted_key(
-        self, profile_with_trusted: Path
-    ) -> None:
+    def test_send_default_resolves_to_single_trusted_key(self, profile_with_trusted: Path) -> None:
         """'--to default' should succeed when exactly one trusted key exists."""
         mock_publish = AsyncMock(return_value="b" * 64)
         with patch("aya.cli.RelayClient") as mock_client_cls:
@@ -704,7 +700,7 @@ class TestDispatch:
             result = runner.invoke(
                 app,
                 [
-                    "dispatch",
+                    "send",
                     "--to",
                     "default",
                     "--intent",
@@ -718,14 +714,14 @@ class TestDispatch:
         assert "Unknown recipient" not in (result.output or "")
         mock_publish.assert_awaited_once()
 
-    def test_dispatch_unknown_recipient_lists_available(
+    def test_send_unknown_recipient_lists_available(
         self, profile_with_multiple_trusted: Path
     ) -> None:
         """Error for unknown --to should list available recipient labels."""
         result = runner.invoke(
             app,
             [
-                "dispatch",
+                "send",
                 "--to",
                 "nobody",
                 "--intent",
@@ -739,8 +735,8 @@ class TestDispatch:
         assert "home" in result.output
         assert "laptop" in result.output
 
-    def test_dispatch_missing_instance_fails(self, profile_with_multiple_instances: Path) -> None:
-        """When multiple instances exist and requested one is absent, dispatch must fail.
+    def test_send_missing_instance_fails(self, profile_with_multiple_instances: Path) -> None:
+        """When multiple instances exist and requested one is absent, send must fail.
 
         Uses a multi-instance profile so the smart single-instance fallback doesn't
         silently succeed — the non-existent name must produce a non-zero exit.
@@ -755,7 +751,7 @@ class TestDispatch:
         result = runner.invoke(
             app,
             [
-                "dispatch",
+                "send",
                 "--to",
                 "home",
                 "--intent",
@@ -769,7 +765,7 @@ class TestDispatch:
         )
         assert result.exit_code != 0
 
-    def test_dispatch_missing_nostr_pubkey_fails(self, profile_with_instance: Path) -> None:
+    def test_send_missing_nostr_pubkey_fails(self, profile_with_instance: Path) -> None:
         """Trusted key without a Nostr pubkey should exit with a clear message."""
         p = Profile.load(profile_with_instance)
         home = Identity.generate("home")
@@ -779,7 +775,7 @@ class TestDispatch:
         result = runner.invoke(
             app,
             [
-                "dispatch",
+                "send",
                 "--to",
                 "home",
                 "--intent",
@@ -792,14 +788,14 @@ class TestDispatch:
         assert result.exit_code != 0
         assert "Nostr pubkey" in result.output
 
-    def test_dispatch_relay_error_exits_cleanly(self, profile_with_trusted: Path) -> None:
+    def test_send_relay_error_exits_cleanly(self, profile_with_trusted: Path) -> None:
         """Relay connection failure should print a friendly message, not a traceback."""
         with patch("aya.cli.RelayClient") as mock_client_cls:
             mock_client_cls.return_value.publish = AsyncMock(side_effect=Exception("conn refused"))
             result = runner.invoke(
                 app,
                 [
-                    "dispatch",
+                    "send",
                     "--to",
                     "home",
                     "--intent",
@@ -810,9 +806,9 @@ class TestDispatch:
                 input="data\n",
             )
         assert result.exit_code != 0
-        assert "Dispatch failed" in result.output
+        assert "Send failed" in result.output
 
-    def test_dispatch_in_reply_to(self, profile_with_trusted: Path) -> None:
+    def test_send_in_reply_to(self, profile_with_trusted: Path) -> None:
         """--in-reply-to sets in_reply_to on the published packet."""
         captured_packet = None
 
@@ -826,7 +822,7 @@ class TestDispatch:
             result = runner.invoke(
                 app,
                 [
-                    "dispatch",
+                    "send",
                     "--to",
                     "home",
                     "--intent",
@@ -844,7 +840,7 @@ class TestDispatch:
         assert captured_packet is not None
         assert captured_packet.in_reply_to == "01JABC1234PARENT00000"
 
-    def test_dispatch_in_reply_to_json(self, profile_with_trusted: Path) -> None:
+    def test_send_in_reply_to_json(self, profile_with_trusted: Path) -> None:
         """--in-reply-to with --format json includes in_reply_to in output."""
 
         async def _capture_publish(signed, *a, **kw):
@@ -855,7 +851,7 @@ class TestDispatch:
             result = runner.invoke(
                 app,
                 [
-                    "dispatch",
+                    "send",
                     "--to",
                     "home",
                     "--intent",
@@ -2106,8 +2102,8 @@ class TestDeprecationWarnings:
         assert "deprecated" in stderr
         assert "--as" in stderr
 
-    def test_send_instance_warns(self, profile_with_trusted: Path, tmp_path: Path) -> None:
-        """--instance on send emits a deprecation warning to stderr."""
+    def test_send_raw_instance_warns(self, profile_with_trusted: Path, tmp_path: Path) -> None:
+        """--instance on send-raw emits a deprecation warning to stderr."""
         # Create a packet file to send
         p = Profile.load(profile_with_trusted)
         local = p.instances["default"]
@@ -2126,7 +2122,7 @@ class TestDeprecationWarnings:
             result = runner.invoke(
                 app,
                 [
-                    "send",
+                    "send-raw",
                     str(packet_file),
                     "--instance",
                     "default",
@@ -2139,15 +2135,15 @@ class TestDeprecationWarnings:
         assert "deprecated" in stderr
         assert "--as" in stderr
 
-    def test_dispatch_instance_warns(self, profile_with_trusted: Path) -> None:
-        """--instance on dispatch emits a deprecation warning to stderr."""
+    def test_send_instance_warns(self, profile_with_trusted: Path) -> None:
+        """--instance on send-raw emits a deprecation warning to stderr."""
         mock_publish = AsyncMock(return_value="b" * 64)
         with patch("aya.cli.RelayClient") as mock_cls:
             mock_cls.return_value.publish = mock_publish
             result = runner.invoke(
                 app,
                 [
-                    "dispatch",
+                    "send",
                     "--to",
                     "home",
                     "--intent",
@@ -2449,7 +2445,7 @@ class TestAck:
 class TestDryRun:
     """Tests for --dry-run flag across relay-publishing and state-mutating commands."""
 
-    def test_send_dry_run(self, profile_with_trusted: Path, tmp_path: Path) -> None:
+    def test_send_raw_dry_run(self, profile_with_trusted: Path, tmp_path: Path) -> None:
         """--dry-run prints packet JSON and does not call publish."""
         p = Profile.load(profile_with_trusted)
         local = p.instances["default"]
@@ -2468,7 +2464,7 @@ class TestDryRun:
             result = runner.invoke(
                 app,
                 [
-                    "send",
+                    "send-raw",
                     str(packet_file),
                     "--dry-run",
                     "--profile",
@@ -2481,7 +2477,7 @@ class TestDryRun:
         assert output_data["intent"] == "dry run test"
         mock_publish.assert_not_awaited()
 
-    def test_dispatch_dry_run(
+    def test_send_dry_run(
         self, profile_with_trusted: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """--dry-run prints signed packet JSON and does not call publish."""
@@ -2491,20 +2487,20 @@ class TestDryRun:
             result = runner.invoke(
                 app,
                 [
-                    "dispatch",
+                    "send",
                     "--to",
                     "home",
                     "--intent",
-                    "dry dispatch test",
+                    "dry send test",
                     "--dry-run",
                     "--profile",
                     str(profile_with_trusted),
                 ],
-                input="Some content for dispatch.\n",
+                input="Some content for send.\n",
             )
         assert result.exit_code == 0, result.output
         output_data = json.loads(result.output)
-        assert output_data["intent"] == "dry dispatch test"
+        assert output_data["intent"] == "dry send test"
         assert "id" in output_data
         mock_publish.assert_not_awaited()
 
@@ -2799,8 +2795,8 @@ class TestJsonFormat:
         assert data["label"] == "home"
         assert data["nostr_pubkey"] is None
 
-    def test_send_json_format(self, profile_with_trusted: Path, tmp_path: Path) -> None:
-        """send --format json outputs JSON with packet_id and event_id."""
+    def test_send_raw_json_format(self, profile_with_trusted: Path, tmp_path: Path) -> None:
+        """send-raw --format json outputs JSON with packet_id and event_id."""
         p = Profile.load(profile_with_trusted)
         local = p.instances["default"]
         home_key = p.trusted_keys["home"]
@@ -2819,7 +2815,7 @@ class TestJsonFormat:
             result = runner.invoke(
                 app,
                 [
-                    "send",
+                    "send-raw",
                     str(packet_file),
                     "--profile",
                     str(profile_with_trusted),
@@ -2969,12 +2965,12 @@ class TestPacketPersistence:
 
 
 class TestIdempotency:
-    """Tests for --idempotency-key dedup on send, dispatch, and ack."""
+    """Tests for --idempotency-key dedup on send-raw, send, and ack."""
 
-    def test_send_idempotency_key_dedup(
+    def test_send_raw_idempotency_key_dedup(
         self, profile_with_trusted: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Second send with same key returns cached result without calling publish."""
+        """Second send-raw with same key returns cached result without calling publish."""
         monkeypatch.setenv("AYA_HOME", str(tmp_path / "aya_home"))
         monkeypatch.setenv("AYA_FORMAT", "json")
 
@@ -3004,7 +3000,7 @@ class TestIdempotency:
             result1 = runner.invoke(
                 app,
                 [
-                    "send",
+                    "send-raw",
                     str(packet_file),
                     "--idempotency-key",
                     "key-1",
@@ -3024,7 +3020,7 @@ class TestIdempotency:
             result2 = runner.invoke(
                 app,
                 [
-                    "send",
+                    "send-raw",
                     str(packet_file),
                     "--idempotency-key",
                     "key-1",
@@ -3038,7 +3034,7 @@ class TestIdempotency:
         assert data2["event_id"] == "e" * 64
         mock_publish2.assert_not_awaited()
 
-    def test_send_different_key_sends(
+    def test_send_raw_different_key_sends(
         self, profile_with_trusted: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """Different idempotency keys both trigger publish."""
@@ -3070,7 +3066,7 @@ class TestIdempotency:
                 result = runner.invoke(
                     app,
                     [
-                        "send",
+                        "send-raw",
                         str(packet_file),
                         "--idempotency-key",
                         key_name,
@@ -3081,10 +3077,10 @@ class TestIdempotency:
             assert result.exit_code == 0, result.output
             mock_publish.assert_awaited_once()
 
-    def test_dispatch_idempotency_key(
+    def test_send_idempotency_key(
         self, profile_with_trusted: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Dispatch with --idempotency-key dedup works the same as send."""
+        """Send with --idempotency-key dedup works the same as send-raw."""
         monkeypatch.setenv("AYA_HOME", str(tmp_path / "aya_home"))
         monkeypatch.setenv("AYA_FORMAT", "json")
 
@@ -3100,41 +3096,41 @@ class TestIdempotency:
             result1 = runner.invoke(
                 app,
                 [
-                    "dispatch",
+                    "send",
                     "--to",
                     "home",
                     "--intent",
-                    "test dispatch",
+                    "test send",
                     "--idempotency-key",
-                    "dispatch-key-1",
+                    "send-key-1",
                     "--profile",
                     str(profile_with_trusted),
                 ],
-                input="dispatch content\n",
+                input="send content\n",
             )
         assert result1.exit_code == 0, result1.output
         data1 = json.loads(result1.output)
         assert "cached" not in data1
         mock_publish.assert_awaited_once()
 
-        # Second dispatch with same key — cached
+        # Second send with same key — cached
         mock_publish2 = AsyncMock(return_value="e" * 64)
         with patch("aya.cli.RelayClient") as mock_cls2:
             mock_cls2.return_value.publish = mock_publish2
             result2 = runner.invoke(
                 app,
                 [
-                    "dispatch",
+                    "send",
                     "--to",
                     "home",
                     "--intent",
-                    "test dispatch",
+                    "test send",
                     "--idempotency-key",
-                    "dispatch-key-1",
+                    "send-key-1",
                     "--profile",
                     str(profile_with_trusted),
                 ],
-                input="dispatch content\n",
+                input="send content\n",
             )
         assert result2.exit_code == 0, result2.output
         data2 = json.loads(result2.output)
@@ -3185,7 +3181,7 @@ class TestIdempotency:
             result = runner.invoke(
                 app,
                 [
-                    "send",
+                    "send-raw",
                     str(packet_file),
                     "--idempotency-key",
                     "expired-key",
@@ -3198,10 +3194,10 @@ class TestIdempotency:
         assert "cached" not in data  # should not be cached — expired
         mock_publish.assert_awaited_once()
 
-    def test_send_without_key_always_sends(
+    def test_send_raw_without_key_always_sends(
         self, profile_with_trusted: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Without --idempotency-key, every send calls publish."""
+        """Without --idempotency-key, every send-raw calls publish."""
         monkeypatch.setenv("AYA_HOME", str(tmp_path / "aya_home"))
         monkeypatch.setenv("AYA_FORMAT", "json")
 
@@ -3230,7 +3226,7 @@ class TestIdempotency:
                 result = runner.invoke(
                     app,
                     [
-                        "send",
+                        "send-raw",
                         str(packet_file),
                         "--profile",
                         str(profile_with_trusted),
@@ -3710,7 +3706,7 @@ class TestSendSignatureValidation:
             mock_cls.return_value.publish = fake_publish
             result = runner.invoke(
                 app,
-                ["send", str(packet_file), "--profile", str(profile_with_trusted)],
+                ["send-raw", str(packet_file), "--profile", str(profile_with_trusted)],
             )
 
         assert result.exit_code == 0, result.output
@@ -3747,7 +3743,7 @@ class TestSendSignatureValidation:
             mock_cls.return_value.publish = fake_publish
             result = runner.invoke(
                 app,
-                ["send", str(packet_file), "--profile", str(profile_with_trusted)],
+                ["send-raw", str(packet_file), "--profile", str(profile_with_trusted)],
             )
 
         assert result.exit_code == 0, result.output
@@ -3783,7 +3779,7 @@ class TestSendSignatureValidation:
             result = runner.invoke(
                 app,
                 [
-                    "send",
+                    "send-raw",
                     str(packet_file),
                     "--profile",
                     str(profile_with_trusted),
@@ -3823,7 +3819,7 @@ class TestSendSignatureValidation:
             mock_cls.return_value.publish = fake_publish
             result = runner.invoke(
                 app,
-                ["send", str(packet_file), "--profile", str(profile_with_trusted)],
+                ["send-raw", str(packet_file), "--profile", str(profile_with_trusted)],
             )
 
         assert result.exit_code == 0, result.output
@@ -3833,7 +3829,7 @@ class TestSendSignatureValidation:
     def test_resign_surfaces_console_notice_in_text_mode(
         self, profile_with_trusted: Path, tmp_path: Path
     ) -> None:
-        """When aya send re-signs in interactive/text mode, the user
+        """When aya send-raw re-signs in interactive/text mode, the user
         should see a visible notice. Silent mutation is surprising."""
         p = Profile.load(profile_with_trusted)
         local = p.instances["default"]
@@ -3856,7 +3852,7 @@ class TestSendSignatureValidation:
             result = runner.invoke(
                 app,
                 [
-                    "send",
+                    "send-raw",
                     str(packet_file),
                     "--profile",
                     str(profile_with_trusted),
@@ -4170,6 +4166,85 @@ class TestRelayRemove:
         assert payload["relays"] == []
 
 
+class TestRelayStatus:
+    def test_status_text_shows_instance_and_peers(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://relay.damus.io", "wss://nos.lol"]
+        p.trusted_keys["home"] = TrustedKey(did="did:key:test123", label="home", nostr_pubkey=None)
+        p.last_checked = {"wss://relay.damus.io": "2026-04-16T12:00:00Z"}
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            ["relay", "status", "--profile", str(profile_with_instance), "--format", "text"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Instance:" in result.output
+        assert "default" in result.output
+        assert "Trusted peers:" in result.output
+        assert "home" in result.output
+        assert "wss://relay.damus.io" in result.output
+        assert "Last poll:" in result.output
+        assert "2026-04-16T12:00:00Z" in result.output
+
+    def test_status_json_shape(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://relay.damus.io"]
+        p.trusted_keys["home"] = TrustedKey(did="did:key:test456", label="home", nostr_pubkey=None)
+        p.last_checked = {"wss://relay.damus.io": "2026-04-16T12:00:00Z"}
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            ["relay", "status", "--profile", str(profile_with_instance), "--format", "json"],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["instance"] == "default"
+        assert payload["trusted_peers"] == ["home"]
+        assert payload["relays"] == ["wss://relay.damus.io"]
+        assert payload["last_checked"] == {"wss://relay.damus.io": "2026-04-16T12:00:00Z"}
+
+    def test_status_with_named_instance(self, profile_path: Path) -> None:
+        profile = Profile(alias="Ace", ship_mind_name="", user_name="Shawn")
+        profile.instances["work"] = Identity.generate("work")
+        profile.default_relays = ["wss://relay.example"]
+        profile.save(profile_path)
+
+        result = runner.invoke(
+            app,
+            ["relay", "status", "--profile", str(profile_path), "--as", "work", "--format", "text"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "work" in result.output
+        assert "wss://relay.example" in result.output
+
+    def test_status_with_unknown_instance_errors(self, profile_path: Path) -> None:
+        profile = Profile(alias="Ace", ship_mind_name="", user_name="Shawn")
+        profile.instances["work"] = Identity.generate("work")
+        profile.instances["home"] = Identity.generate("home")
+        profile.save(profile_path)
+
+        result = runner.invoke(
+            app,
+            ["relay", "status", "--profile", str(profile_path), "--as", "nope", "--format", "text"],
+        )
+        assert result.exit_code != 0
+
+    def test_status_text_no_peers_no_poll(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://relay.damus.io"]
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            ["relay", "status", "--profile", str(profile_with_instance), "--format", "text"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "(none)" in result.output
+        assert "(never)" in result.output
+
+
 # ── _maybe_create_ci_watch gh repo view parsing ─────────────────────────────
 
 
@@ -4267,34 +4342,34 @@ class TestMaybeCreateCiWatchRepoParsing:
             mock_watches.assert_not_called()
 
 
-# ── send/pack/dispatch help text cross-references ───────────────────────────
+# ── send/send-raw/pack help text cross-references ───────────────────────────
 
 
 class TestCommandHelpCrossReferences:
-    """Verify that send, pack, and dispatch help text cross-references each other."""
+    """Verify that send, send-raw, and pack help text cross-references each other."""
 
-    def test_send_help_mentions_dispatch(self):
-        result = runner.invoke(app, ["send", "--help"])
+    def test_send_raw_help_mentions_send(self):
+        result = runner.invoke(app, ["send-raw", "--help"])
         assert result.exit_code == 0, result.output
-        assert "aya dispatch" in result.output
+        assert "aya send" in result.output
 
-    def test_send_help_mentions_pack(self):
-        result = runner.invoke(app, ["send", "--help"])
+    def test_send_raw_help_mentions_pack(self):
+        result = runner.invoke(app, ["send-raw", "--help"])
         assert result.exit_code == 0, result.output
         assert "aya pack" in result.output
-
-    def test_pack_help_mentions_dispatch(self):
-        result = runner.invoke(app, ["pack", "--help"])
-        assert result.exit_code == 0, result.output
-        assert "aya dispatch" in result.output
 
     def test_pack_help_mentions_send(self):
         result = runner.invoke(app, ["pack", "--help"])
         assert result.exit_code == 0, result.output
         assert "aya send" in result.output
 
-    def test_dispatch_help_mentions_pack_and_send(self):
-        result = runner.invoke(app, ["dispatch", "--help"])
+    def test_pack_help_mentions_send_raw(self):
+        result = runner.invoke(app, ["pack", "--help"])
+        assert result.exit_code == 0, result.output
+        assert "aya send-raw" in result.output
+
+    def test_send_help_mentions_pack_and_send_raw(self):
+        result = runner.invoke(app, ["send", "--help"])
         assert result.exit_code == 0, result.output
         assert "aya pack" in result.output
-        assert "aya send" in result.output
+        assert "aya send-raw" in result.output

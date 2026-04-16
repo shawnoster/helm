@@ -38,16 +38,16 @@ aya schedule snooze <id-prefix> --until "in 1 hour"
 
 ```bash
 # Send context to another machine (encrypted by default on public relays)
-aya dispatch --as alice --to bob \
+aya send --as alice --to bob \
   --intent "context sync" --files path/to/file.md
 
 # Send a conversation seed (request for research/action)
-aya dispatch --as alice --to bob --seed \
+aya send --as alice --to bob --seed \
   --intent "investigate caching" \
   --opener "Can you trace the auth flow and find where sessions drop?"
 
 # Send plaintext (debug or private relay only)
-aya dispatch --as alice --to bob --no-encrypt --intent "test"
+aya send --as alice --to bob --no-encrypt --intent "test"
 
 # Check inbox
 aya inbox --as alice
@@ -105,7 +105,7 @@ Available slash commands (work in any project):
 
 | Command | What it does |
 |---------|--------------|
-| `/aya-send` | Pack and dispatch a packet to another machine |
+| `/aya-send` | Pack and send a packet to another machine |
 | `/aya-triage-packets` | Receive and route incoming packets |
 | `/aya-pair` | Guided pairing between two instances |
 | `/aya-setup` | First-run bootstrap (identity, hooks, polling) |
@@ -192,7 +192,7 @@ aya schedule watch github-pr owner/repo#456 -m "PR review" --remove-when merged_
 
 **Sending context to another machine:**
 ```bash
-aya dispatch --as alice --to bob --seed \
+aya send --as alice --to bob --seed \
   --intent "research request" \
   --opener "What logging do we have for the payment flow?"
 ```

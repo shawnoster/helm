@@ -161,7 +161,7 @@ app.add_typer(config_app, name="config")
 
 relay_app = typer.Typer(
     name="relay",
-    help="Manage default Nostr relays used by send/receive/dispatch.",
+    help="Manage default Nostr relays used by send/send-raw/receive.",
     no_args_is_help=True,
 )
 app.add_typer(relay_app, name="relay")
@@ -184,7 +184,7 @@ class ErrorCode:
     PAIR_FAILED = "PAIR_FAILED"
     INVALID_ARGUMENT = "INVALID_ARGUMENT"
     AMBIGUOUS_PREFIX = "AMBIGUOUS_PREFIX"
-    DISPATCH_FAILED = "DISPATCH_FAILED"
+    SEND_FAILED = "SEND_FAILED"
     PAIR_TIMEOUT = "PAIR_TIMEOUT"
 
 
@@ -441,7 +441,10 @@ def init(
             f"Nostr:    [dim]{identity.nostr_public_hex[:16]}…[/dim]  "
             "[dim italic](secp256k1 · relay transport)[/dim italic]\n"
             f"Relay:    [cyan]{relay_display}[/cyan]\n\n"
-            "[dim]Share your DID with other instances you want to trust.[/dim]",
+            "[dim]Share your DID with other instances you want to trust.[/dim]\n\n"
+            "[bold]Next steps:[/bold]\n"
+            "  [cyan]aya schedule install[/cyan]    Set up hooks and cron\n"
+            "  [cyan]aya pair --peer <name>[/cyan]  Connect to another instance",
             title="aya — init",
         )
     )
@@ -526,8 +529,8 @@ def pack(
 ) -> None:
     """Pack a knowledge packet ready to send.
 
-    To pack and send in one step: aya dispatch --to <label> --intent "..."
-    See also: aya send (send a pre-built packet file)
+    To pack and send in one step: aya send --to <label> --intent "..."
+    See also: aya send-raw (send a pre-built packet file)
     """
     if instance is not None and as_ != "default":
         _emit_error(
@@ -590,11 +593,11 @@ def pack(
         console.print(f"[green]✓[/green] Packet written to [cyan]{out}[/cyan]")
 
 
-# ── send ──────────────────────────────────────────────────────────────────────
+# ── send-raw ──────────────────────────────────────────────────────────────────
 
 
-@app.command()
-def send(
+@app.command("send-raw")
+def send_raw(
     packet_file: Path = typer.Argument(help="Packet JSON file to send"),
     relay: str = typer.Option(None, help="Relay URL (overrides profile default)"),
     as_: str = typer.Option("default", "--as", help="Local identity to act as"),
@@ -613,14 +616,14 @@ def send(
         OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
     ),
 ) -> None:
-    """Send a packet to a Nostr relay.
+    """Send a pre-built packet file to a Nostr relay.
 
     This sends a pre-built packet file. To compose and send in one step:
-      aya dispatch --to <label> --intent "..."
+      aya send --to <label> --intent "..."
 
     See also: aya pack (create a packet without sending)
     """
-    logger.debug("send: packet_file=%s, as=%s", packet_file, as_)
+    logger.debug("send-raw: packet_file=%s, as=%s", packet_file, as_)
     if instance is not None and as_ != "default":
         _emit_error(
             ErrorCode.INVALID_ARGUMENT,
@@ -709,11 +712,11 @@ def send(
     )
 
 
-# ── dispatch ──────────────────────────────────────────────────────────────────
+# ── send ──────────────────────────────────────────────────────────────────────
 
 
-@app.command()
-def dispatch(
+@app.command("send")
+def send_cmd(
     to: str = typer.Option(..., help="Recipient label (home) or DID"),
     intent: str = typer.Option(..., help="What is this packet and why"),
     files: list[Path] = typer.Option([], help="Files to include"),
@@ -746,10 +749,10 @@ def dispatch(
 ) -> None:
     """Pack and send in one step — the natural 'pack for home' flow.
 
-    Combines aya pack + aya send: creates the packet, signs it, and
+    Combines aya pack + aya send-raw: creates the packet, signs it, and
     publishes to the relay. This is the command most users want.
     """
-    logger.debug("dispatch: to=%s, intent=%s, as=%s", to, intent, as_)
+    logger.debug("send: to=%s, intent=%s, as=%s", to, intent, as_)
     if instance is not None and as_ != "default":
         _emit_error(
             ErrorCode.INVALID_ARGUMENT,
@@ -839,10 +842,10 @@ def dispatch(
         try:
             event_id = await client.publish(signed, recipient_nostr_pub, encrypt=not no_encrypt)
         except Exception:
-            logger.exception("Relay publish failed during dispatch")
+            logger.exception("Relay publish failed during send")
             _emit_error(
-                ErrorCode.DISPATCH_FAILED,
-                "Dispatch failed — event could not be published to relay(s).",
+                ErrorCode.SEND_FAILED,
+                "Send failed — event could not be published to relay(s).",
                 {"relay": relay_urls[0] if relay_urls else None},
             )
 
@@ -867,13 +870,13 @@ def dispatch(
 
         console.print(
             Panel.fit(
-                f"[bold green]✓ Dispatched[/bold green]\n\n"
+                f"[bold green]✓ Sent[/bold green]\n\n"
                 f"Intent:  [cyan]{signed.intent}[/cyan]\n"
                 f"Packet:  [dim]{signed.id[:8]}[/dim]\n"
                 f"Event:   [dim]{event_id[:8]}[/dim]\n"
                 f"Relay:   [dim]{relay_display}[/dim]\n"
                 f"To:      [dim]{to_label}[/dim]",
-                title="aya — dispatch",
+                title="aya — send",
             )
         )
 
@@ -3060,6 +3063,55 @@ def relay_remove(
             "restored on the next profile load.[/yellow]"
         )
     console.print(f"[dim]Saved to {profile}[/dim]")
+
+
+@relay_app.command("status")
+def relay_status(
+    as_: str = typer.Option("default", "--as", help="Local identity to act as"),
+    profile: Path = typer.Option(DEFAULT_PROFILE, help="Path to profile.json"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
+) -> None:
+    """Relay health check: identity, trusted peers, relays, last poll."""
+    format_ = resolve_format(format_)
+    p = _load_profile_for_relay(profile)
+
+    # Resolve and validate the requested instance
+    _resolve_instance(p, as_)
+    # Derive display label: use as_ if explicit, otherwise the single registered instance
+    instance_label = as_ if as_ != "default" else next(iter(p.instances.keys()), "default")
+
+    # Trusted peers
+    trusted_peers = [v.label for v in p.trusted_keys.values() if v.label]
+
+    # Relay URLs
+    relays = list(p.default_relays)
+
+    # Last poll per relay
+    last_checked: dict[str, str] = {}
+    if p.last_checked:
+        last_checked = {url: ts for url, ts in p.last_checked.items() if url in relays}
+
+    if format_ == OutputFormat.JSON:
+        _output_json(
+            {
+                "instance": instance_label,
+                "trusted_peers": trusted_peers,
+                "relays": relays,
+                "last_checked": last_checked,
+            }
+        )
+        return
+
+    console.print(f"Instance:       {instance_label}")
+    console.print("Trusted peers:  " + (", ".join(trusted_peers) if trusted_peers else "(none)"))
+    console.print("Relays:         " + (", ".join(relays) if relays else "(none)"))
+    if last_checked:
+        for url, ts in last_checked.items():
+            console.print(f"Last poll:      {url} → {ts}")
+    else:
+        console.print("Last poll:      (never)")
 
 
 # ── Clipboard helper ─────────────────────────────────────────────────────────

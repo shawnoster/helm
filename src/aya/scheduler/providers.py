@@ -37,6 +37,8 @@ def _get_jira_credentials() -> tuple[str, str, str]:
 
 # ── watch providers ──────────────────────────────────────────────────────────
 
+_gh_missing_warned: bool = False
+
 
 def _run_gh(args: list[str], timeout: int = 15) -> dict[str, Any] | list[Any] | None:
     """Run gh CLI and parse JSON output."""
@@ -51,8 +53,17 @@ def _run_gh(args: list[str], timeout: int = 15) -> dict[str, Any] | list[Any] | 
         if result.returncode != 0:
             return None
         return json.loads(result.stdout) if result.stdout.strip() else None
-    except (subprocess.TimeoutExpired, json.JSONDecodeError, FileNotFoundError) as e:
-        logging.debug("gh command failed: %s", e)
+    except FileNotFoundError:
+        global _gh_missing_warned  # noqa: PLW0603
+        if not _gh_missing_warned:
+            logger.warning(
+                "GitHub CLI ('gh') not installed — GitHub watch features disabled. "
+                "Install: https://cli.github.com/"
+            )
+            _gh_missing_warned = True
+        return None
+    except (subprocess.TimeoutExpired, json.JSONDecodeError) as e:
+        logger.debug("gh command failed: %s", e)
         return None
 
 

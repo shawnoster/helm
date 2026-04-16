@@ -59,7 +59,7 @@ machine that has run `aya init` with a real label.
      1. work
      2. sean-okeefe
    ```
-3. Validate with `printf 'validate' | aya dispatch --dry-run --as <local-label> --to <label> --intent validate`
+3. Validate with `printf 'validate' | aya send --dry-run --as <local-label> --to <label> --intent validate`
 
 ---
 
@@ -96,7 +96,7 @@ grep -E "verification failed|InvalidSignature" /tmp/aya-recv.err
 
 If a warning line appears, tell the user: *"packet `<id>` failed
 signature verification and was discarded by aya — sender needs to
-re-dispatch."* The packet itself stays on the relay and will resurface
+re-send."* The packet itself stays on the relay and will resurface
 on every poll until you explicitly drop it locally:
 
 ```bash
@@ -186,7 +186,7 @@ for p in packets:
 ```
 
 **Option B** (fallback if packet has cleared the inbox): use the DID
-from `aya read --meta` directly. `aya dispatch --to` accepts a DID as
+from `aya read --meta` directly. `aya send --to` accepts a DID as
 well as a label.
 
 ```bash
@@ -196,10 +196,10 @@ print(json.loads(sys.stdin.read())['from'])
 ")
 ```
 
-Then dispatch:
+Then send:
 
 ```bash
-aya dispatch --as <local-label> --to "$PEER_LABEL_OR_DID" \
+aya send --as <local-label> --to "$PEER_LABEL_OR_DID" \
   --intent "re: <condensed original intent>" \
   --seed \
   --in-reply-to <original-packet-id> \
@@ -217,15 +217,15 @@ collapses round-trip latency. Surface anything new in the same response.
 
 ## 4. Send
 
-Fresh dispatch, no thread. Recipient is inferred or picked (see §0).
+Fresh send, no thread. Recipient is inferred or picked (see §0).
 Content is either provided explicitly or curated from the conversation.
 
 ### Step 1 — Determine content source
 
 **Explicit content (skip curation):**
-- `/relay send work --files design.md` → dispatch the file
-- "send Sean this: <quoted text>" → dispatch the quoted text
-- Content piped via heredoc → dispatch as-is
+- `/relay send work --files design.md` → send the file
+- "send Sean this: <quoted text>" → send the quoted text
+- Content piped via heredoc → send as-is
 
 **No explicit content (curation mode):**
 When the user says "pack this up" or "send this to work" without
@@ -258,9 +258,9 @@ Derive the intent from the content if the user didn't provide one: one
 short sentence, first person, e.g. "Pick up dinner party guest count
 decision" or "Continue reading list research".
 
-**Show draft before dispatch:** "Here's what I'd send — look right?"
+**Show draft before sending:** "Here's what I'd send — look right?"
 
-### Step 3 — Dispatch
+### Step 3 — Send
 
 ### Type guide
 
@@ -274,7 +274,7 @@ decision" or "Continue reading list research".
 ### Seed (default — use unless content needs to ride along)
 
 ```bash
-aya dispatch --as <local-label> --to <peer-label> \
+aya send --as <local-label> --to <peer-label> \
   --intent "<one-line intent>" \
   --seed \
   --opener "<opening question or body>"
@@ -283,7 +283,7 @@ aya dispatch --as <local-label> --to <peer-label> \
 ### Content (markdown body via stdin)
 
 ```bash
-aya dispatch --as <local-label> --to <peer-label> \
+aya send --as <local-label> --to <peer-label> \
   --intent "<one-line intent>" \
   --context "<why this is being sent>" <<'BODY'
 <markdown content>
@@ -293,7 +293,7 @@ BODY
 ### File
 
 ```bash
-aya dispatch --as <local-label> --to <peer-label> \
+aya send --as <local-label> --to <peer-label> \
   --intent "<one-line intent>" \
   --files path/to/file.md
 ```
@@ -405,11 +405,11 @@ is a separate thing and doesn't cover relay state.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `aya receive` returns `{"packets": []}` but you expect one | Peer hasn't dispatched yet, or relay propagation lag | Tell user to ping the peer; wait 30s and retry |
-| `WARNING:aya.packet:DID-based signature verification failed for packet <id>` on stderr | Bad signature; packet is **discarded** by aya, never appears in the JSON output (and not as `ingested:false`) | Surface to user; run `aya drop <id>` to stop the resurface; sender must re-dispatch to retry |
+| `aya receive` returns `{"packets": []}` but you expect one | Peer hasn't sent yet, or relay propagation lag | Tell user to ping the peer; wait 30s and retry |
+| `WARNING:aya.packet:DID-based signature verification failed for packet <id>` on stderr | Bad signature; packet is **discarded** by aya, never appears in the JSON output (and not as `ingested:false`) | Surface to user; run `aya drop <id>` to stop the resurface; sender must re-send to retry |
 | `aya show <id>` returns `PACKET_NOT_FOUND` | Packet not yet ingested | Run verb 1 (Check) first |
-| `aya dispatch` errors with `Unknown recipient '<label>'. Available: ...` | `--to <peer>` not in `trusted_keys` | Run `aya pair` to connect, or `aya trust <did> --peer <label>` |
-| `aya dispatch` errors with `No Nostr pubkey found for recipient. Pair first.` | Trust entry exists but lacks `nostr_pubkey` field | Re-pair via `aya pair` to populate the pubkey |
+| `aya send` errors with `Unknown recipient '<label>'. Available: ...` | `--to <peer>` not in `trusted_keys` | Run `aya pair` to connect, or `aya trust <did> --peer <label>` |
+| `aya send` errors with `No Nostr pubkey found for recipient. Pair first.` | Trust entry exists but lacks `nostr_pubkey` field | Re-pair via `aya pair` to populate the pubkey |
 | Interactive shell errors before aya runs | Shell function shadowing the binary | Check `declare -F aya`; unset if found |
 | `aya schedule recurring` shows `last_run_at: never` | Hooks don't fire in active sessions | Expected; rely on manual check + immediate-poll |
 | Relay returns HTTP 503 / connection refused | Transient relay outage | aya auto-retries (5 attempts); wait 30s and retry manually |

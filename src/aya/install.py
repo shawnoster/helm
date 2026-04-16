@@ -255,7 +255,10 @@ def _build_cron_lines(aya_path: str, interval_seconds: int) -> list[str]:
 
 
 def _get_current_crontab() -> str:
-    """Read current crontab. Returns empty string if none exists."""
+    """Read current crontab. Returns empty string if none exists.
+
+    Raises FileNotFoundError if crontab is not installed (e.g. WSL without cron).
+    """
     result = subprocess.run(
         ["crontab", "-l"],  # noqa: S607
         capture_output=True,
@@ -504,6 +507,12 @@ def install_scheduler(
             result.cron_installed = installed
             result.cron_already_present = already
             result.cron_lines = lines
+        except FileNotFoundError:
+            result.errors.append(
+                "crontab not found — skipping cron install. "
+                "Install cron/crontab and ensure the 'crontab' executable is on PATH. "
+                "On WSL, you may also need to start the service: sudo service cron start"
+            )
         except subprocess.CalledProcessError as exc:
             result.errors.append(f"crontab failed: {exc}")
 

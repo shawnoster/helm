@@ -74,7 +74,7 @@ SENDER (alice)                   RELAY                    RECEIVER (bob)
    │
 2. Assistant gathers context
    │
-3. aya dispatch
+3. aya send
    ├── Create JSON envelope
    ├── Sign with ed25519
    ├── Set TTL, intent, conflict strategy

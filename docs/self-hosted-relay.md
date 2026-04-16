@@ -176,8 +176,8 @@ Test with aya:
 # Check inbox via your relay
 aya inbox --relay wss://nostr.yourdomain.com
 
-# Send a test dispatch through your relay
-echo "relay test" | aya dispatch \
+# Send a test packet through your relay
+echo "relay test" | aya send \
   --to home \
   --intent "self-hosted relay test" \
   --relay wss://nostr.yourdomain.com
