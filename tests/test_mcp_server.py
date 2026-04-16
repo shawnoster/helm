@@ -26,6 +26,11 @@ def test_list_tools_names():
         "aya_schedule_watch",
         "aya_ack",
         "aya_show",
+        "aya_read",
+        "aya_config_set",
+        "aya_config_show",
+        "aya_packets",
+        "aya_relay_status",
     }
 
 
@@ -273,6 +278,163 @@ async def test_ack_tool(tmp_path):
     assert payload["in_reply_to"] == pkt.id
     assert "packet_id" in payload
     mock_publish.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# aya_read
+# ---------------------------------------------------------------------------
+
+
+async def test_read_tool_content_only(tmp_path):
+    """aya_read returns content only by default."""
+    from aya.packet import Packet
+
+    pkt = Packet(**{"from": "did:key:sender", "to": "did:key:receiver"}, intent="test")
+    pkt.content = "Hello world"
+    packets_dir = tmp_path / "packets"
+    packets_dir.mkdir()
+    (packets_dir / f"{pkt.id}.json").write_text(pkt.to_json())
+
+    with patch("aya.paths.PACKETS_DIR", packets_dir):
+        result = await call_tool("aya_read", {"packet_id": pkt.id[:8]})
+
+    payload = json.loads(result[0].text)
+    assert payload == {"content": "Hello world"}
+
+
+async def test_read_tool_with_meta(tmp_path):
+    """aya_read with meta=True returns full metadata."""
+    from aya.packet import Packet
+
+    pkt = Packet(**{"from": "did:key:sender", "to": "did:key:receiver"}, intent="test")
+    pkt.content = "Hello world"
+    packets_dir = tmp_path / "packets"
+    packets_dir.mkdir()
+    (packets_dir / f"{pkt.id}.json").write_text(pkt.to_json())
+
+    with patch("aya.paths.PACKETS_DIR", packets_dir):
+        result = await call_tool("aya_read", {"packet_id": pkt.id[:8], "meta": True})
+
+    payload = json.loads(result[0].text)
+    assert payload["id"] == pkt.id
+    assert payload["intent"] == "test"
+    assert payload["content"] == "Hello world"
+
+
+async def test_read_tool_short_prefix():
+    """aya_read rejects prefixes shorter than 8 chars."""
+    result = await call_tool("aya_read", {"packet_id": "abc"})
+    payload = json.loads(result[0].text)
+    assert "error" in payload
+
+
+# ---------------------------------------------------------------------------
+# aya_config_show
+# ---------------------------------------------------------------------------
+
+
+async def test_config_show_tool():
+    """aya_config_show returns current config."""
+    fake_config = {"instance_label": "home"}
+
+    with patch("aya.config.load_config", return_value=fake_config):
+        result = await call_tool("aya_config_show", {})
+
+    payload = json.loads(result[0].text)
+    assert payload["instance_label"] == "home"
+
+
+# ---------------------------------------------------------------------------
+# aya_config_set
+# ---------------------------------------------------------------------------
+
+
+async def test_config_set_tool():
+    """aya_config_set sets a value and returns updated config."""
+    fake_result = {"instance_label": "home", "foo": "bar"}
+
+    with patch("aya.config.set_config_value", return_value=fake_result):
+        result = await call_tool("aya_config_set", {"key": "foo", "value": "bar"})
+
+    payload = json.loads(result[0].text)
+    assert payload["foo"] == "bar"
+    assert payload["instance_label"] == "home"
+
+
+# ---------------------------------------------------------------------------
+# aya_packets
+# ---------------------------------------------------------------------------
+
+
+async def test_packets_tool(tmp_path):
+    """aya_packets lists stored packets."""
+    from aya.packet import Packet
+
+    packets_dir = tmp_path / "packets"
+    packets_dir.mkdir()
+
+    for i in range(3):
+        pkt = Packet(
+            **{"from": "did:key:sender", "to": "did:key:receiver"},
+            intent=f"test-{i}",
+        )
+        (packets_dir / f"{pkt.id}.json").write_text(pkt.to_json())
+
+    with patch("aya.paths.PACKETS_DIR", packets_dir):
+        result = await call_tool("aya_packets", {"limit": 2})
+
+    payload = json.loads(result[0].text)
+    assert isinstance(payload, list)
+    assert len(payload) == 2
+
+
+async def test_packets_tool_empty(tmp_path):
+    """aya_packets returns empty list when no packets dir."""
+    missing_dir = tmp_path / "no_packets"
+    with patch("aya.paths.PACKETS_DIR", missing_dir):
+        result = await call_tool("aya_packets", {})
+
+    payload = json.loads(result[0].text)
+    assert payload == []
+
+
+# ---------------------------------------------------------------------------
+# aya_relay_status
+# ---------------------------------------------------------------------------
+
+
+async def test_relay_status_tool():
+    """aya_relay_status returns relay info."""
+    from aya.identity import Identity, Profile, TrustedKey
+
+    local = Identity.generate("default")
+    peer = Identity.generate("peer")
+    profile = Profile(
+        alias="Test",
+        ship_mind_name="",
+        user_name="Tester",
+        instances={"default": local},
+        trusted_keys={
+            "peer": TrustedKey(
+                did=peer.did,
+                label="peer",
+                nostr_pubkey=peer.nostr_public_hex,
+            ),
+        },
+        ingested_ids=[],
+        default_relays=["wss://relay.example.com"],
+        last_checked={"wss://relay.example.com": "2026-04-01T10:00:00Z"},
+    )
+
+    with patch("aya.mcp_server._load_profile", return_value=profile):
+        result = await call_tool("aya_relay_status", {"instance": "default"})
+
+    payload = json.loads(result[0].text)
+    assert payload["instance"] == "default"
+    assert payload["did"] == local.did
+    assert payload["relays"] == ["wss://relay.example.com"]
+    assert "peer" in payload["trusted_keys"]
+    assert payload["last_checked"]["wss://relay.example.com"] == "2026-04-01T10:00:00Z"
 
 
 # ---------------------------------------------------------------------------
