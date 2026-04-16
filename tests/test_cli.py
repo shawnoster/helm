@@ -4168,3 +4168,100 @@ class TestRelayRemove:
         payload = json.loads(result.output)
         assert payload["removed"] == "wss://only.example"
         assert payload["relays"] == []
+
+
+# ── _maybe_create_ci_watch gh repo view parsing ─────────────────────────────
+
+
+class TestMaybeCreateCiWatchRepoParsing:
+    """Tests for gh-repo-view-based owner/repo parsing in _maybe_create_ci_watch."""
+
+    def _make_subprocess_side_effect(self, responses: dict[str, tuple[int, str]]):
+        """Return a side_effect function for subprocess.run that dispatches by command."""
+
+        def _side_effect(cmd, **_kwargs):
+            # Match by first 3 tokens, e.g. "git remote get-url"
+            key = " ".join(cmd[:3])
+            if key not in responses:
+                # Try longer key for disambiguation
+                key = " ".join(cmd[:4])
+            rc, out = responses.get(key, (1, ""))
+            return type("FakeResult", (), {"returncode": rc, "stdout": out})()
+
+        return _side_effect
+
+    def test_happy_path_parses_owner_repo(self):
+        """gh repo view returns owner/repo -> proceeds to PR check and creates watch."""
+        responses = {
+            "git remote get-url": (0, "git@github.com:myorg/myrepo.git"),
+            "git branch --show-current": (0, "fix/my-feature"),
+            "gh repo view": (0, "myorg/myrepo"),
+            "gh pr view": (0, "42"),
+        }
+        with (
+            patch("subprocess.run", side_effect=self._make_subprocess_side_effect(responses)),
+            patch("aya.cli.get_active_watches", return_value=[]),
+            patch("aya.cli.add_watch") as mock_add,
+        ):
+            from aya.cli import _maybe_create_ci_watch
+
+            _maybe_create_ci_watch()
+            mock_add.assert_called_once()
+            call_kwargs = mock_add.call_args[1]
+            assert call_kwargs["target"] == "myorg/myrepo#42"
+
+    def test_dots_in_repo_name(self):
+        """Repo names with dots are correctly parsed via split instead of regex."""
+        responses = {
+            "git remote get-url": (0, "git@github.com:owner/my.repo.name.git"),
+            "git branch --show-current": (0, "feature/x"),
+            "gh repo view": (0, "owner/my.repo.name"),
+            "gh pr view": (0, "7"),
+        }
+        with (
+            patch("subprocess.run", side_effect=self._make_subprocess_side_effect(responses)),
+            patch("aya.cli.get_active_watches", return_value=[]),
+            patch("aya.cli.add_watch") as mock_add,
+        ):
+            from aya.cli import _maybe_create_ci_watch
+
+            _maybe_create_ci_watch()
+            mock_add.assert_called_once()
+            call_kwargs = mock_add.call_args[1]
+            assert call_kwargs["target"] == "owner/my.repo.name#7"
+
+    def test_gh_not_available_returns_early(self):
+        """When gh CLI fails (rc != 0), function returns without creating a watch."""
+        responses = {
+            "git remote get-url": (0, "git@github.com:org/repo.git"),
+            "git branch --show-current": (0, "feature/x"),
+            "gh repo view": (1, ""),
+        }
+        with (
+            patch("subprocess.run", side_effect=self._make_subprocess_side_effect(responses)),
+            patch("aya.cli.get_active_watches", return_value=[]) as mock_watches,
+            patch("aya.cli.add_watch") as mock_add,
+        ):
+            from aya.cli import _maybe_create_ci_watch
+
+            _maybe_create_ci_watch()
+            mock_add.assert_not_called()
+            mock_watches.assert_not_called()
+
+    def test_malformed_output_returns_early(self):
+        """When gh repo view returns output without a slash, function returns early."""
+        responses = {
+            "git remote get-url": (0, "git@github.com:org/repo.git"),
+            "git branch --show-current": (0, "feature/x"),
+            "gh repo view": (0, "no-slash-here"),
+        }
+        with (
+            patch("subprocess.run", side_effect=self._make_subprocess_side_effect(responses)),
+            patch("aya.cli.get_active_watches", return_value=[]) as mock_watches,
+            patch("aya.cli.add_watch") as mock_add,
+        ):
+            from aya.cli import _maybe_create_ci_watch
+
+            _maybe_create_ci_watch()
+            mock_add.assert_not_called()
+            mock_watches.assert_not_called()
