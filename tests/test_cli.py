@@ -4170,6 +4170,85 @@ class TestRelayRemove:
         assert payload["relays"] == []
 
 
+class TestRelayStatus:
+    def test_status_text_shows_instance_and_peers(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://relay.damus.io", "wss://nos.lol"]
+        p.trusted_keys["home"] = TrustedKey(did="did:key:test123", label="home", nostr_pubkey=None)
+        p.last_checked = {"wss://relay.damus.io": "2026-04-16T12:00:00Z"}
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            ["relay", "status", "--profile", str(profile_with_instance), "--format", "text"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "Instance:" in result.output
+        assert "default" in result.output
+        assert "Trusted peers:" in result.output
+        assert "home" in result.output
+        assert "wss://relay.damus.io" in result.output
+        assert "Last poll:" in result.output
+        assert "2026-04-16T12:00:00Z" in result.output
+
+    def test_status_json_shape(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://relay.damus.io"]
+        p.trusted_keys["home"] = TrustedKey(did="did:key:test456", label="home", nostr_pubkey=None)
+        p.last_checked = {"wss://relay.damus.io": "2026-04-16T12:00:00Z"}
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            ["relay", "status", "--profile", str(profile_with_instance), "--format", "json"],
+        )
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.output)
+        assert payload["instance"] == "default"
+        assert payload["trusted_peers"] == ["home"]
+        assert payload["relays"] == ["wss://relay.damus.io"]
+        assert payload["last_checked"] == {"wss://relay.damus.io": "2026-04-16T12:00:00Z"}
+
+    def test_status_with_named_instance(self, profile_path: Path) -> None:
+        profile = Profile(alias="Ace", ship_mind_name="", user_name="Shawn")
+        profile.instances["work"] = Identity.generate("work")
+        profile.default_relays = ["wss://relay.example"]
+        profile.save(profile_path)
+
+        result = runner.invoke(
+            app,
+            ["relay", "status", "--profile", str(profile_path), "--as", "work", "--format", "text"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "work" in result.output
+        assert "wss://relay.example" in result.output
+
+    def test_status_with_unknown_instance_errors(self, profile_path: Path) -> None:
+        profile = Profile(alias="Ace", ship_mind_name="", user_name="Shawn")
+        profile.instances["work"] = Identity.generate("work")
+        profile.instances["home"] = Identity.generate("home")
+        profile.save(profile_path)
+
+        result = runner.invoke(
+            app,
+            ["relay", "status", "--profile", str(profile_path), "--as", "nope", "--format", "text"],
+        )
+        assert result.exit_code != 0
+
+    def test_status_text_no_peers_no_poll(self, profile_with_instance: Path) -> None:
+        p = Profile.load(profile_with_instance)
+        p.default_relays = ["wss://relay.damus.io"]
+        p.save(profile_with_instance)
+
+        result = runner.invoke(
+            app,
+            ["relay", "status", "--profile", str(profile_with_instance), "--format", "text"],
+        )
+        assert result.exit_code == 0, result.output
+        assert "(none)" in result.output
+        assert "(never)" in result.output
+
+
 # ── _maybe_create_ci_watch gh repo view parsing ─────────────────────────────
 
 

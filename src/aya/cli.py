@@ -3065,6 +3065,55 @@ def relay_remove(
     console.print(f"[dim]Saved to {profile}[/dim]")
 
 
+@relay_app.command("status")
+def relay_status(
+    as_: str = typer.Option("default", "--as", help="Local identity to act as"),
+    profile: Path = typer.Option(DEFAULT_PROFILE, help="Path to profile.json"),
+    format_: OutputFormat = typer.Option(
+        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
+    ),
+) -> None:
+    """Relay health check: identity, trusted peers, relays, last poll."""
+    format_ = resolve_format(format_)
+    p = _load_profile_for_relay(profile)
+
+    # Resolve and validate the requested instance
+    _resolve_instance(p, as_)
+    # Derive display label: use as_ if explicit, otherwise the single registered instance
+    instance_label = as_ if as_ != "default" else next(iter(p.instances.keys()), "default")
+
+    # Trusted peers
+    trusted_peers = [v.label for v in p.trusted_keys.values() if v.label]
+
+    # Relay URLs
+    relays = list(p.default_relays)
+
+    # Last poll per relay
+    last_checked: dict[str, str] = {}
+    if p.last_checked:
+        last_checked = {url: ts for url, ts in p.last_checked.items() if url in relays}
+
+    if format_ == OutputFormat.JSON:
+        _output_json(
+            {
+                "instance": instance_label,
+                "trusted_peers": trusted_peers,
+                "relays": relays,
+                "last_checked": last_checked,
+            }
+        )
+        return
+
+    console.print(f"Instance:       {instance_label}")
+    console.print("Trusted peers:  " + (", ".join(trusted_peers) if trusted_peers else "(none)"))
+    console.print("Relays:         " + (", ".join(relays) if relays else "(none)"))
+    if last_checked:
+        for url, ts in last_checked.items():
+            console.print(f"Last poll:      {url} → {ts}")
+    else:
+        console.print("Last poll:      (never)")
+
+
 # ── Clipboard helper ─────────────────────────────────────────────────────────
 
 
