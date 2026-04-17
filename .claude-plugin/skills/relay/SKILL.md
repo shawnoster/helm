@@ -22,10 +22,12 @@ Always pass `--as <local-label>` (e.g. `--as home` on the home machine,
 machine that has run `aya init` with a real label.
 
 Always pass `--relay wss://relay.monocularjack.com` on every `aya send`
-and `aya receive`. The private relay must be tried first; `aya init`
-only seeds public relays into defaults, so new instances won't have it
-in `default_relays` at all. Explicit is belt-and-suspenders — public
-relays (damus, nos.lol) remain as fallbacks via profile defaults.
+and `aya receive`. The private relay must be used explicitly because
+`aya init` only seeds public relays into defaults, so new instances
+won't have it in `default_relays` at all. Note that `--relay` forces
+use of only that relay — it does not fall back to `default_relays`.
+If you need ordered fallbacks, omit `--relay` and put the private
+relay first in `default_relays`.
 
 ---
 
