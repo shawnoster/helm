@@ -20,57 +20,43 @@ def _get_local_tz() -> ZoneInfo:
 
     Resolution order:
     1. AYA_TZ environment variable (explicit override)
-    2. System timezone via datetime.now().astimezone().tzinfo
-    3. UTC as last resort
+    2. /etc/timezone (plain text IANA name, common on Debian/Ubuntu/WSL)
+    3. /etc/localtime symlink target (common on most Linux distros)
+    4. UTC as last resort
 
-    Caching ensures consistent timezone throughout the session.
+    Always returns a proper ZoneInfo with DST rules. Caching ensures
+    consistent timezone throughout the session.
     """
+    import pathlib
+
     tz_name = os.environ.get("AYA_TZ", "").strip()
     if tz_name:
         try:
             return ZoneInfo(tz_name)
         except KeyError:
-            logging.warning("Invalid AYA_TZ %r; falling back to system timezone", tz_name)
+            logger.warning("Invalid AYA_TZ %r; falling back to system timezone", tz_name)
 
-    # Detect system timezone
+    # Try /etc/timezone (Debian/Ubuntu/WSL — plain text IANA name)
     try:
-        local_tz = datetime.now().astimezone().tzinfo
-        if local_tz is not None:
-            # Get the IANA name if available (e.g. America/Los_Angeles)
-            tz_key = getattr(local_tz, "key", None)
-            if tz_key:
-                return ZoneInfo(tz_key)
-            # Fall back to using the offset-based tzinfo directly wrapped in ZoneInfo
-            import time
-
-            if time.daylight:
-                tz_name = time.tzname[1] if time.localtime().tm_isdst else time.tzname[0]
-            else:
-                tz_name = time.tzname[0]
-            # tzname gives abbreviations like "PDT" — not valid for ZoneInfo.
-            # Use /etc/localtime or TZ env as IANA source.
-            for src in ("/etc/timezone", "/etc/localtime"):
-                try:
-                    import pathlib
-
-                    p = pathlib.Path(src)
-                    if p.is_symlink():
-                        # /etc/localtime -> ../usr/share/zoneinfo/America/Los_Angeles
-                        resolved = str(p.resolve())
-                        if "zoneinfo/" in resolved:
-                            iana = resolved.split("zoneinfo/", 1)[1]
-                            return ZoneInfo(iana)
-                    elif p.exists() and src == "/etc/timezone":
-                        iana = p.read_text().strip()
-                        if iana:
-                            return ZoneInfo(iana)
-                except Exception:  # noqa: S112
-                    continue
-            # If we got a working tzinfo from astimezone, use it directly
-            return local_tz  # type: ignore[return-value]
+        p = pathlib.Path("/etc/timezone")
+        if p.exists():
+            iana = p.read_text().strip()
+            if iana:
+                return ZoneInfo(iana)
     except Exception:
-        logging.warning("Could not detect system timezone; falling back to UTC")
+        logger.debug("Failed to read /etc/timezone")
 
+    # Try /etc/localtime symlink (most Linux distros)
+    try:
+        p = pathlib.Path("/etc/localtime")
+        resolved = str(p.resolve())
+        if "zoneinfo/" in resolved:
+            iana = resolved.split("zoneinfo/", 1)[1]
+            return ZoneInfo(iana)
+    except Exception:
+        logger.debug("Failed to resolve /etc/localtime")
+
+    logger.warning("Could not detect system timezone; falling back to UTC")
     return ZoneInfo("UTC")
 
 

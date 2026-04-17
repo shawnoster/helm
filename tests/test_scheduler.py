@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -53,14 +54,15 @@ def _isolate_scheduler(tmp_path, monkeypatch):
 
 
 class TestGetLocalTz:
-    def test_default_timezone(self, monkeypatch):
+    def test_default_timezone_detects_system(self, monkeypatch):
         """_get_local_tz detects system timezone when AYA_TZ is not set."""
         monkeypatch.delenv("AYA_TZ", raising=False)
-        # Clear the cache so we get a fresh evaluation
         _get_local_tz.cache_clear()
         tz = _get_local_tz()
-        # Should detect the system timezone, not hardcode Denver
-        assert tz is not None
+        # Must return a real ZoneInfo (not a fixed-offset tzinfo)
+        assert isinstance(tz, ZoneInfo)
+        # On any Linux system, should detect something (not fall through to UTC
+        # unless the system genuinely has no timezone configured)
         assert str(tz) != ""
 
     def test_custom_timezone(self, monkeypatch):
@@ -82,8 +84,8 @@ class TestGetLocalTz:
         monkeypatch.setenv("AYA_TZ", "Invalid/Zone")
         _get_local_tz.cache_clear()
         tz = _get_local_tz()
-        # Should fall back to system tz (not Denver), or UTC as last resort
-        assert tz is not None
+        # Must return a real ZoneInfo, not the invalid value
+        assert isinstance(tz, ZoneInfo)
         assert str(tz) != "Invalid/Zone"
         assert "Invalid AYA_TZ" in caplog.text
 
