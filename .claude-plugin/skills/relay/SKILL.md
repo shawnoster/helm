@@ -107,11 +107,20 @@ unknown senders (non-interactive safety); `--format json` forces
 structured output regardless of TTY detection (default `auto` produces
 Rich text on a real terminal, which breaks JSON parsing downstream).
 
-For each new packet in the returned `packets` array, immediately run
-verb 2 (Read) inline and present the body. Lead with the most recent.
-Summarize multiple packets; don't dump the JSON list to the user.
+The two surfaces return different shapes:
 
-If the response is `{"packets": []}`, reply *"Empty."* and stop.
+- **MCP `aya_receive`** returns a list of packet summaries directly,
+  e.g. `[{id, intent, from, ingested}, …]`. Empty list means nothing
+  new.
+- **CLI `aya receive --format json`** wraps the list in an object:
+  `{"packets": [{...}, …]}`. Empty is `{"packets": []}`.
+
+For each new packet, immediately run verb 2 (Read) inline and present
+the body. Lead with the most recent. Summarize multiple packets; don't
+dump the JSON list to the user.
+
+If the returned list is empty (`[]` from MCP, `{"packets": []}` from
+CLI), reply *"Empty."* and stop.
 
 **Signature failures** are handled by aya at the `receive` boundary:
 the CLI logs `WARNING:aya.packet:DID-based signature verification
@@ -147,8 +156,7 @@ Extract the body cleanly without dumping the envelope JSON. Include
 `meta`/`--meta` to get id/from/sent_at/intent header fields alongside
 the body.
 
-**MCP (preferred):** `aya_read(packet_id="<id>", meta=true)` — returns
-a JSON object with body/from/sent_at/intent.
+**MCP (preferred):** `aya_read(packet_id="<id>", meta=true)`.
 
 **CLI fallback:**
 
@@ -156,29 +164,30 @@ a JSON object with body/from/sent_at/intent.
 aya read --meta --format json <packet-id>
 ```
 
-The JSON output (same shape from both surfaces) has:
+The two surfaces return different shapes — use the right key for the
+surface you called:
 
-```json
-{
-  "id": "01KP07VKNS...",
-  "body": "<extracted text — opener+context+questions for seeds, content for markdown>",
-  "from": "did:key:z6Mkqx…",
-  "sent_at": "2026-04-12T07:00:21+00:00",
-  "intent": "skill version check",
-  "in_reply_to": null
-}
-```
+- **MCP `aya_read(meta=true)`** returns
+  `{id, intent, from, sent_at, content_type, content}`. The `content`
+  field is the raw packet content (no extraction). No `in_reply_to`
+  field — use `aya_show(packet_id=...)` if you need the full envelope.
+- **CLI `aya read --meta --format json`** returns
+  `{id, body, from, sent_at, intent, in_reply_to}`. The `body` field
+  is already *extracted* text (opener+context+questions for seeds,
+  content for markdown).
 
-Use those fields to populate a framing template in your response to
-the user — never paste the raw JSON itself:
+Populate the framing template below with the common fields (`from`,
+`sent_at`, `intent`) — never paste the raw JSON itself. For the body
+line, use MCP's `content` or CLI's `body`. `in_reply_to` is CLI-only in
+the template; omit it when the source is MCP.
 
 ```
 ━━━ Packet <id_prefix> ━━━
 From: <from>          Sent: <sent_at>
 Intent: <intent>
-<in_reply_to: <parent_id_prefix>, if present>
+<in_reply_to: <parent_id_prefix>, if present — CLI source only>
 
-<body>
+<content or body>
 ━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
