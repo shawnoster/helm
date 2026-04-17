@@ -16,16 +16,48 @@ logger = logging.getLogger(__name__)
 
 @functools.lru_cache(maxsize=1)
 def _get_local_tz() -> ZoneInfo:
-    """Get the local timezone from AYA_TZ env var, with fallback to America/Denver.
+    """Get the local timezone from AYA_TZ env var, with system detection fallback.
 
-    Caching ensures consistent timezone throughout the session.
+    Resolution order:
+    1. AYA_TZ environment variable (explicit override)
+    2. /etc/timezone (plain text IANA name, common on Debian/Ubuntu/WSL)
+    3. /etc/localtime symlink target (common on most Linux distros)
+    4. UTC as last resort
+
+    Always returns a proper ZoneInfo with DST rules. Caching ensures
+    consistent timezone throughout the session.
     """
-    tz_name = os.environ.get("AYA_TZ", "America/Denver").strip()
+    import pathlib
+
+    tz_name = os.environ.get("AYA_TZ", "").strip()
+    if tz_name:
+        try:
+            return ZoneInfo(tz_name)
+        except KeyError:
+            logger.warning("Invalid AYA_TZ %r; falling back to system timezone", tz_name)
+
+    # Try /etc/timezone (Debian/Ubuntu/WSL — plain text IANA name)
     try:
-        return ZoneInfo(tz_name)
-    except KeyError:
-        logging.warning("Invalid timezone %r; falling back to America/Denver", tz_name)
-        return ZoneInfo("America/Denver")
+        p = pathlib.Path("/etc/timezone")
+        if p.exists():
+            iana = p.read_text().strip()
+            if iana:
+                return ZoneInfo(iana)
+    except Exception:
+        logger.debug("Failed to read /etc/timezone")
+
+    # Try /etc/localtime symlink (most Linux distros)
+    try:
+        p = pathlib.Path("/etc/localtime")
+        resolved = str(p.resolve())
+        if "zoneinfo/" in resolved:
+            iana = resolved.split("zoneinfo/", 1)[1]
+            return ZoneInfo(iana)
+    except Exception:
+        logger.debug("Failed to resolve /etc/localtime")
+
+    logger.warning("Could not detect system timezone; falling back to UTC")
+    return ZoneInfo("UTC")
 
 
 # ── alert expiry constant ────────────────────────────────────────────────────
