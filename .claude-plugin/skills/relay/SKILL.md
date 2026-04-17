@@ -21,6 +21,12 @@ Always pass `--as <local-label>` (e.g. `--as home` on the home machine,
 `--as work` on the work machine). The `default` identity is wrong on any
 machine that has run `aya init` with a real label.
 
+Always pass `--relay wss://relay.monocularjack.com` on every `aya send`
+and `aya receive`. The private relay must be tried first; `aya init`
+only seeds public relays into defaults, so new instances won't have it
+in `default_relays` at all. Explicit is belt-and-suspenders — public
+relays (damus, nos.lol) remain as fallbacks via profile defaults.
+
 ---
 
 ## 0. Route intent
@@ -59,7 +65,7 @@ machine that has run `aya init` with a real label.
      1. work
      2. sean-okeefe
    ```
-3. Validate with `printf 'validate' | aya send --dry-run --as <local-label> --to <label> --intent validate`
+3. Validate with `printf 'validate' | aya send --dry-run --as <local-label> --relay wss://relay.monocularjack.com --to <label> --intent validate`
 
 ---
 
@@ -73,7 +79,7 @@ on confirmation for unknown senders (non-interactive safety);
 JSON parsing downstream).
 
 ```bash
-aya receive --as <local-label> --auto-ingest --skip-untrusted --format json
+aya receive --as <local-label> --relay wss://relay.monocularjack.com --auto-ingest --skip-untrusted --format json
 ```
 
 For each new packet in the returned `packets` array, immediately run
@@ -90,7 +96,7 @@ the JSON output. Bad-sig packets do **not** appear with
 user, capture stderr separately:
 
 ```bash
-aya receive --as <local-label> --auto-ingest --skip-untrusted --format json 2>/tmp/aya-recv.err
+aya receive --as <local-label> --relay wss://relay.monocularjack.com --auto-ingest --skip-untrusted --format json 2>/tmp/aya-recv.err
 grep -E "verification failed|InvalidSignature" /tmp/aya-recv.err
 ```
 
@@ -199,7 +205,7 @@ print(json.loads(sys.stdin.read())['from'])
 Then send:
 
 ```bash
-aya send --as <local-label> --to "$PEER_LABEL_OR_DID" \
+aya send --as <local-label> --relay wss://relay.monocularjack.com --to "$PEER_LABEL_OR_DID" \
   --intent "re: <condensed original intent>" \
   --seed \
   --in-reply-to <original-packet-id> \
@@ -274,7 +280,7 @@ decision" or "Continue reading list research".
 ### Seed (default — use unless content needs to ride along)
 
 ```bash
-aya send --as <local-label> --to <peer-label> \
+aya send --as <local-label> --relay wss://relay.monocularjack.com --to <peer-label> \
   --intent "<one-line intent>" \
   --seed \
   --opener "<opening question or body>"
@@ -283,7 +289,7 @@ aya send --as <local-label> --to <peer-label> \
 ### Content (markdown body via stdin)
 
 ```bash
-aya send --as <local-label> --to <peer-label> \
+aya send --as <local-label> --relay wss://relay.monocularjack.com --to <peer-label> \
   --intent "<one-line intent>" \
   --context "<why this is being sent>" <<'BODY'
 <markdown content>
@@ -293,7 +299,7 @@ BODY
 ### File
 
 ```bash
-aya send --as <local-label> --to <peer-label> \
+aya send --as <local-label> --relay wss://relay.monocularjack.com --to <peer-label> \
   --intent "<one-line intent>" \
   --files path/to/file.md
 ```
