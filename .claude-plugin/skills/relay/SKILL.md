@@ -214,14 +214,22 @@ For browsing past packets: `aya_packets(limit=10)` (MCP) or
 
 Always thread via `in_reply_to` / `--in-reply-to`. The recipient comes
 from the original packet — but the `from` field is a sender DID, not a
-human label. Two lookup options:
+human label. You can either resolve the DID to a label for readability
+or send directly to the DID (both surfaces accept either).
 
-**Option A** (preferred when packet is still in inbox): resolve the
-label via inbox. The MCP tool returns structured data directly:
+**Option A — resolve to a human label.** The two surfaces take different
+paths here because `aya_inbox` MCP does not include a label field
+(returns `{id, intent, from, sent_at, summary}`), so MCP must map via
+`aya_relay_status.trusted_keys`:
 
-- **MCP:** `aya_inbox(instance="<local-label>")` → find the entry
-  whose `id` starts with `<original-packet-id>`, read `from_label`.
-- **CLI:**
+- **MCP (two calls):**
+  1. `aya_read(packet_id="<original-packet-id>", meta=true)` → read
+     `from` (the sender DID).
+  2. `aya_relay_status(instance="<local-label>")` → returned
+     `trusted_keys` is a `{label: did}` dict. Invert it and look up the
+     label for the sender DID. Fall back to the DID itself if no
+     trusted-key entry matches.
+- **CLI (single shell pipeline):**
 
   ```bash
   PEER_LABEL=$(aya inbox --as <local-label> --format json | python3 -c "
@@ -235,10 +243,11 @@ label via inbox. The MCP tool returns structured data directly:
   ")
   ```
 
-**Option B** (fallback if packet has cleared the inbox): use the DID
-from `aya_read(packet_id, meta=true)` (MCP) or
-`aya read --meta --format json <id>` (CLI). The send surfaces accept a
-DID as well as a label.
+**Option B — skip label resolution and send to the DID.** Fastest when
+the packet has cleared the inbox or when a human label isn't needed.
+Read the DID from `aya_read(packet_id, meta=true).from` (MCP) or
+`aya read --meta --format json <id>` CLI output, and pass it straight
+to the send surfaces below.
 
 Then send the reply. Choose the form that fits the content:
 
