@@ -180,6 +180,85 @@ _TOOLS: list[types.Tool] = [
             "additionalProperties": False,
         },
     ),
+    types.Tool(
+        name="aya_read",
+        description="Read the content of a stored packet by ID or prefix.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "packet_id": {
+                    "type": "string",
+                    "description": "Packet ID or prefix (min 8 chars).",
+                },
+                "meta": {
+                    "type": "boolean",
+                    "description": "If true, return full metadata; otherwise return content only.",
+                    "default": False,
+                },
+            },
+            "required": ["packet_id"],
+            "additionalProperties": False,
+        },
+    ),
+    types.Tool(
+        name="aya_config_set",
+        description="Set a workspace configuration value.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "key": {
+                    "type": "string",
+                    "description": "Configuration key to set.",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "Value to assign.",
+                },
+            },
+            "required": ["key", "value"],
+            "additionalProperties": False,
+        },
+    ),
+    types.Tool(
+        name="aya_config_show",
+        description="Show the current workspace configuration.",
+        inputSchema={
+            "type": "object",
+            "properties": {},
+            "additionalProperties": False,
+        },
+    ),
+    types.Tool(
+        name="aya_packets",
+        description="List stored packets, most recent first.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum number of packets to return (default: 20).",
+                    "default": 20,
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
+    types.Tool(
+        name="aya_relay_status",
+        description="Show relay health and identity info for an instance.",
+        inputSchema={
+            "type": "object",
+            "properties": {
+                "instance": {
+                    "type": "string",
+                    "description": "Local identity to check (default: 'default').",
+                    "default": "default",
+                },
+            },
+            "additionalProperties": False,
+        },
+    ),
 ]
 
 
@@ -525,6 +604,116 @@ async def _handle_show(arguments: dict[str, Any]) -> list[types.TextContent]:
     return _text(json.loads(pkt.to_json()))
 
 
+async def _handle_read(arguments: dict[str, Any]) -> list[types.TextContent]:
+    packet_id = arguments["packet_id"]
+    meta = arguments.get("meta", False)
+
+    from aya.packet import Packet
+    from aya.paths import PACKETS_DIR
+
+    if len(packet_id) < 8:
+        return _error("Packet ID prefix must be at least 8 characters.")
+
+    if not PACKETS_DIR.exists():
+        return _error("No stored packets found.")
+
+    matches = [f for f in PACKETS_DIR.glob("*.json") if f.stem.startswith(packet_id)]
+    if not matches:
+        return _error(f"Packet '{packet_id}' not found.")
+    if len(matches) > 1:
+        return _error(f"Ambiguous prefix '{packet_id}' -- matches {len(matches)} packets.")
+
+    pkt = Packet.from_json(matches[0].read_text())
+
+    if meta:
+        return _text(
+            {
+                "id": pkt.id,
+                "intent": pkt.intent,
+                "from": pkt.from_did,
+                "sent_at": pkt.sent_at,
+                "content_type": (
+                    pkt.content_type.value
+                    if hasattr(pkt.content_type, "value")
+                    else str(pkt.content_type)
+                ),
+                "content": pkt.content,
+            }
+        )
+    return _text({"content": pkt.content})
+
+
+async def _handle_config_set(arguments: dict[str, Any]) -> list[types.TextContent]:
+    from aya.config import set_config_value
+
+    key = arguments["key"]
+    value = arguments["value"]
+    config = set_config_value(key, value)
+    return _text(config)
+
+
+async def _handle_config_show(_arguments: dict[str, Any]) -> list[types.TextContent]:
+    from aya.config import load_config
+
+    config = load_config()
+    return _text(config)
+
+
+async def _handle_packets(arguments: dict[str, Any]) -> list[types.TextContent]:
+    from aya.packet import Packet
+    from aya.paths import PACKETS_DIR
+
+    limit = max(int(arguments.get("limit", 20)), 1)
+
+    if not PACKETS_DIR.exists():
+        return _text([])
+
+    def _safe_mtime(f: Any) -> float:
+        try:
+            return f.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    files = sorted(PACKETS_DIR.glob("*.json"), key=_safe_mtime, reverse=True)
+    files = files[:limit]
+
+    summaries = []
+    for f in files:
+        try:
+            pkt = Packet.from_json(f.read_text())
+            summaries.append(
+                {
+                    "id": pkt.id,
+                    "intent": pkt.intent,
+                    "from": pkt.from_did,
+                    "sent_at": pkt.sent_at,
+                }
+            )
+        except Exception:
+            logger.debug("Skipping unparseable packet file %s", f.name)
+    return _text(summaries)
+
+
+async def _handle_relay_status(arguments: dict[str, Any]) -> list[types.TextContent]:
+    instance = arguments.get("instance", "default")
+    profile = _load_profile()
+    local = _resolve_instance(profile, instance)
+
+    trusted = {label: tk.did for label, tk in profile.trusted_keys.items()}
+
+    relays = profile.default_relays
+    last_checked = {url: ts for url, ts in profile.last_checked.items() if url in relays}
+
+    result: dict[str, Any] = {
+        "instance": instance,
+        "did": local.did,
+        "relays": relays,
+        "trusted_keys": trusted,
+        "last_checked": last_checked,
+    }
+    return _text(result)
+
+
 # ── dispatcher ───────────────────────────────────────────────────────────────
 
 _HANDLERS: dict[str, Any] = {
@@ -536,6 +725,11 @@ _HANDLERS: dict[str, Any] = {
     "aya_schedule_watch": _handle_schedule_watch,
     "aya_ack": _handle_ack,
     "aya_show": _handle_show,
+    "aya_read": _handle_read,
+    "aya_config_set": _handle_config_set,
+    "aya_config_show": _handle_config_show,
+    "aya_packets": _handle_packets,
+    "aya_relay_status": _handle_relay_status,
 }
 
 
