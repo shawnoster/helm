@@ -21,6 +21,14 @@ Always pass `--as <local-label>` (e.g. `--as home` on the home machine,
 `--as work` on the work machine). The `default` identity is wrong on any
 machine that has run `aya init` with a real label.
 
+Always pass `--relay wss://relay.monocularjack.com` on every `aya send`
+and `aya receive`. The private relay must be used explicitly because
+`aya init` only seeds public relays into defaults, so new instances
+won't have it in `default_relays` at all. Note that `--relay` forces
+use of only that relay — it does not fall back to `default_relays`.
+If you need ordered fallbacks, omit `--relay` and put the private
+relay first in `default_relays`.
+
 ---
 
 ## Tool surface
@@ -83,7 +91,7 @@ equivalents are needed.
      1. work
      2. sean-okeefe
    ```
-3. Validate with `printf 'validate' | aya send --dry-run --as <local-label> --to <label> --intent validate`
+3. Validate with `printf 'validate' | aya send --dry-run --as <local-label> --relay wss://relay.monocularjack.com --to <label> --intent validate`
 
 ---
 
@@ -98,7 +106,7 @@ trusted packets and skips untrusted ones by default; no flags needed.
 stderr to surface signature-verification warnings (see below):
 
 ```bash
-aya receive --as <local-label> --auto-ingest --skip-untrusted --format json
+aya receive --as <local-label> --relay wss://relay.monocularjack.com --auto-ingest --skip-untrusted --format json
 ```
 
 CLI flag notes: `--auto-ingest` ingests trusted packets without
@@ -130,7 +138,7 @@ the JSON output. Bad-sig packets do **not** appear with
 user, capture stderr separately:
 
 ```bash
-aya receive --as <local-label> --auto-ingest --skip-untrusted --format json 2>/tmp/aya-recv.err
+aya receive --as <local-label> --relay wss://relay.monocularjack.com --auto-ingest --skip-untrusted --format json 2>/tmp/aya-recv.err
 grep -E "verification failed|InvalidSignature" /tmp/aya-recv.err
 ```
 
@@ -260,7 +268,7 @@ Then send the reply. Choose the form that fits the content:
 - **Seed reply (short opener, CLI-only — `aya_send` has no seed mode):**
 
   ```bash
-  aya send --as <local-label> --to "$PEER_LABEL_OR_DID" \
+  aya send --as <local-label> --relay wss://relay.monocularjack.com --to "$PEER_LABEL_OR_DID" \
     --intent "re: <condensed original intent>" \
     --seed \
     --in-reply-to <original-packet-id> \
@@ -336,7 +344,7 @@ decision" or "Continue reading list research".
 Seed mode is **CLI-only** — `aya_send` has no `--seed --opener` equivalent:
 
 ```bash
-aya send --as <local-label> --to <peer-label> \
+aya send --as <local-label> --relay wss://relay.monocularjack.com --to <peer-label> \
   --intent "<one-line intent>" \
   --seed \
   --opener "<opening question or body>"
@@ -352,7 +360,7 @@ aya send --as <local-label> --to <peer-label> \
   `--context`, which MCP doesn't expose):
 
   ```bash
-  aya send --as <local-label> --to <peer-label> \
+  aya send --as <local-label> --relay wss://relay.monocularjack.com --to <peer-label> \
     --intent "<one-line intent>" \
     --context "<why this is being sent>" <<'BODY'
   <markdown content>
@@ -364,7 +372,7 @@ aya send --as <local-label> --to <peer-label> \
 File attachments are **CLI-only** (no `--files` in `aya_send`):
 
 ```bash
-aya send --as <local-label> --to <peer-label> \
+aya send --as <local-label> --relay wss://relay.monocularjack.com --to <peer-label> \
   --intent "<one-line intent>" \
   --files path/to/file.md
 ```
