@@ -165,8 +165,8 @@ class TestCanonicalHookEntries:
     def test_post_tool_use_hook_crons_is_async(self) -> None:
         """The PostToolUse `aya hook crons` entry must be async — every tool
         call would otherwise pay a Python interpreter cold-start, blocking
-        the next tool. The sibling `aya log auto` and `aya hook watch`
-        entries are also async; the crons entry must match."""
+        the next tool. The sibling `aya hook watch` entry is also async
+        (asyncRewake); the crons entry must match."""
         post_tool_use = CANONICAL_HOOKS["PostToolUse"]
         crons_entries = [
             h

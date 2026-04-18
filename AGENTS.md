@@ -101,15 +101,12 @@ Or add a permanent alias to your shell profile:
 alias claude='claude --plugin-dir /path/to/aya'
 ```
 
-Available slash commands (work in any project):
+Available plugin skills (work in any project):
 
-| Command | What it does |
-|---------|--------------|
-| `/aya-send` | Pack and send a packet to another machine |
-| `/aya-triage-packets` | Receive and route incoming packets |
-| `/aya-pair` | Guided pairing between two instances |
-| `/aya-setup` | First-run bootstrap (identity, hooks, polling) |
-| `/aya-watch` | Watch a GitHub PR with smart defaults |
+| Skill | Verbs | What it does |
+|-------|-------|--------------|
+| `/aya` | setup, pair, status, refresh, watch | Manage aya — identity, pairing, health, updates, watches |
+| `/relay` | check, read, reply, send, status | Relay communication — send/receive packets between instances |
 
 After editing skill files, run `/reload-plugins` to pick up changes live.
 
