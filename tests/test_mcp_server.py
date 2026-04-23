@@ -330,7 +330,7 @@ async def test_receive_skips_cursor_when_persist_fails(tmp_path):
         patch("aya.paths.PACKETS_DIR", empty_dir),
         patch("aya.mcp_server._load_profile", return_value=profile),
         patch("aya.relay.RelayClient") as mock_cls,
-        patch("aya.ingest.ingest", lambda pkt, quiet=False: None),
+        patch("aya.ingest.ingest", lambda pkt, *, quiet=False: None),
     ):
         mock_cls.return_value.fetch_pending = mock_fetch
         result = await call_tool("aya_receive", {"instance": "default"})
