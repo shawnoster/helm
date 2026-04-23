@@ -2442,10 +2442,11 @@ def _resolve_nostr_pubkey(did: str, profile: Profile) -> str | None:
 
 def _ingest(packet: Packet, *, quiet: bool = False) -> None:
     """
-    Ingest a packet into the active assistant context.
-    In Phase 1 this prints to stdout for the assistant to pick up.
-    Phase 3+ will pipe directly into the Claude session context.
-    When quiet=True, side effects run but console output is suppressed.
+    Ingest a packet: surface it (console/alert) and persist the body to PACKETS_DIR.
+
+    Called by both the CLI receive flow and the MCP ``aya_receive`` handler. Pass
+    ``quiet=True`` to suppress all console output — required when invoked from
+    the MCP stdio path, where stray stdout writes would corrupt JSON-RPC.
     """
     if not quiet:
         console.print(f"\n[bold]Ingesting:[/bold] {packet.intent}")
