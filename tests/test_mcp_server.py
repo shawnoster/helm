@@ -294,6 +294,54 @@ async def test_receive_writes_packet_body_to_disk(tmp_path):
     assert any(entry["id"] == signed.id for entry in profile.ingested_ids)
 
 
+async def test_receive_skips_cursor_when_persist_fails(tmp_path):
+    """If _ingest fails to write the packet body, the cursor must not advance.
+
+    Otherwise we re-introduce the original cursor-advances-but-body-discarded
+    bug under a different failure mode (disk full, permission denied, etc.).
+    """
+    from aya.identity import Identity, Profile, TrustedKey
+    from aya.packet import Packet
+
+    local = Identity.generate("default")
+    home = Identity.generate("home")
+    profile = Profile(alias="Ace", ship_mind_name="", user_name="Shawn")
+    profile.instances["default"] = local
+    profile.trusted_keys["home"] = TrustedKey(
+        did=home.did, label="home", nostr_pubkey=home.nostr_public_hex
+    )
+    profile_path = tmp_path / "profile.json"
+    profile.save(profile_path)
+
+    # Point PACKETS_DIR at an empty directory; stub _ingest to a no-op so the
+    # expected file never gets written. Mirrors _ingest's real behavior when
+    # its best-effort write step hits OSError (disk full, permissions, etc.)
+    # and is swallowed by its blanket except.
+    empty_dir = tmp_path / "packets_empty"
+    empty_dir.mkdir()
+
+    signed = Packet(**{"from": home.did, "to": local.did}, intent="persist-fail").sign(home)
+
+    async def mock_fetch(*args, **kwargs):
+        yield signed
+
+    with (
+        patch("aya.paths.PROFILE_PATH", profile_path),
+        patch("aya.paths.PACKETS_DIR", empty_dir),
+        patch("aya.mcp_server._load_profile", return_value=profile),
+        patch("aya.relay.RelayClient") as mock_cls,
+        patch("aya.cli._ingest", lambda pkt, quiet=False: None),
+    ):
+        mock_cls.return_value.fetch_pending = mock_fetch
+        result = await call_tool("aya_receive", {"instance": "default"})
+
+    payload = json.loads(result[0].text)
+    assert len(payload) == 1
+    assert payload[0]["ingested"] is False
+    assert payload[0]["error"] == "persist_failed"
+    assert all(entry["id"] != signed.id for entry in profile.ingested_ids)
+
+
 # ---------------------------------------------------------------------------
 # aya_ack
 # ---------------------------------------------------------------------------

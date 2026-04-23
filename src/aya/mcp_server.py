@@ -420,7 +420,7 @@ async def _handle_receive(arguments: dict[str, Any]) -> list[types.TextContent]:
     from aya.cli import _ingest
     from aya.identity import _assert_valid_ulid
     from aya.packet import Packet
-    from aya.paths import PROFILE_PATH
+    from aya.paths import PACKETS_DIR, PROFILE_PATH
     from aya.relay import RelayClient
 
     profile = _load_profile()
@@ -456,6 +456,21 @@ async def _handle_receive(arguments: dict[str, Any]) -> list[types.TextContent]:
         if trusted:
             _assert_valid_ulid(pkt.id)
             _ingest(pkt, quiet=True)
+            # _ingest persists best-effort (CLI still prints on failure). Under MCP the
+            # body write is our only record — if it didn't land, leave ingested_ids
+            # alone so the next poll retries instead of losing the packet.
+            if not (PACKETS_DIR / f"{pkt.id}.json").exists():
+                logger.warning("Persistence failed for packet %s; not advancing cursor", pkt.id)
+                received.append(
+                    {
+                        "id": pkt.id,
+                        "intent": pkt.intent,
+                        "from": pkt.from_did,
+                        "ingested": False,
+                        "error": "persist_failed",
+                    }
+                )
+                continue
             profile.ingested_ids.append(
                 {"id": pkt.id, "ingested_at": now_iso, "from_did": pkt.from_did}
             )
