@@ -342,6 +342,48 @@ async def test_receive_skips_cursor_when_persist_fails(tmp_path):
     assert all(entry["id"] != signed.id for entry in profile.ingested_ids)
 
 
+async def test_receive_no_since_filter(tmp_path):
+    """aya_receive calls fetch_pending() with no since, even when last_checked is set.
+
+    Regression for issue #246: the MCP handler had the same last_checked-derived
+    since cursor as cli.py receive, permanently excluding packets that arrived
+    before the cursor but were never ingested.
+    """
+    from datetime import UTC, datetime, timedelta
+
+    from aya.identity import Identity, Profile
+
+    local = Identity.generate("default")
+    profile = Profile(alias="Ace", ship_mind_name="", user_name="Shawn")
+    profile.instances["default"] = local
+    relay_url = "wss://relay.example.com"
+    profile.default_relays = [relay_url]
+    last_check_time = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
+    profile.last_checked[relay_url] = (
+        last_check_time.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    )
+    profile_path = tmp_path / "profile.json"
+    profile.save(profile_path)
+
+    fetch_calls: list[tuple] = []
+
+    async def mock_fetch(*args, **kwargs):
+        fetch_calls.append((args, kwargs))
+        if False:  # pragma: no cover
+            yield  # makes this an async generator
+
+    with (
+        patch("aya.paths.PROFILE_PATH", profile_path),
+        patch("aya.mcp_server._load_profile", return_value=profile),
+        patch("aya.relay.RelayClient") as mock_cls,
+    ):
+        mock_cls.return_value.fetch_pending = mock_fetch
+        await call_tool("aya_receive", {"instance": "default"})
+
+    assert len(fetch_calls) == 1
+    assert fetch_calls[0][1].get("since") is None
+
+
 # ---------------------------------------------------------------------------
 # aya_ack
 # ---------------------------------------------------------------------------

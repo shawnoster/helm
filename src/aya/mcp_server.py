@@ -415,7 +415,7 @@ async def _handle_send(arguments: dict[str, Any]) -> list[types.TextContent]:
 async def _handle_receive(arguments: dict[str, Any]) -> list[types.TextContent]:
     instance = arguments.get("instance", "default")
 
-    from datetime import UTC, datetime, timedelta
+    from datetime import UTC, datetime
 
     from aya.identity import _assert_valid_ulid
     from aya.ingest import ingest
@@ -429,17 +429,12 @@ async def _handle_receive(arguments: dict[str, Any]) -> list[types.TextContent]:
     relay_urls = profile.default_relays
     client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
 
-    since: datetime | None = None
-    if profile.last_checked:
-        now = datetime.now(UTC)
-        oldest = min(
-            datetime.fromisoformat(v.replace("Z", "+00:00")) for v in profile.last_checked.values()
-        )
-        since = max(oldest - timedelta(seconds=60), now - timedelta(days=7))
-
+    # No `since` filter — ingested_ids is the authoritative dedup mechanism and
+    # the relay's 7-day TTL window is the correct lower bound.  A last_checked-
+    # derived cursor permanently excludes packets that arrived before the cursor
+    # but were never ingested (see issue #246).
     packets: list[Packet] = []
-    since_kwargs: dict[str, Any] = {"since": since} if since is not None else {}
-    async for packet in client.fetch_pending(**since_kwargs):
+    async for packet in client.fetch_pending():
         packets.append(packet)
 
     now_check_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
