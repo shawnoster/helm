@@ -1131,22 +1131,14 @@ def receive(
         relay_urls = [relay] if relay else p.default_relays
         client = RelayClient(relay_urls, local.nostr_private_hex, local.nostr_public_hex)
 
-        # Compute since from last_checked to avoid re-scanning the full window on
-        # every poll.  60-second lookback guards against minor clock drift.
-        # Clamp to at most 7 days back so a very stale last_checked doesn't
-        # trigger an unbounded relay scan or override the relay's default window.
-        since: datetime | None = None
-        if p.last_checked:
-            now = datetime.now(UTC)
-            oldest = min(datetime.fromisoformat(v) for v in p.last_checked.values())
-            since = max(oldest - timedelta(seconds=60), now - timedelta(days=7))
-
         # Fetch pending packets for this instance; ingested_ids is the authoritative
-        # dedup mechanism and filters already-seen packets below.
+        # dedup mechanism and filters already-seen packets below.  No `since` filter
+        # is applied — the relay's default 7-day TTL window is the correct bound, and
+        # a cursor derived from last_checked can permanently exclude packets that
+        # arrived before the cursor but were never ingested (see issue #246).
         packets: list[Packet] = []
-        since_kwargs: dict = {"since": since} if since is not None else {}
         try:
-            async for packet in client.fetch_pending(**since_kwargs):
+            async for packet in client.fetch_pending():
                 packets.append(packet)
         except Exception:
             logger.exception("Relay fetch failed during receive")
@@ -1156,8 +1148,7 @@ def receive(
                 _output_json({"packets": []})
             return
 
-        # Record that we checked these relays — persist even when inbox is empty
-        # so future polls use a narrow since window rather than the full 7-day default.
+        # Record last poll time per relay for status display.
         now_check_iso = datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
         for url in relay_urls:
             p.last_checked[url] = now_check_iso

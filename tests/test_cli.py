@@ -1445,15 +1445,17 @@ class TestReceive:
         saved = Profile.load(profile_with_instance)
         assert any(e["id"] == packet.id for e in saved.ingested_ids)
 
-    def test_receive_since_lookback(self, profile_with_sender: Path, sender: Identity) -> None:
-        """When last_checked is set, receive passes since = last_checked - 60s."""
+    def test_receive_no_since_filter(self, profile_with_sender: Path, sender: Identity) -> None:
+        """receive always calls fetch_pending() with no since, even when last_checked is set.
+
+        The since cursor was removed in issue #246 because it permanently excluded
+        packets that landed before last_checked - 60s but were never ingested.
+        ingested_ids is the authoritative dedup mechanism; the relay's 7-day TTL
+        window is the correct bound.
+        """
         p = Profile.load(profile_with_sender)
         packet = self._signed_packet(sender, p.instances["default"].did)
 
-        # Record a previous check time on one relay. Use a recent relative
-        # timestamp (1 hour ago) so it stays within cli.py's 7-day lookback
-        # clamp regardless of when the test runs. Round to seconds to match
-        # the iso serialization on line 1309.
         relay_url = p.default_relays[0]
         last_check_time = datetime.now(UTC).replace(microsecond=0) - timedelta(hours=1)
         p.last_checked[relay_url] = (
@@ -1475,10 +1477,7 @@ class TestReceive:
             )
 
         assert len(fetch_calls) == 1
-        called_since = fetch_calls[0][1].get("since")
-        assert called_since is not None
-        expected_since = last_check_time - timedelta(seconds=60)
-        assert called_since == expected_since
+        assert fetch_calls[0][1].get("since") is None
 
     def test_receive_last_checked_persistence(self, profile_with_sender: Path) -> None:
         """receive saves last_checked for each relay even when inbox is empty."""
