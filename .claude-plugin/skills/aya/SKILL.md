@@ -121,13 +121,14 @@ Setup is **mostly CLI-only** — no MCP tools cover `aya init`,
    - Reminder/health crons: prompt must include "Output ONLY the reminder message itself — no preamble, no confirmation afterward."
    - `relay-poll` is a special case: it may remain silent when nothing is ingested, but it may surface packet content to the user when packets are received.
 
-6. **Wire up the plugin.** Check if the user's shell profile already has a claude alias with `--plugin-dir`. If not, suggest adding:
+6. **Wire up the skills.** Two patterns work — pick whichever the workspace already uses:
 
-   ```bash
-   alias claude='claude --plugin-dir /path/to/aya'
-   ```
-
-   Adjust the path to wherever aya is cloned. This makes `/aya` and `/relay` skills available globally.
+   - **Symlink pattern (home machine convention).** If the workspace has a `Makefile` with a `link-skills` target (this workspace does), symlink each skill's `SKILL.md` into `~/.claude/commands/`. The home machine wires `dev/skills/{aya,relay}/` as symlinks into `dev/code/aya/.claude-plugin/skills/{aya,relay}/`, then `make link-skills` exposes them as flat slash commands. SessionStart hook keeps the links fresh.
+   - **Plugin-dir alias (portable).** If there's no symlink workflow:
+     ```bash
+     alias claude='claude --plugin-dir /path/to/aya'
+     ```
+     Adjust the path to the local clone. Loads `/aya` and `/relay` under the plugin namespace.
 
 7. **Offer pairing.** Ask: "Do you want to pair with another machine now?" If yes, hand off to verb 2 (Pair).
 
@@ -258,11 +259,51 @@ Run a full aya readiness check and surface anything actionable.
 ## 4. Refresh
 
 Refresh is **CLI-only** — `uv tool` installer commands and
-`aya schedule install` have no MCP equivalents. Uninstall the current
-aya installation and reinstall the latest version from GitHub, with
+`aya schedule install` have no MCP equivalents. Reinstall aya, with
 verification.
 
-Run these commands in sequence:
+### Detect install source first
+
+Before reinstalling, check whether the current install is editable from
+a local source clone (the home-instance default per `AGENTS.md`):
+
+```bash
+cat ~/.local/share/uv/tools/aya-ai-assist/uv-receipt.toml 2>/dev/null
+```
+
+If the receipt has `editable = "/path/to/aya"` pointing at an existing
+directory, run **the editable path** below — clobbering it with a
+GitHub install kills "source edits are live without reinstall." If the
+receipt is missing, points at a dead path, or has no `editable` flag,
+run **the GitHub path**.
+
+### Editable path (local source clone)
+
+When the receipt points at a live local clone — typically
+`/home/shawn/dev/code/aya`:
+
+1. **Pull the clone up to date** (refresh = "get the latest"):
+
+   ```bash
+   git -C /home/shawn/dev/code/aya status --porcelain
+   git -C /home/shawn/dev/code/aya pull --ff-only
+   ```
+
+   If `status --porcelain` shows uncommitted changes, stop and ask the
+   user before pulling. Editable installs run against the working tree;
+   pulling could surprise in-flight work.
+
+2. **Reinstall editable** (re-syncs deps from `pyproject.toml`):
+
+   ```bash
+   uv tool install --editable /home/shawn/dev/code/aya --reinstall
+   ```
+
+3. Continue at **Common steps** below.
+
+### GitHub path (no local clone)
+
+When the receipt is missing or non-editable:
 
 1. **Uninstall current version:**
 
@@ -276,13 +317,17 @@ Run these commands in sequence:
    uv tool install --from git+https://github.com/shawnoster/aya aya-ai-assist --force
    ```
 
-3. **Re-install hooks** (picks up any format changes):
+3. Continue at **Common steps** below.
+
+### Common steps (both paths)
+
+4. **Re-install hooks** (picks up any format changes):
 
    ```bash
    aya schedule install
    ```
 
-4. **Verify installation:**
+5. **Verify installation:**
 
    ```bash
    which aya && aya status -f json | jq '.systems.ok'
@@ -311,7 +356,6 @@ Add a watch on a GitHub PR (or other target) with sensible defaults.
    | Target pattern | Provider |
    |---|---|
    | `owner/repo#N` or GitHub URL | `github-pr` |
-   | `PROJ-123` (Jira-style key) | `jira-ticket` |
 
 3. **Set defaults.** For GitHub PRs:
    - `--message`: "PR {number} — {title}" (fetch title via `gh pr view {number} --json title -q .title`)
@@ -354,7 +398,6 @@ Add a watch on a GitHub PR (or other target) with sensible defaults.
 
 - For PRs the user just opened or is reviewing, default to `--remove-when merged_or_closed` so the watch cleans itself up.
 - If the user says "let me know when it's approved", add `--condition approved_or_merged`.
-- Jira watches require `ATLASSIAN_*` env vars to be set. If they're missing, tell the user to run `op-load-env` or set them manually.
 - Watch IDs support prefix matching for later dismiss/snooze operations.
 
 ---

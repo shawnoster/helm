@@ -4,10 +4,11 @@ description: >
   Manage communication between instances and peers via the aya relay.
   Covers checking inbox, reading packets, replying, sending new messages,
   and showing relay status. Invoke when the user says "check the relay",
-  "any packets", "send to home", "send this to work", "tell Sean",
-  "pack this up", "ask work", "reply to that", "what did home say",
-  "relay status", "anything new?", or any equivalent. Infers intent
-  and recipient from context. Auto-polls after every send.
+  "any packets", "send to home", "send this home", "pack for home",
+  "send this to work", "tell Sean", "pack this up", "ask work",
+  "reply to that", "what did home say", "relay status", "anything new?",
+  or any equivalent. Infers intent and recipient from context. Auto-polls
+  after every send.
 argument-hint: "[check | read <id> | reply <id> | send [<peer>] [<intent>] | status]"
 ---
 
