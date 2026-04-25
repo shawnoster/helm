@@ -356,6 +356,7 @@ Add a watch on a GitHub PR (or other target) with sensible defaults.
    | Target pattern | Provider |
    |---|---|
    | `owner/repo#N` or GitHub URL | `github-pr` |
+   | `PROJ-123` (Jira-style key) | `jira-ticket` |
 
 3. **Set defaults.** For GitHub PRs:
    - `--message`: "PR {number} — {title}" (fetch title via `gh pr view {number} --json title -q .title`)
