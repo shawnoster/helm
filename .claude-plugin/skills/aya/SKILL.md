@@ -399,6 +399,7 @@ Add a watch on a GitHub PR (or other target) with sensible defaults.
 
 - For PRs the user just opened or is reviewing, default to `--remove-when merged_or_closed` so the watch cleans itself up.
 - If the user says "let me know when it's approved", add `--condition approved_or_merged`.
+- Jira watches require `ATLASSIAN_*` env vars to be set. If they're missing, tell the user to run `op-load-env` or set them manually.
 - Watch IDs support prefix matching for later dismiss/snooze operations.
 
 ---
