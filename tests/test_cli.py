@@ -2365,6 +2365,26 @@ class TestPacketPersistence:
         assert result.exit_code == 0, result.output
         assert "daily handoff" in result.output
 
+    def test_read_panel_preserves_bracket_sequences(self, packets_dir: Path) -> None:
+        """read --panel must not interpret [...] in the body as Rich markup."""
+        local = Identity.generate("default")
+        home = Identity.generate("home")
+        # Body contains text that Rich would normally treat as markup.
+        body_with_markup = "log line: [error] something [bold]important[/bold] happened"
+        pkt = Packet(
+            **{"from": home.did, "to": local.did},
+            intent="log",
+            content=body_with_markup,
+        )
+        (packets_dir / f"{pkt.id}.json").write_text(pkt.to_json())
+
+        result = runner.invoke(app, ["read", pkt.id[:8], "--panel", "--format", "text"])
+        assert result.exit_code == 0, result.output
+        # The literal [error] / [bold] text must survive — it should NOT be
+        # consumed or applied as markup.
+        assert "[error]" in result.output
+        assert "[bold]" in result.output
+
     def test_packets_list(
         self,
         packets_dir: Path,

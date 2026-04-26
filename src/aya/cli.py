@@ -2297,9 +2297,12 @@ def read(
     # Text mode — always render as a string via _extract_body.
     body = _extract_body(packet.content, packet.content_type)
     if panel:
+        # Wrap in Text() so packet bodies containing `[...]` sequences are
+        # not interpreted as Rich markup. Mirrors the non-panel path's
+        # markup=False / highlight=False behaviour.
         console.print(
             Panel(
-                body,
+                Text(body),
                 title=f"{packet.intent}  ·  {packet.id[:8]}",
                 subtitle=f"from {packet.from_did[:30]}…  ·  {packet.sent_at[:10]}",
             )
