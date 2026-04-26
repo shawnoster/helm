@@ -250,13 +250,11 @@ After editing any skill file in the aya repo, run `/reload-plugins` in your sess
 | `aya init` | Generate identity keypair for this instance |
 | `aya pair` | Pair two instances via short-lived relay code |
 | `aya trust` | Manually trust a DID |
-| `aya pack` | Create a signed knowledge packet (writes file; doesn't publish) |
-| `aya send` | Pack + send in one step (no temp file) |
+| `aya send` | Build, sign, and publish a knowledge packet to a Nostr relay |
 | `aya send-raw` | Publish a pre-built packet file to a Nostr relay |
 | `aya inbox` | List pending (un-ingested) packets |
 | `aya receive` | Review and ingest packets from the relay |
-| `aya show` | Show full content of an ingested packet |
-| `aya read` | Read content of a stored packet (with `--meta` for headers) |
+| `aya read` | Read the body of a stored packet (`--meta` for headers, `--panel` for boxed display) |
 | `aya ack` | Acknowledge a received packet (sends a reply back) |
 | `aya drop` | Delete an ingested packet from local storage |
 | `aya packets` | List stored packets, most recent first |
@@ -269,7 +267,6 @@ After editing any skill file in the aya repo, run `/reload-plugins` in your sess
 | `aya schedule activity` | Record user activity — resets the idle back-off timer |
 | `aya schedule is-idle` | Check whether the session is currently idle |
 | `aya schedule list` | List scheduled items |
-| `aya schedule check` | Check for due reminders and alerts |
 | `aya schedule dismiss` | Dismiss a scheduled item or alert (prefix match OK) |
 | `aya schedule snooze` | Snooze a reminder until a given time |
 | `aya schedule alerts` | Show alerts from the background watcher |

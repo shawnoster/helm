@@ -54,7 +54,6 @@ from aya.scheduler import (
     add_recurring,
     add_reminder,
     add_watch,
-    check_due,
     dismiss_alert,
     dismiss_item,
     format_pending,
@@ -489,84 +488,6 @@ def trust(
         )
 
 
-# ── pack ──────────────────────────────────────────────────────────────────────
-
-
-@app.command()
-def pack(
-    to: str = typer.Option(..., help="Recipient label (home) or DID"),
-    intent: str = typer.Option(..., help="What is this packet and why"),
-    files: list[Path] = typer.Option([], help="Files to include"),
-    context: str = typer.Option(None, help="Annotation for the receiving assistant"),
-    seed: bool = typer.Option(False, help="Create a conversation seed instead of content"),
-    opener: str = typer.Option(None, help="[seed] Opening question for the receiving assistant"),
-    out: Path = typer.Option(None, help="Write packet JSON to file (default: stdout)"),
-    as_: str = typer.Option("default", "--as", help="Local identity to act as"),
-    conflict: ConflictStrategy = typer.Option(
-        ConflictStrategy.LAST_WRITE_WINS, help="Conflict resolution strategy"
-    ),
-    profile: Path = typer.Option(DEFAULT_PROFILE),
-    format_: OutputFormat = typer.Option(
-        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
-    ),
-) -> None:
-    """Pack a knowledge packet ready to send.
-
-    To pack and send in one step: aya send --to <label> --intent "..."
-    See also: aya send-raw (send a pre-built packet file)
-    """
-    format_ = resolve_format(format_)
-    p = _load_profile(profile)
-    local = _resolve_instance(p, as_)
-
-    # Resolve recipient DID
-    to_did, _to_label = _resolve_did(to, p)
-
-    if seed:
-        if not opener:
-            _emit_error(ErrorCode.INVALID_ARGUMENT, "--opener required for seed packets.")
-        packet = Packet.as_seed(
-            from_did=local.did,
-            to_did=to_did,
-            intent=intent,
-            opener=opener,
-            context_summary=context or "",
-        )
-    elif files:
-        packet = Packet.from_files(
-            paths=[str(f) for f in files],
-            from_did=local.did,
-            to_did=to_did,
-            intent=intent,
-            context=context,
-        )
-    else:
-        content = sys.stdin.read()
-        packet = Packet(
-            **{"from": local.did, "to": to_did},
-            intent=intent,
-            context=context,
-            content_type=ContentType.MARKDOWN,
-            content=content,
-            conflict_strategy=conflict,
-        )
-
-    signed = packet.sign(local)
-    json_output = signed.to_json()
-
-    if out:
-        out.write_text(json_output)
-
-    if format_ == OutputFormat.JSON:
-        _output_json(json.loads(json_output))
-        raise typer.Exit(0)
-
-    if not out:
-        sys.stdout.write(json_output)
-    else:
-        console.print(f"[green]✓[/green] Packet written to [cyan]{out}[/cyan]")
-
-
 # ── send-raw ──────────────────────────────────────────────────────────────────
 
 
@@ -591,8 +512,6 @@ def send_raw(
 
     This sends a pre-built packet file. To compose and send in one step:
       aya send --to <label> --intent "..."
-
-    See also: aya pack (create a packet without sending)
     """
     logger.debug("send-raw: packet_file=%s, as=%s", packet_file, as_)
     format_ = resolve_format(format_)
@@ -708,8 +627,8 @@ def send_cmd(
 ) -> None:
     """Pack and send in one step — the natural 'pack for home' flow.
 
-    Combines aya pack + aya send-raw: creates the packet, signs it, and
-    publishes to the relay. This is the command most users want.
+    Builds the packet, signs it, and publishes to the relay. This is the
+    command most users want. For a pre-built packet file, see send-raw.
     """
     logger.debug("send: to=%s, intent=%s, as=%s", to, intent, as_)
     format_ = resolve_format(format_)
@@ -1632,38 +1551,6 @@ def schedule_list(
         _display_items(items)
 
 
-@schedule_app.command("check")
-def schedule_check(
-    format_: OutputFormat = typer.Option(
-        OutputFormat.AUTO, "--format", "-f", help="Output format: auto (default), text, or json"
-    ),
-) -> None:
-    """Check for due reminders and alerts."""
-    format_ = resolve_format(format_)
-    due_items, unseen = check_due()
-
-    if format_ == OutputFormat.JSON:
-        _output_json({"due": due_items, "alerts": unseen})
-        return
-
-    if not due_items and not unseen:
-        console.print("[dim]Nothing due. No alerts.[/dim]")
-        return
-
-    if due_items:
-        console.print(f"\n  [bold]⏰ {len(due_items)} reminder(s) due:[/bold]")
-        for r in due_items:
-            due_dt = datetime.fromisoformat(r["due_at"])
-            console.print(
-                f"    🔴 {r['id'][:8]}  {due_dt.strftime('%I:%M %p')}  {r['message'][:55]}"
-            )
-
-    if unseen:
-        console.print(f"\n  [bold]🔔 {len(unseen)} alert(s):[/bold]")
-        for a in unseen:
-            console.print(f"    📢 {a['source_item_id'][:8]}  {a['message'][:60]}")
-
-
 @schedule_app.command("dismiss")
 def schedule_dismiss(
     item_id: str = typer.Argument(help="Item ID (prefix match ok)"),
@@ -2300,58 +2187,6 @@ def _resolve_nostr_pubkey(did: str, profile: Profile) -> str | None:
     return None
 
 
-# ── show ──────────────────────────────────────────────────────────────────────
-
-
-@app.command()
-def show(
-    packet_id: str = typer.Argument(help="Packet ID or prefix (min 8 chars)"),
-    format_: OutputFormat = typer.Option(OutputFormat.AUTO, "--format", "-f", help="Output format"),
-) -> None:
-    """Show the content of a previously ingested packet."""
-    from aya.paths import PACKETS_DIR
-
-    format_ = resolve_format(format_)
-
-    if len(packet_id) < 8:
-        _emit_error(ErrorCode.INVALID_ARGUMENT, "Packet ID prefix must be at least 8 characters.")
-
-    # Find matching packet files
-    if not PACKETS_DIR.exists():
-        _emit_error(ErrorCode.PACKET_NOT_FOUND, "No ingested packets found.")
-
-    matches = [f for f in PACKETS_DIR.glob("*.json") if f.stem.startswith(packet_id)]
-    if not matches:
-        _emit_error(
-            ErrorCode.PACKET_NOT_FOUND,
-            f"Packet '{packet_id}' not found.",
-            {"packet_id": packet_id},
-        )
-    if len(matches) > 1:
-        _emit_error(
-            ErrorCode.AMBIGUOUS_PREFIX,
-            f"Ambiguous prefix — matches {len(matches)} packets.",
-            {"packet_id": packet_id, "matches": len(matches)},
-        )
-
-    from aya.packet import Packet
-
-    packet = Packet.from_json(matches[0].read_text())
-
-    if format_ == OutputFormat.JSON:
-        _output_json(json.loads(packet.to_json()))
-        raise typer.Exit(0)
-
-    # Rich text display
-    console.print(
-        Panel(
-            str(packet.content),
-            title=f"{packet.intent}  ·  {packet.id[:8]}",
-            subtitle=f"from {packet.from_did[:30]}…  ·  {packet.sent_at[:10]}",
-        )
-    )
-
-
 # ── read ──────────────────────────────────────────────────────────────────────
 
 
@@ -2396,13 +2231,18 @@ def _extract_body(content: object, content_type: ContentType | None = None) -> s
 def read(
     packet_id: str = typer.Argument(help="Packet ID or prefix (min 8 chars)"),
     meta: bool = typer.Option(False, "--meta", help="Also print packet metadata header"),
+    panel: bool = typer.Option(
+        False, "--panel", help="Render the body in a boxed Rich panel with title/subtitle"
+    ),
     format_: OutputFormat = typer.Option(OutputFormat.AUTO, "--format", "-f", help="Output format"),
 ) -> None:
     """Read a previously ingested packet — extracts body without dumping the envelope JSON.
 
     For seed packets, prints the opener (and context_summary, open_questions
     if present). For content packets, prints the content directly. Use
-    ``--meta`` to also print id/from/sent_at/intent header.
+    ``--meta`` to also print id/from/sent_at/intent header, or ``--panel`` to
+    render the body in a boxed display. ``--panel`` is ignored under
+    ``--format json``.
     """
     from aya.paths import PACKETS_DIR
 
@@ -2456,6 +2296,15 @@ def read(
 
     # Text mode — always render as a string via _extract_body.
     body = _extract_body(packet.content, packet.content_type)
+    if panel:
+        console.print(
+            Panel(
+                body,
+                title=f"{packet.intent}  ·  {packet.id[:8]}",
+                subtitle=f"from {packet.from_did[:30]}…  ·  {packet.sent_at[:10]}",
+            )
+        )
+        return
     if meta:
         console.print(f"[bold]{packet.intent}[/bold]  ·  {packet.id[:12]}")
         console.print(f"[dim]from {packet.from_did[:30]}…  ·  {packet.sent_at[:16]}[/dim]")

@@ -4,6 +4,19 @@
 
 ### Removed
 
+- `aya pack` — `aya send` is the canonical pack-and-publish flow. The pack
+  command had no callers in skills, hooks, or MCP — its help even redirected
+  users to `send`. If you need to build a packet without publishing, use
+  `aya send --dry-run` or build the JSON manually and use `aya send-raw`.
+- `aya show` — collapsed into `aya read`. Pass `--panel` to `read` for the
+  boxed display the old `show` produced. The MCP `aya_show` tool is removed
+  with the same migration: `aya_read(meta=true)` returns the structured
+  fields, and reading the packet file at `~/.aya/packets/<id>.json` gives
+  the full signed envelope.
+- `aya schedule check` — partial reimplementation of `pending` and `alerts`.
+  Use `aya schedule pending` (the SessionStart payload) for due reminders
+  + actionable alerts, or `aya schedule alerts [--mark-seen]` for the
+  alert queue alone.
 - `aya schedule poll` — replaced by `aya schedule tick`, which already calls
   `run_poll` internally. The command had been documented as legacy since the
   unified tick refactor; nothing in skills, hooks, or the system crontab

@@ -328,194 +328,6 @@ class TestPair:
         assert trusted_keys["guild-shawnoster"]["did"] == initiator_identity.did
 
 
-class TestPack:
-    def test_pack_produces_json_to_file(self, profile_with_trusted: Path, tmp_path: Path) -> None:
-        out_file = tmp_path / "packet.json"
-        p = Profile.load(profile_with_trusted)
-        home_did = p.trusted_keys["home"].did
-
-        result = runner.invoke(
-            app,
-            [
-                "pack",
-                "--to",
-                home_did,
-                "--intent",
-                "Test pack from work",
-                "--out",
-                str(out_file),
-                "--profile",
-                str(profile_with_trusted),
-                "--format",
-                "text",
-            ],
-            input="Some content\n",
-        )
-        assert result.exit_code == 0, result.output
-        assert out_file.exists()
-
-        data = json.loads(out_file.read_text())
-        assert data["intent"] == "Test pack from work"
-        assert data["to"] == home_did
-
-    def test_pack_resolves_label(self, profile_with_trusted: Path, tmp_path: Path) -> None:
-        out_file = tmp_path / "packet.json"
-        result = runner.invoke(
-            app,
-            [
-                "pack",
-                "--to",
-                "home",  # label, not raw DID
-                "--intent",
-                "Resolved by label",
-                "--out",
-                str(out_file),
-                "--profile",
-                str(profile_with_trusted),
-                "--format",
-                "text",
-            ],
-            input="data\n",
-        )
-        assert result.exit_code == 0, result.output
-        assert out_file.exists()
-
-    def test_pack_unknown_recipient_fails(self, profile_with_instance: Path) -> None:
-        result = runner.invoke(
-            app,
-            [
-                "pack",
-                "--to",
-                "nobody",
-                "--intent",
-                "fail",
-                "--profile",
-                str(profile_with_instance),
-            ],
-            input="data\n",
-        )
-        assert result.exit_code != 0
-
-    def test_pack_missing_profile_fails(self, tmp_path: Path) -> None:
-        result = runner.invoke(
-            app,
-            [
-                "pack",
-                "--to",
-                "did:key:z6Mkfake",
-                "--intent",
-                "fail",
-                "--profile",
-                str(tmp_path / "missing.json"),
-            ],
-            input="data\n",
-        )
-        assert result.exit_code != 0
-
-    def test_pack_missing_instance_fails(self, profile_path: Path, tmp_path: Path) -> None:
-        # Profile exists but has no instances
-        profile_path.write_text(json.dumps({}))
-        result = runner.invoke(
-            app,
-            [
-                "pack",
-                "--to",
-                "did:key:z6Mkfake",
-                "--intent",
-                "fail",
-                "--as",
-                "default",
-                "--profile",
-                str(profile_path),
-            ],
-            input="data\n",
-        )
-        assert result.exit_code != 0
-
-    def test_pack_smart_default_single_named_instance(
-        self, profile_with_named_instance: Path, tmp_path: Path
-    ) -> None:
-        """When only one instance exists and its name differs from --as, use it anyway."""
-        p = Profile.load(profile_with_named_instance)
-        # Add a trusted key so the pack can resolve a recipient
-        remote = Identity.generate("remote")
-        p.trusted_keys["remote"] = TrustedKey(
-            did=remote.did, label="remote", nostr_pubkey=remote.nostr_public_hex
-        )
-        p.save(profile_with_named_instance)
-
-        out_file = tmp_path / "packet.json"
-        result = runner.invoke(
-            app,
-            [
-                "pack",
-                "--to",
-                "remote",
-                "--intent",
-                "smart default test",
-                "--out",
-                str(out_file),
-                "--as",
-                "default",  # no 'default' instance — only 'work' exists
-                "--profile",
-                str(profile_with_named_instance),
-                "--format",
-                "text",
-            ],
-            input="hello\n",
-        )
-        assert result.exit_code == 0, result.output
-        assert out_file.exists()
-
-    def test_pack_multiple_instances_shows_available_names(
-        self, profile_with_multiple_instances: Path, tmp_path: Path
-    ) -> None:
-        """When multiple instances exist and requested one is absent, error lists them."""
-        result = runner.invoke(
-            app,
-            [
-                "pack",
-                "--to",
-                "did:key:z6Mkfake",
-                "--intent",
-                "fail",
-                "--as",
-                "default",
-                "--profile",
-                str(profile_with_multiple_instances),
-            ],
-            input="data\n",
-        )
-        assert result.exit_code != 0
-        # Error should mention all available instance names
-        combined = result.stdout + (result.stderr or "")
-        assert "work" in combined
-        assert "laptop" in combined
-
-    def test_pack_no_instances_prompts_init(
-        self, profile_with_no_instances: Path, tmp_path: Path
-    ) -> None:
-        """When no instances exist, error tells user to run aya init."""
-        result = runner.invoke(
-            app,
-            [
-                "pack",
-                "--to",
-                "did:key:z6Mkfake",
-                "--intent",
-                "fail",
-                "--as",
-                "default",
-                "--profile",
-                str(profile_with_no_instances),
-            ],
-            input="data\n",
-        )
-        assert result.exit_code != 0
-        combined = result.stdout + (result.stderr or "")
-        assert "aya init" in combined
-
-
 # ── schedule remind ──────────────────────────────────────────────────────────
 
 
@@ -2544,25 +2356,14 @@ class TestPacketPersistence:
         assert len(packet_files) == 1
         assert packet_files[0].stem == pkt.id
 
-    def test_show_displays_packet(self, packets_dir: Path, sample_packet: Packet) -> None:
-        """show command displays packet content."""
+    def test_read_panel_displays_body(self, packets_dir: Path, sample_packet: Packet) -> None:
+        """read --panel renders body in a Rich panel with title."""
         packet_file = packets_dir / f"{sample_packet.id}.json"
         packet_file.write_text(sample_packet.to_json())
 
-        result = runner.invoke(app, ["show", sample_packet.id[:8], "--format", "text"])
+        result = runner.invoke(app, ["read", sample_packet.id[:8], "--panel", "--format", "text"])
         assert result.exit_code == 0, result.output
         assert "daily handoff" in result.output
-
-    def test_show_json_format(self, packets_dir: Path, sample_packet: Packet) -> None:
-        """show --format json returns valid JSON with expected fields."""
-        packet_file = packets_dir / f"{sample_packet.id}.json"
-        packet_file.write_text(sample_packet.to_json())
-
-        result = runner.invoke(app, ["show", sample_packet.id[:8], "--format", "json"])
-        assert result.exit_code == 0, result.output
-        data = json.loads(result.output)
-        assert data["intent"] == "daily handoff"
-        assert data["id"] == sample_packet.id
 
     def test_packets_list(
         self,
@@ -2584,10 +2385,10 @@ class TestPacketPersistence:
         data = json.loads(result.output)
         assert len(data["packets"]) == 3
 
-    def test_show_unknown_id(self, packets_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-        """show with an unknown ID exits nonzero."""
+    def test_read_unknown_id(self, packets_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """read with an unknown ID exits nonzero."""
         monkeypatch.setenv("AYA_FORMAT", "json")
-        result = runner.invoke(app, ["show", "00000000unknown"])
+        result = runner.invoke(app, ["read", "00000000unknown"])
         assert result.exit_code != 0
 
 
@@ -3972,34 +3773,18 @@ class TestMaybeCreateCiWatchRepoParsing:
             mock_watches.assert_not_called()
 
 
-# ── send/send-raw/pack help text cross-references ───────────────────────────
+# ── send/send-raw help text cross-references ─────────────────────────────────
 
 
 class TestCommandHelpCrossReferences:
-    """Verify that send, send-raw, and pack help text cross-references each other."""
+    """Verify that send and send-raw help text cross-reference each other."""
 
     def test_send_raw_help_mentions_send(self):
         result = runner.invoke(app, ["send-raw", "--help"])
         assert result.exit_code == 0, result.output
         assert "aya send" in result.output
 
-    def test_send_raw_help_mentions_pack(self):
-        result = runner.invoke(app, ["send-raw", "--help"])
-        assert result.exit_code == 0, result.output
-        assert "aya pack" in result.output
-
-    def test_pack_help_mentions_send(self):
-        result = runner.invoke(app, ["pack", "--help"])
-        assert result.exit_code == 0, result.output
-        assert "aya send" in result.output
-
-    def test_pack_help_mentions_send_raw(self):
-        result = runner.invoke(app, ["pack", "--help"])
-        assert result.exit_code == 0, result.output
-        assert "aya send-raw" in result.output
-
-    def test_send_help_mentions_pack_and_send_raw(self):
+    def test_send_help_mentions_send_raw(self):
         result = runner.invoke(app, ["send", "--help"])
         assert result.exit_code == 0, result.output
-        assert "aya pack" in result.output
-        assert "aya send-raw" in result.output
+        assert "send-raw" in result.output

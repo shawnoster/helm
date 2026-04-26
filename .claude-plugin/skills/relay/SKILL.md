@@ -48,11 +48,10 @@ inline with each verb below. Fall back to the CLI when any of these apply:
 MCP tools that act on a local identity (`aya_receive`, `aya_inbox`,
 `aya_send`, `aya_ack`, `aya_relay_status`) take `instance=<label>`
 where the CLI takes `--as <label>`. Other MCP tools (`aya_read`,
-`aya_show`, `aya_packets`, `aya_status`, `aya_schedule_*`,
-`aya_config_*`) don't take an identity argument — they act on local
-state or a specific packet ID. `aya_receive` auto-ingests trusted
-packets by default, so no `--auto-ingest`/`--skip-untrusted`
-equivalents are needed.
+`aya_packets`, `aya_status`, `aya_schedule_*`, `aya_config_*`) don't
+take an identity argument — they act on local state or a specific
+packet ID. `aya_receive` auto-ingests trusted packets by default, so
+no `--auto-ingest`/`--skip-untrusted` equivalents are needed.
 
 ---
 
@@ -179,7 +178,8 @@ surface you called:
 - **MCP `aya_read(meta=true)`** returns
   `{id, intent, from, sent_at, content_type, content}`. The `content`
   field is the raw packet content (no extraction). No `in_reply_to`
-  field — use `aya_show(packet_id=...)` if you need the full envelope.
+  field — read the packet file under `~/.aya/packets/<id>.json`
+  directly if you need the full signed envelope.
 - **CLI `aya read --meta --format json`** returns
   `{id, body, from, sent_at, intent, in_reply_to}`. The `body` field
   is already *extracted* text (opener+context+questions for seeds,
@@ -531,7 +531,7 @@ relay state.
 |---|---|---|
 | `aya receive` returns `{"packets": []}` but you expect one | Peer hasn't sent yet, or relay propagation lag | Tell user to ping the peer; wait 30s and retry |
 | `WARNING:aya.packet:DID-based signature verification failed for packet <id>` on stderr | Bad signature; packet is **discarded** by aya, never appears in the JSON output (and not as `ingested:false`) | Surface to user; run `aya drop <id>` to stop the resurface; sender must re-send to retry |
-| `aya show <id>` returns `PACKET_NOT_FOUND` | Packet not yet ingested | Run verb 1 (Check) first |
+| `aya read <id>` returns `PACKET_NOT_FOUND` | Packet not yet ingested | Run verb 1 (Check) first |
 | `aya send` errors with `Unknown recipient '<label>'. Available: ...` | `--to <peer>` not in `trusted_keys` | Run `aya pair` to connect, or `aya trust <did> --peer <label>` |
 | `aya send` errors with `No Nostr pubkey found for recipient. Pair first.` | Trust entry exists but lacks `nostr_pubkey` field | Re-pair via `aya pair` to populate the pubkey |
 | Interactive shell errors before aya runs | Shell function shadowing the binary | Check `declare -F aya`; unset if found |

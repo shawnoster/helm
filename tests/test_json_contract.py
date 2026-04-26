@@ -346,16 +346,3 @@ class TestScheduleAlertsContract:
         alert = alerts_list[0]
         for key in ("id", "source_item_id", "message", "seen"):
             assert key in alert, f"missing alert key: {key}"
-
-
-# ── schedule check ───────────────────────────────────────────────────────────
-
-
-class TestScheduleCheckContract:
-    def test_top_level_keys(self):
-        """schedule check --format json has due and alerts."""
-        data = _invoke_json("schedule", "check")
-        assert "due" in data
-        assert "alerts" in data
-        assert isinstance(data["due"], list)
-        assert isinstance(data["alerts"], list)
