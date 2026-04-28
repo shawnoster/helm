@@ -223,22 +223,35 @@ This prints all due reminders, alerts, and session cron prompts as plain text. C
 
 ## Claude Code plugin
 
-aya ships as a Claude Code plugin. Load it in dev mode by pointing the
-`--plugin-dir` flag at the `.claude-plugin/` subdirectory of your local
-clone:
+aya ships with bundled Claude Code skills in `skills/`. There are two ways
+to install them:
+
+**Symlink install (recommended):** installs skills as slash commands in
+`~/.claude/commands/`:
+
+```bash
+make link-skills
+```
+
+This creates `~/.claude/commands/aya.md` and `~/.claude/commands/relay.md`
+as symlinks pointing into the repo. Run `make unlink-skills` to remove them.
+Re-running `make link-skills` is idempotent — safe to run after updates.
+
+**Plugin-dir (dev mode):** load the whole plugin directory without symlinking:
 
 ```bash
 alias claude='claude --plugin-dir /path/to/aya/.claude-plugin'
 ```
 
-This loads aya's bundled skills:
+Either method loads aya's bundled skills:
 
 | Skill | Verbs | What it does |
 | ---- | ---- | ---- |
 | `/aya` | setup, pair, status, refresh, watch | Manage aya — identity, pairing, health checks, updates, PR/ticket watches |
 | `/relay` | check, read, reply, send, status | Relay communication — send/receive packets between instances with structured output and auto-polling |
 
-After editing any skill file in the aya repo, run `/reload-plugins` in your session to pick up changes — no reinstall needed.
+After editing any skill file in the aya repo, run `/reload-plugins` in your
+session to pick up changes — no reinstall needed.
 
 ---
 
