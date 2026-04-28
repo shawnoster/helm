@@ -333,9 +333,7 @@ async def _handle_inbox(arguments: dict[str, Any]) -> list[types.TextContent]:
     # Dropped IDs are user-marked-ignore and must never resurface on any surface.
     dropped_set = set(profile.dropped_ids)
     new_packets = [
-        pkt
-        for pkt in all_packets
-        if pkt.id not in ingested_set and pkt.id not in dropped_set
+        pkt for pkt in all_packets if pkt.id not in ingested_set and pkt.id not in dropped_set
     ]
 
     summaries = [
