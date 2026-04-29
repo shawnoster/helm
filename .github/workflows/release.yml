@@ -34,7 +34,7 @@ jobs:
           token: ${{ secrets.RELEASE_TOKEN }}
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v7
+        uses: astral-sh/setup-uv@v8
         with:
           enable-cache: true
 
