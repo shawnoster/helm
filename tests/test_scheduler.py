@@ -744,14 +744,24 @@ class TestGetDueReminders:
     def test_does_not_return_future_reminders(self):
         from aya.scheduler import get_due_reminders
 
-        add_reminder("Future reminder", "in 2 hours")
-        datetime(2026, 4, 1, 12, 0, tzinfo=LOCAL_TZ)
-        # "in 2 hours" relative to now is in the past only if we use a very old now
-        # Use a future now far ahead to ensure it's not due yet
-        due = get_due_reminders(now=datetime(2026, 4, 1, 13, 0, tzinfo=LOCAL_TZ))
-        # The reminder is ~2h from parse-time which is past our now+1h
-        # Just verify we don't throw
-        assert isinstance(due, list)
+        # Write a reminder directly with a known future due_at, so the
+        # filter has a deterministic now < due_at relationship to evaluate.
+        now = datetime(2026, 4, 1, 12, 0, tzinfo=LOCAL_TZ)
+        future_due = datetime(2026, 4, 1, 14, 0, tzinfo=LOCAL_TZ)  # 2h after now
+        items = load_items()
+        items.append(
+            {
+                "id": "01JFUT000000000000000000001",
+                "type": "reminder",
+                "status": "pending",
+                "message": "Future reminder",
+                "due_at": future_due.isoformat(),
+                "created_at": now.isoformat(),
+            }
+        )
+        save_items(items)
+        due = get_due_reminders(now=now)
+        assert not any(r["message"] == "Future reminder" for r in due)
 
     def test_skips_dismissed_reminders(self):
         from aya.scheduler import get_due_reminders
