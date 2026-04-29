@@ -14,8 +14,8 @@ follow in [shawnoster/aya issues with the `gateway` label](https://github.com/sh
 ```bash
 cd gateway
 uv sync
-uv run uvicorn app.main:app --reload
-curl localhost:8000/health
+uv run uvicorn app.main:app --reload --port 8080
+curl localhost:8080/health
 # {"ok":true,"version":"dev"}
 ```
 
