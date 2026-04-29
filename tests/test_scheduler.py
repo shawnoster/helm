@@ -835,12 +835,25 @@ class TestGetUpcomingReminders:
     def test_custom_hours_window(self):
         from aya.scheduler import get_upcoming_reminders
 
-        add_reminder("Near future", "in 1 hour")
+        # Save a reminder directly with a known due_at 1h after `now`,
+        # then call with hours=0 (horizon == now). Per get_upcoming_reminders'
+        # `now < reminder_due <= horizon` rule, the reminder must be excluded.
         now = datetime(2026, 4, 1, 12, 0, tzinfo=LOCAL_TZ)
-        # With a tiny window (0 hours) nothing should be "upcoming"
-        # This is a bounds check — use the real item as a control
+        future_due = datetime(2026, 4, 1, 13, 0, tzinfo=LOCAL_TZ)
+        items = load_items()
+        items.append(
+            {
+                "id": "01JFUT000000000000000000002",
+                "type": "reminder",
+                "status": "pending",
+                "message": "Near future",
+                "due_at": future_due.isoformat(),
+                "created_at": now.isoformat(),
+            }
+        )
+        save_items(items)
         result_narrow = get_upcoming_reminders(now=now, hours=0)
-        assert isinstance(result_narrow, list)
+        assert result_narrow == []
 
 
 class TestGetActiveWatches:
