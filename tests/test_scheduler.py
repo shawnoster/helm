@@ -726,3 +726,178 @@ class TestRegisteredCronIds:
 
         scheduler.REGISTERED_CRONS_FILE.write_text('{"ids": "not a list"}')
         assert load_registered_cron_ids() == set()
+
+
+# ── Programmatic API ─────────────────────────────────────────────────────────
+
+
+class TestGetDueReminders:
+    def test_returns_past_due_reminders(self):
+        from aya.scheduler import get_due_reminders
+
+        add_reminder("Old reminder", "2025-01-01T12:00:00")
+        now = datetime(2026, 4, 1, 12, 0, tzinfo=LOCAL_TZ)
+        due = get_due_reminders(now=now)
+        assert any(r["message"] == "Old reminder" for r in due)
+
+    def test_does_not_return_future_reminders(self):
+        from aya.scheduler import get_due_reminders
+
+        # Write a reminder directly with a known future due_at, so the
+        # filter has a deterministic now < due_at relationship to evaluate.
+        now = datetime(2026, 4, 1, 12, 0, tzinfo=LOCAL_TZ)
+        future_due = datetime(2026, 4, 1, 14, 0, tzinfo=LOCAL_TZ)  # 2h after now
+        items = load_items()
+        items.append(
+            {
+                "id": "01JFUT000000000000000000001",
+                "type": "reminder",
+                "status": "pending",
+                "message": "Future reminder",
+                "due_at": future_due.isoformat(),
+                "created_at": now.isoformat(),
+            }
+        )
+        save_items(items)
+        due = get_due_reminders(now=now)
+        assert not any(r["message"] == "Future reminder" for r in due)
+
+    def test_skips_dismissed_reminders(self):
+        from aya.scheduler import get_due_reminders
+
+        item = add_reminder("Soon", "in 1 minute")
+        dismiss_item(item["id"])
+        now = datetime(2030, 1, 1, tzinfo=LOCAL_TZ)
+        due = get_due_reminders(now=now)
+        assert not any(r["id"] == item["id"] for r in due)
+
+    def test_empty_when_no_reminders(self):
+        from aya.scheduler import get_due_reminders
+
+        due = get_due_reminders()
+        assert due == []
+
+    def test_skips_items_with_malformed_timestamps(self):
+        """Reminders with bad timestamps are silently skipped."""
+        from aya.scheduler import get_due_reminders
+
+        items = load_items()
+        items.append(
+            {
+                "id": "01JBAD000000000000000000001",
+                "type": "reminder",
+                "status": "pending",
+                "message": "bad timestamp",
+                "due_at": "not-a-date",
+                "created_at": "2026-01-01T00:00:00",
+            }
+        )
+        save_items(items)
+        due = get_due_reminders()
+        assert all(r["message"] != "bad timestamp" for r in due)
+
+
+class TestGetUpcomingReminders:
+    def test_returns_reminders_within_window(self):
+        from aya.scheduler import get_upcoming_reminders
+
+        # Save a reminder directly with due_at 1h after `now` — well within
+        # the default 24h window — and assert it's actually returned.
+        now = datetime(2026, 4, 1, 12, 0, tzinfo=LOCAL_TZ)
+        future_due = datetime(2026, 4, 1, 13, 0, tzinfo=LOCAL_TZ)
+        items = load_items()
+        items.append(
+            {
+                "id": "01JFUT000000000000000000003",
+                "type": "reminder",
+                "status": "pending",
+                "message": "Soon",
+                "due_at": future_due.isoformat(),
+                "created_at": now.isoformat(),
+            }
+        )
+        save_items(items)
+        upcoming = get_upcoming_reminders(now=now)
+        assert any(r["message"] == "Soon" for r in upcoming)
+
+    def test_excludes_overdue_reminders(self):
+        from aya.scheduler import get_upcoming_reminders
+
+        item = add_reminder("Already due", "2025-01-01T12:00:00")
+        now = datetime(2026, 4, 1, 12, 0, tzinfo=LOCAL_TZ)
+        upcoming = get_upcoming_reminders(now=now)
+        assert not any(r["id"] == item["id"] for r in upcoming)
+
+    def test_sorted_by_due_at(self):
+        from aya.scheduler import get_upcoming_reminders
+
+        add_reminder("First", "in 2 hours")
+        add_reminder("Second", "in 1 hour")
+        upcoming = get_upcoming_reminders()
+        due_times = [r["due_at"] for r in upcoming]
+        assert due_times == sorted(due_times)
+
+    def test_empty_when_no_reminders(self):
+        from aya.scheduler import get_upcoming_reminders
+
+        assert get_upcoming_reminders() == []
+
+    def test_custom_hours_window(self):
+        from aya.scheduler import get_upcoming_reminders
+
+        # Save a reminder directly with a known due_at 1h after `now`,
+        # then call with hours=0 (horizon == now). Per get_upcoming_reminders'
+        # `now < reminder_due <= horizon` rule, the reminder must be excluded.
+        now = datetime(2026, 4, 1, 12, 0, tzinfo=LOCAL_TZ)
+        future_due = datetime(2026, 4, 1, 13, 0, tzinfo=LOCAL_TZ)
+        items = load_items()
+        items.append(
+            {
+                "id": "01JFUT000000000000000000002",
+                "type": "reminder",
+                "status": "pending",
+                "message": "Near future",
+                "due_at": future_due.isoformat(),
+                "created_at": now.isoformat(),
+            }
+        )
+        save_items(items)
+        result_narrow = get_upcoming_reminders(now=now, hours=0)
+        assert result_narrow == []
+
+
+class TestGetActiveWatches:
+    def test_returns_active_watches(self):
+        from aya.scheduler import get_active_watches
+
+        add_watch(
+            provider="github-pr",
+            target="owner/repo#1",
+            message="PR watch",
+        )
+        watches = get_active_watches()
+        assert any(w["message"] == "PR watch" for w in watches)
+
+    def test_excludes_dismissed_watches(self):
+        from aya.scheduler import get_active_watches
+
+        item = add_watch(
+            provider="github-pr",
+            target="owner/repo#2",
+            message="Dismissed watch",
+        )
+        dismiss_item(item["id"])
+        watches = get_active_watches()
+        assert not any(w["id"] == item["id"] for w in watches)
+
+    def test_empty_when_no_watches(self):
+        from aya.scheduler import get_active_watches
+
+        assert get_active_watches() == []
+
+    def test_does_not_include_reminders(self):
+        from aya.scheduler import get_active_watches
+
+        add_reminder("Not a watch", "in 1 hour")
+        watches = get_active_watches()
+        assert all(w["type"] == "watch" for w in watches)

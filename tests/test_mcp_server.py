@@ -684,6 +684,36 @@ async def test_unknown_tool():
 
 
 # ---------------------------------------------------------------------------
+# aya_schedule_watch
+# ---------------------------------------------------------------------------
+
+
+async def test_schedule_watch_tool(tmp_path, monkeypatch):
+    """aya_schedule_watch creates a watch item via the scheduler."""
+    sched_file = tmp_path / "scheduler.json"
+    sched_file.write_text(json.dumps({"schema_version": 2, "items": []}))
+    lock_file = tmp_path / ".scheduler.lock"
+
+    monkeypatch.setattr("aya.scheduler.SCHEDULER_FILE", sched_file)
+    monkeypatch.setattr("aya.scheduler.LOCK_FILE", lock_file)
+
+    result = await call_tool(
+        "aya_schedule_watch",
+        {
+            "provider": "github-pr",
+            "target": "owner/repo#42",
+            "message": "Watch my PR",
+        },
+    )
+    assert len(result) == 1
+    payload = json.loads(result[0].text)
+    assert payload["type"] == "watch"
+    assert payload["message"] == "Watch my PR"
+    assert payload["provider"] == "github-pr"
+    assert payload["status"] == "active"
+
+
+# ---------------------------------------------------------------------------
 # error handling
 # ---------------------------------------------------------------------------
 
