@@ -13,8 +13,11 @@ business routes follow in subsequent issues.
 ## Auth
 
 All routes except `/health` require an `Authorization: Bearer <token>`
-header. The token is loaded from a secrets file bind-mounted on the
-host at `/run/secrets/gateway.env`.
+header. The token is read from a host-side secrets file at
+`/run/secrets/gateway.env` via Docker Compose `env_file` and injected
+into the container as the `GATEWAY_BEARER` environment variable. The
+file lives on the machine running `docker compose` — it is not mounted
+into the container's filesystem.
 
 ### Bootstrap (one-time, on the host)
 
