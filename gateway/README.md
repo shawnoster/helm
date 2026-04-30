@@ -148,16 +148,20 @@ rsync -av --delete \
 **4. Write the secrets file on Babar**
 
 The compose file expects the secrets at `/run/secrets/gateway.env` on
-the host. Build the line locally (so `op read` only ever runs on the
-dev box that's signed in) and pipe it over SSH in one shot:
+the host. `op read` only runs on the dev box that's signed in; the
+token is streamed over SSH so it never appears on a command line or in
+shell history:
 
 ```bash
 ssh babar 'sudo mkdir -p /run/secrets'
-echo "GATEWAY_BEARER=$(op read 'op://Private/aya-gateway/credential')" \
+{ printf 'GATEWAY_BEARER='; \
+  op read 'op://Private/aya-gateway/credential'; \
+  printf '\n'; } \
   | ssh babar 'sudo tee /run/secrets/gateway.env >/dev/null && sudo chmod 600 /run/secrets/gateway.env'
 
-# Verify (should show GATEWAY_BEARER=<base64-blob>):
-ssh babar 'sudo cat /run/secrets/gateway.env'
+# Verify presence + permissions without echoing the secret:
+ssh babar "sudo test -s /run/secrets/gateway.env && sudo stat -c '%a %U %G %n' /run/secrets/gateway.env"
+# Expected: 600 root root /run/secrets/gateway.env
 ```
 
 **5. Build and start the container**
