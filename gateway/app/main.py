@@ -1,6 +1,7 @@
 """aya-gateway HTTP service."""
 
 import os
+import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -35,7 +36,12 @@ def _require_bearer(
     credentials: HTTPAuthorizationCredentials | None = Security(_bearer_scheme),  # noqa: B008
 ) -> None:
     """FastAPI dependency — reject requests that lack a valid bearer token."""
-    if credentials is None or credentials.credentials != _bearer_token():
+    expected = _bearer_token()
+    if (
+        credentials is None
+        or not expected
+        or not secrets.compare_digest(credentials.credentials, expected)
+    ):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or missing bearer token",
