@@ -6,14 +6,13 @@ services:
         GIT_SHA: ${GIT_SHA:-unknown}
     image: aya-gateway:latest
     container_name: aya-gateway
-    restart: unless-stopped
+    restart: always
     env_file:
       - /run/secrets/gateway.env
+    environment:
+      - TZ=America/Los_Angeles
     ports:
-      - "8080:8080"
-    networks:
-      - default
-
-networks:
-  default:
-    driver: bridge
+      - "8080:8080/tcp"
+    network_mode: synobridge
+    security_opt:
+      - no-new-privileges:true

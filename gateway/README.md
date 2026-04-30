@@ -48,9 +48,10 @@ GATEWAY_BEARER=<your-token>
      > /run/secrets/gateway.env
    chmod 600 /run/secrets/gateway.env
    ```
-3. Restart the container to pick up the new token:
+3. Restart the container to pick up the new token — DSM Container
+   Manager → Container → `aya-gateway` → Restart, or via SSH:
    ```bash
-   docker compose restart
+   ssh babar 'docker restart aya-gateway'
    ```
 
 ## Quickstart (local dev)
@@ -74,20 +75,18 @@ uv run ruff check .
 uv run mypy app
 ```
 
-## Quickstart (docker)
+## Local docker test
+
+The bundled `docker-compose.yml` targets Babar — it pins `network_mode:
+synobridge` (a Synology-managed bridge) and reads secrets from
+`/run/secrets/gateway.env`. Neither exists on a typical dev box, so test
+the image locally with raw `docker build` / `docker run` instead:
 
 ```bash
 cd gateway
-# Create the secrets file first (see Bootstrap above), then:
-docker compose up -d --build
-curl localhost:8080/health
-docker compose down
-```
-
-For a versioned build, pass the git sha:
-
-```bash
-GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build
+docker build -t aya-gateway:dev --build-arg GIT_SHA=$(git rev-parse --short HEAD) .
+docker run --rm -p 8080:8080 -e GATEWAY_BEARER=dev-token aya-gateway:dev
+# in another terminal:
 curl localhost:8080/health
 # {"ok":true,"version":"<sha>"}
 ```
@@ -95,29 +94,34 @@ curl localhost:8080/health
 ## Deploy to Babar (production)
 
 Babar (Synology DS224+, `192.168.50.230`) hosts the production
-container. DSM nginx reverse-proxies `gateway.monocularjack.com`
-(public HTTPS via Let's Encrypt) to `localhost:8080` on Babar. Bearer
-auth is the security primitive — see the rationale in
+container, managed via **DSM Container Manager** (Projects). DSM nginx
+reverse-proxies `gateway.monocularjack.com` (public HTTPS via Let's
+Encrypt) to `localhost:8080` on Babar. Bearer auth is the security
+primitive — see the rationale in
 `notebook/projects/aya-gateway/README.md` (Ingress paths and threat
 models).
 
 ### Prerequisites
 
-- SSH access to Babar (`ssh babar`, configured via 1Password)
-- 1Password CLI (`op`) on the dev box, signed in
+- DSM admin access (web UI at `https://192.168.50.230:5001`)
+- DSM Container Manager package installed (default on DSM 7.2+)
+- 1Password CLI (`op`) on the dev box, signed in (used once to mint the
+  bearer)
+- SSH access to Babar (used once to write the host-side secrets file
+  with mode 600 — DSM File Station can't set ownership/perms that the
+  docker daemon needs)
 - DNS for `gateway.monocularjack.com` pointing at Babar (CNAME to
   `nas-babar.duckdns.org` or A record to the public IP)
-- DSM admin access (web UI at `https://192.168.50.230:5001`)
+- The `synobridge` network exists on Babar — Synology auto-creates this
+  on Container Manager install; no action needed
 
 ### First deploy
 
-Run all `dev box →` commands from this repo's `gateway/` directory.
-
 **1. Generate and store the bearer token**
 
-The existing Auth section reads from `op://Private/aya-gateway/credential`, so
-create an **API Credential** item with the bearer in the `credential`
-field:
+Create an **API Credential** item in 1Password with the bearer in the
+`credential` field (the Auth section reads
+`op://Private/aya-gateway/credential`):
 
 ```bash
 # dev box → 1Password
@@ -128,29 +132,33 @@ op item create --category="API Credential" --vault=Private \
 op read 'op://Private/aya-gateway/credential'
 ```
 
-**2. Create the deploy directory on Babar**
+**2. Stage the source on Babar**
+
+The Container Manager Project needs the build context (Dockerfile,
+compose, `app/`, `pyproject.toml`, `uv.lock`) on the NAS. Two options:
 
 ```bash
-# dev box → babar
+# Option A: rsync from the dev box
 ssh babar 'sudo mkdir -p /volume1/docker/aya-gateway && sudo chown $USER:users /volume1/docker/aya-gateway'
-```
-
-**3. Copy compose + Dockerfile + app to Babar**
-
-```bash
-# dev box
 rsync -av --delete \
-  --exclude='__pycache__' --exclude='.venv' --exclude='*.pyc' \
+  --exclude='__pycache__' --exclude='.venv' --exclude='*.pyc' --exclude='tests' \
   Dockerfile docker-compose.yml pyproject.toml uv.lock app \
   babar:/volume1/docker/aya-gateway/
 ```
 
-**4. Write the secrets file on Babar**
+```
+Option B: DSM File Station
+  1. Create folder /volume1/docker/aya-gateway (if it doesn't exist)
+  2. Drag-and-drop Dockerfile, docker-compose.yml, pyproject.toml,
+     uv.lock, and the app/ directory into it
+```
 
-The compose file expects the secrets at `/run/secrets/gateway.env` on
-the host. `op read` only runs on the dev box that's signed in; the
-token is streamed over SSH so it never appears on a command line or in
-shell history:
+**3. Write the secrets file on Babar**
+
+The compose file expects secrets at `/run/secrets/gateway.env` on the
+host. `op read` runs on the dev box that's signed in; the token is
+streamed over SSH so it never appears on a command line or in shell
+history:
 
 ```bash
 ssh babar 'sudo mkdir -p /run/secrets'
@@ -164,29 +172,43 @@ ssh babar "sudo test -s /run/secrets/gateway.env && sudo stat -c '%a %U %G %n' /
 # Expected: 600 root root /run/secrets/gateway.env
 ```
 
-**5. Build and start the container**
+**4. Create the Project in Container Manager (DSM web UI)**
+
+Open DSM at `https://192.168.50.230:5001` →
+**Container Manager → Project → Create**:
+
+| Field | Value |
+|---|---|
+| Project name | `aya-gateway` |
+| Path | `/volume1/docker/aya-gateway` |
+| Source | **Use existing docker-compose.yml** (the one staged in step 2) |
+| Build | Enable (Container Manager will run `docker compose up --build`) |
+
+The compose pins `image: aya-gateway:latest`; Container Manager builds
+that tag from the local Dockerfile on first deploy and on every rebuild.
+
+**Optional — embed the git sha as the version string.** The compose
+references `${GIT_SHA:-unknown}` as a build arg. To get the sha into
+`/health`'s `version` field, edit the compose on Babar before creating
+the Project and replace `${GIT_SHA:-unknown}` with the literal short
+sha (`git rev-parse --short HEAD` on the dev box). Otherwise `version`
+reports `unknown` — harmless, just less informative.
+
+**5. Smoke test on Babar**
+
+After the Project shows **Running**, from any LAN host:
 
 ```bash
-# GIT_SHA expands locally on the dev box (Babar has no aya checkout)
-ssh babar "cd /volume1/docker/aya-gateway && GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build"
-```
-
-**6. Smoke test on Babar**
-
-```bash
-ssh babar 'curl -sf localhost:8080/health'
+curl -sf http://192.168.50.230:8080/health
 # {"ok":true,"version":"..."}
 ```
 
-If this fails, check container logs:
-
-```bash
-ssh babar 'cd /volume1/docker/aya-gateway && docker compose logs gateway'
-```
+If it fails, inspect logs in **Container Manager → Container →
+aya-gateway → Log** (or via SSH: `ssh babar 'docker logs aya-gateway'`).
 
 The most common first-deploy failure is `RuntimeError: GATEWAY_BEARER is
-not set` — the env_file path is wrong or the file isn't readable by the
-docker daemon.
+not set` — the secrets file is missing, has the wrong path, or isn't
+readable by the docker daemon.
 
 ### DSM reverse proxy (browser, one-time)
 
@@ -243,30 +265,44 @@ plus a LAN 200 on `:8080/health` is the deploy contract.
 
 ### Routine ops
 
-```bash
-# Tail logs
-ssh babar 'cd /volume1/docker/aya-gateway && docker compose logs -f --tail=50'
+**Tail logs** — DSM Container Manager → Container → `aya-gateway` →
+Log, or via SSH:
 
-# Update (after pushing changes to main)
+```bash
+ssh babar 'docker logs -f --tail=50 aya-gateway'
+```
+
+**Update (after pushing changes to main)** — re-stage source, then
+rebuild via the UI:
+
+```bash
+# 1. Re-stage source on Babar
 rsync -av --delete \
-  --exclude='__pycache__' --exclude='.venv' --exclude='*.pyc' \
+  --exclude='__pycache__' --exclude='.venv' --exclude='*.pyc' --exclude='tests' \
   Dockerfile docker-compose.yml pyproject.toml uv.lock app \
   babar:/volume1/docker/aya-gateway/
-ssh babar "cd /volume1/docker/aya-gateway && GIT_SHA=$(git rev-parse --short HEAD) docker compose up -d --build"
-
-# Token rotation — see "Rotation" under Auth, above. Run on Babar.
-
-# Stop
-ssh babar 'cd /volume1/docker/aya-gateway && docker compose down'
 ```
+
+```
+# 2. DSM Container Manager → Project → aya-gateway → Build → Run
+#    (Container Manager rebuilds the image and recreates the container)
+```
+
+**Stop / start** — Container Manager → Project → `aya-gateway` →
+Action menu (Stop, Start, Clean).
+
+**Token rotation** — see "Rotation" under Auth, above. After
+regenerating `/run/secrets/gateway.env` on Babar, restart the container
+via Container Manager (the env_file is re-read on container start).
 
 ### Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Container won't start, `RuntimeError: GATEWAY_BEARER is not set` | secrets file missing or not readable by docker daemon | `ssh babar 'sudo ls -l /run/secrets/gateway.env'` — must exist, mode 600, owner readable by docker |
-| `curl localhost:8080/health` on Babar returns connection refused | container not running or crashed at startup | `ssh babar 'cd /volume1/docker/aya-gateway && docker compose logs gateway'` |
-| DSM reverse proxy returns 502 | container down OR port mismatch in DSM rule | verify `localhost:8080` in the DSM rule + check container status with `ssh babar 'cd /volume1/docker/aya-gateway && docker compose ps'` |
+| `curl localhost:8080/health` on Babar returns connection refused | container not running or crashed at startup | Container Manager → Container → `aya-gateway` → Log, or `ssh babar 'docker logs aya-gateway'` |
+| DSM reverse proxy returns 502 | container down OR port mismatch in DSM rule | verify `localhost:8080` in the DSM rule + check Container Manager → Project status |
+| Project build fails with `network synobridge not found` | Synology Docker package not initialized (synobridge is auto-created on install) | install / re-init Container Manager via Package Center |
 | LE cert acquisition fails | DNS not pointing at Babar yet, or LE rate limit (5 certs/week/domain) | verify `dig gateway.monocularjack.com` returns the public IP; if rate limited, wait it out |
 | Public `https://gateway.../health` hangs | DSM nginx not running, or port 443 not forwarded | check DSM Web Station, verify port-forward at router |
 
@@ -282,6 +318,6 @@ gateway/
 │   ├── test_auth.py     # bearer-token auth tests
 │   └── test_health.py   # /health smoke tests
 ├── Dockerfile           # multi-stage, non-root, Python 3.12
-├── docker-compose.yml   # bridge networking, restart unless-stopped
+├── docker-compose.yml   # synobridge networking, restart always (Babar)
 └── pyproject.toml       # fastapi, uvicorn + dev tooling
 ```
