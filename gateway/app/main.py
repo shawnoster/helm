@@ -57,7 +57,14 @@ async def _lifespan(application: FastAPI) -> AsyncIterator[None]:
     yield
 
 
-app = FastAPI(title="aya-gateway", version=_version(), lifespan=_lifespan)
+app = FastAPI(
+    title="aya-gateway",
+    version=_version(),
+    lifespan=_lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None,
+)
 
 # Router for all authenticated endpoints. Add future routes here.
 authenticated = APIRouter(dependencies=[Depends(_require_bearer)])

@@ -77,3 +77,16 @@ def test_health_not_blocked_by_wrong_token() -> None:
     with TestClient(app) as client:
         response = client.get("/health", headers={"Authorization": "Bearer totally-wrong"})
     assert response.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Documentation endpoints disabled
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("path", ["/docs", "/redoc", "/openapi.json"])
+def test_docs_endpoints_disabled(path: str) -> None:
+    """FastAPI's auto-generated docs must not leak alongside /health."""
+    with TestClient(app) as client:
+        response = client.get(path)
+    assert response.status_code == 404
