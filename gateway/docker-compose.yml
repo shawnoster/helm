@@ -7,8 +7,7 @@ services:
     image: aya-gateway:latest
     container_name: aya-gateway
     restart: always
-    env_file:
-      - /run/secrets/gateway.env
+    env_file: ./.env
     environment:
       - TZ=America/Los_Angeles
     ports:

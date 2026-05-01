@@ -15,21 +15,33 @@ land in subsequent phases.
 ## Auth
 
 All routes except `/health` require an `Authorization: Bearer <token>`
-header. The token is read from a host-side secrets file at
-`/run/secrets/gateway.env` via Docker Compose `env_file` and injected
-into the container as the `GATEWAY_BEARER` environment variable. The
-file lives on the machine running `docker compose` — it is not mounted
-into the container's filesystem.
+header. The token is read from a host-side `.env` file alongside the
+compose file via Docker Compose `env_file` and injected into the
+container as the `GATEWAY_BEARER` environment variable. The file lives
+on the machine running `docker compose` — it is not mounted into the
+container's filesystem.
+
+The file path is `./.env` relative to the compose file (i.e. inside
+the project directory). Compose-based examples in this README,
+including local docker usage, should read from `./.env` unless a
+section explicitly says otherwise — **not** `/run/secrets/`, which is
+tmpfs on Linux and gets wiped on every reboot.
+
+> **Security note:** `.env` contains a secret — never commit it.
+> `gateway/.env` is listed in `.gitignore`; verify with
+> `git status` before every commit.
 
 ### Bootstrap (one-time, on the host)
 
 ```bash
-# Pull the credential from 1Password and write it to the secrets file.
-# Run this once before starting the container.
+# Pull the credential from 1Password and write it next to docker-compose.yml.
+# Run this once from inside the compose directory on Babar.
+cd /volume1/docker/projects/aya-gateway-compose
 op read 'op://Private/aya-gateway/credential' \
   | sed 's/^/GATEWAY_BEARER=/' \
-  > /run/secrets/gateway.env
-chmod 600 /run/secrets/gateway.env
+  > .env
+sudo chmod 600 .env
+sudo chown root:root .env
 ```
 
 The file must contain a single line:
@@ -41,13 +53,7 @@ GATEWAY_BEARER=<your-token>
 ### Rotation
 
 1. Update the credential in 1Password (`op://Private/aya-gateway/credential`).
-2. Regenerate the secrets file on the host:
-   ```bash
-   op read 'op://Private/aya-gateway/credential' \
-     | sed 's/^/GATEWAY_BEARER=/' \
-     > /run/secrets/gateway.env
-   chmod 600 /run/secrets/gateway.env
-   ```
+2. Regenerate the `.env` file on the host (same command as Bootstrap above).
 3. Restart the container to pick up the new token — DSM Container
    Manager → Container → `aya-gateway` → Restart, or via SSH:
    ```bash
@@ -78,9 +84,9 @@ uv run mypy app
 ## Local docker test
 
 The bundled `docker-compose.yml` targets Babar — it pins `network_mode:
-synobridge` (a Synology-managed bridge) and reads secrets from
-`/run/secrets/gateway.env`. Neither exists on a typical dev box, so test
-the image locally with raw `docker build` / `docker run` instead:
+synobridge` (a Synology-managed bridge) and uses `env_file: ./.env`.
+Neither exists on a typical dev box, so test the image locally with raw
+`docker build` / `docker run` instead:
 
 ```bash
 cd gateway
@@ -135,41 +141,56 @@ op read 'op://Private/aya-gateway/credential'
 **2. Stage the source on Babar**
 
 The Container Manager Project needs the build context (Dockerfile,
-compose, `app/`, `pyproject.toml`, `uv.lock`) on the NAS. Two options:
+compose, `app/`, `pyproject.toml`, `uv.lock`) on the NAS. Babar's
+convention puts compose project dirs under `/volume1/docker/projects/`
+(sibling to per-service data dirs like `/volume1/docker/gitea/`):
 
 ```bash
 # Option A: rsync from the dev box
-ssh babar 'sudo mkdir -p /volume1/docker/aya-gateway && sudo chown $USER:users /volume1/docker/aya-gateway'
+ssh babar 'sudo mkdir -p /volume1/docker/projects/aya-gateway-compose && sudo chown $USER:users /volume1/docker/projects/aya-gateway-compose'
 rsync -av --delete \
   --exclude='__pycache__' --exclude='.venv' --exclude='*.pyc' --exclude='tests' \
   Dockerfile docker-compose.yml pyproject.toml uv.lock app \
-  babar:/volume1/docker/aya-gateway/
+  babar:/volume1/docker/projects/aya-gateway-compose/
 ```
 
 ```
 Option B: DSM File Station
-  1. Create folder /volume1/docker/aya-gateway (if it doesn't exist)
+  1. In /volume1/docker/projects/, create folder aya-gateway-compose
   2. Drag-and-drop Dockerfile, docker-compose.yml, pyproject.toml,
      uv.lock, and the app/ directory into it
 ```
 
-**3. Write the secrets file on Babar**
+**3. Write the .env file on Babar**
 
-The compose file expects secrets at `/run/secrets/gateway.env` on the
-host. `op read` runs on the dev box that's signed in; the token is
-streamed over SSH so it never appears on a command line or in shell
-history:
+The compose loads secrets from `./.env` (relative to the compose file,
+i.e. `/volume1/docker/projects/aya-gateway-compose/.env`). `op` runs on
+the dev box (see Prerequisites); the token is obtained there first, then
+written to Babar in an interactive root shell.
+
+First, read the token on the dev box and copy it to the clipboard:
 
 ```bash
-ssh babar 'sudo mkdir -p /run/secrets'
-{ printf 'GATEWAY_BEARER='; \
-  op read 'op://Private/aya-gateway/credential'; \
-  printf '\n'; } \
-  | ssh babar 'sudo tee /run/secrets/gateway.env >/dev/null && sudo chmod 600 /run/secrets/gateway.env'
+# dev box
+op read 'op://Private/aya-gateway/credential'
+```
 
-# Verify presence + permissions without echoing the secret:
-ssh babar "sudo test -s /run/secrets/gateway.env && sudo stat -c '%a %U %G %n' /run/secrets/gateway.env"
-# Expected: 600 root root /run/secrets/gateway.env
+Then open an interactive root shell on Babar and write the file.
+Single-quoting the token prevents shell interpretation of `+`, `/`, or
+`=` characters in base64 tokens:
+
+```bash
+# dev box → Babar (interactive; DSM requires a terminal for sudo password)
+ssh -t babar
+sudo -i
+cd /volume1/docker/projects/aya-gateway-compose
+printf 'GATEWAY_BEARER=%s\n' 'PASTE_TOKEN_HERE' > .env
+chmod 600 .env
+chown root:root .env
+stat -c '%a %U %G %n' .env
+# Expected: 600 root root .env
+exit  # leave root shell
+exit  # leave ssh
 ```
 
 **4. Create the Project in Container Manager (DSM web UI)**
@@ -180,8 +201,8 @@ Open DSM at `https://192.168.50.230:5001` →
 | Field | Value |
 |---|---|
 | Project name | `aya-gateway` |
-| Path | `/volume1/docker/aya-gateway` |
-| Source | **Use existing docker-compose.yml** (the one staged in step 2) |
+| Path | `/volume1/docker/projects/aya-gateway-compose` |
+| Source | **Use existing docker-compose.yml** (the one staged in step 2; DSM auto-detects `compose.yml` / `compose.yaml` / `docker-compose.yml`) |
 | Build | Enable (Container Manager will run `docker compose up --build`) |
 
 The compose pins `image: aya-gateway:latest`; Container Manager builds
@@ -208,7 +229,7 @@ aya-gateway → Log** (or via SSH: `ssh babar 'docker logs aya-gateway'`).
 
 The most common first-deploy failure is `RuntimeError: GATEWAY_BEARER is
 not set` — the secrets file is missing, has the wrong path, or isn't
-readable by the docker daemon.
+readable by DSM Container Manager (or the account running `docker compose`).
 
 ### DSM reverse proxy (browser, one-time)
 
@@ -280,7 +301,7 @@ rebuild via the UI:
 rsync -av --delete \
   --exclude='__pycache__' --exclude='.venv' --exclude='*.pyc' --exclude='tests' \
   Dockerfile docker-compose.yml pyproject.toml uv.lock app \
-  babar:/volume1/docker/aya-gateway/
+  babar:/volume1/docker/projects/aya-gateway-compose/
 ```
 
 ```
@@ -292,14 +313,15 @@ rsync -av --delete \
 Action menu (Stop, Start, Clean).
 
 **Token rotation** — see "Rotation" under Auth, above. After
-regenerating `/run/secrets/gateway.env` on Babar, restart the container
-via Container Manager (the env_file is re-read on container start).
+regenerating `.env` on Babar, restart the container via Container
+Manager (the env_file is re-read on container start).
 
 ### Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Container won't start, `RuntimeError: GATEWAY_BEARER is not set` | secrets file missing or not readable by docker daemon | `ssh babar 'sudo ls -l /run/secrets/gateway.env'` — must exist, mode 600, owner readable by docker |
+| Container won't start, `RuntimeError: GATEWAY_BEARER is not set` | `.env` file missing, wrong path, or unreadable by DSM Container Manager (or by the user running `docker compose`) | `ssh babar 'sudo ls -l /volume1/docker/projects/aya-gateway-compose/.env'` — must exist, mode 600, and be readable by DSM Container Manager (or the account running `docker compose`) |
+| DSM Project YAML linter rejects `env_file:` block | List form (`env_file:` then `- ./.env` on next line) is finicky in DSM's editor | use the inline string form: `env_file: ./.env` |
 | `curl localhost:8080/health` on Babar returns connection refused | container not running or crashed at startup | Container Manager → Container → `aya-gateway` → Log, or `ssh babar 'docker logs aya-gateway'` |
 | DSM reverse proxy returns 502 | container down OR port mismatch in DSM rule | verify `localhost:8080` in the DSM rule + check Container Manager → Project status |
 | Project build fails with `network synobridge not found` | Synology Docker package not initialized (synobridge is auto-created on install) | install / re-init Container Manager via Package Center |
