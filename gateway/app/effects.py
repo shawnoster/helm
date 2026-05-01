@@ -17,21 +17,44 @@ import subprocess
 import threading
 from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, status
 from pydantic import BaseModel, Field
 
-from app.auth import _require_bearer
-
+# Auth is applied by the parent `authenticated` router in app.main; declaring
+# it here too would double-evaluate the dependency on every request.
 router = APIRouter(
     prefix="/effects",
     tags=["effects"],
-    dependencies=[Depends(_require_bearer)],
 )
 
 _KITT_BINARY = shutil.which("nanoleaf-kitt") or "/usr/local/bin/nanoleaf-kitt"
 
 _kitt_lock = threading.Lock()
 _kitt_proc: subprocess.Popen[bytes] | None = None
+
+
+def _terminate_safely(proc: subprocess.Popen[bytes]) -> None:
+    """Best-effort terminate-then-kill. Tolerant of races and stuck processes.
+
+    Three known failure modes:
+    - The process exits between our `poll()` check and `terminate()` →
+      `terminate()` raises `ProcessLookupError`. Harmless; nothing left to kill.
+    - SIGTERM doesn't take effect within 2s → escalate to SIGKILL.
+    - SIGKILL also fails to reap (zombie/stuck), or `wait()` times out again →
+      give up and let the new Popen replace the reference. Better to over-spawn
+      and let the OS clean up than 500 the route.
+    """
+    try:
+        proc.terminate()
+        proc.wait(timeout=2)
+    except ProcessLookupError:
+        return
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+            proc.wait(timeout=2)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            return
 
 
 class KittArgs(BaseModel):
@@ -68,12 +91,7 @@ def kitt(args: KittArgs | None = None) -> dict[str, Any]:
 
     with _kitt_lock:
         if _kitt_proc is not None and _kitt_proc.poll() is None:
-            _kitt_proc.terminate()
-            try:
-                _kitt_proc.wait(timeout=2)
-            except subprocess.TimeoutExpired:
-                _kitt_proc.kill()
-                _kitt_proc.wait(timeout=2)
+            _terminate_safely(_kitt_proc)
 
         _kitt_proc = subprocess.Popen(  # noqa: S603 — fixed binary path, validated args
             cmd,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from collections.abc import Iterator
 from typing import Any
 
@@ -191,3 +192,33 @@ def test_kitt_does_not_terminate_already_exited_process(client: TestClient) -> N
     client.post("/effects/kitt", headers=AUTH_HEADERS, json={})
     assert first.terminate_count == 0, "exited process must not be re-terminated"
     assert len(FakePopen.instances) == 2
+
+
+def test_kitt_tolerates_terminate_race(client: TestClient, monkeypatch: MonkeyPatch) -> None:
+    """terminate() raising ProcessLookupError (process exited mid-request) must not 500."""
+
+    def raising_terminate(self: FakePopen) -> None:
+        raise ProcessLookupError("simulated race: process already exited")
+
+    client.post("/effects/kitt", headers=AUTH_HEADERS, json={})
+    monkeypatch.setattr(FakePopen, "terminate", raising_terminate)
+    response = client.post("/effects/kitt", headers=AUTH_HEADERS, json={"color": "blue"})
+    assert response.status_code == 202
+    assert len(FakePopen.instances) == 2
+
+
+def test_kitt_tolerates_kill_wait_timeout(client: TestClient, monkeypatch: MonkeyPatch) -> None:
+    """kill+wait timing out must not 500 — give up gracefully and spawn new."""
+    timeout = subprocess.TimeoutExpired(cmd="nanoleaf-kitt", timeout=2)
+
+    def first_wait_times_out(self: FakePopen, timeout: float | None = None) -> int:  # noqa: ARG001
+        raise subprocess.TimeoutExpired(cmd="nanoleaf-kitt", timeout=2)
+
+    client.post("/effects/kitt", headers=AUTH_HEADERS, json={})
+    monkeypatch.setattr(FakePopen, "wait", first_wait_times_out)
+    response = client.post("/effects/kitt", headers=AUTH_HEADERS, json={"color": "amber"})
+    assert response.status_code == 202
+    assert len(FakePopen.instances) == 2
+    # First process should have been kill()ed after the terminate+wait timeout
+    assert FakePopen.instances[0].kill_count >= 1
+    del timeout  # unused — kept for clarity
