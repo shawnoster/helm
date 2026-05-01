@@ -53,6 +53,8 @@ NAMED_COLORS = {
 
 def load_token():
     t = os.environ.get("NANOLEAF_TOKEN")
+    if t is not None:
+        t = t.strip()
     if t:
         return t
     if ENV_FILE.exists():
